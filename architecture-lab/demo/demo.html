@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture Lab Demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 20px; }
+      button { margin-right: 8px; margin-bottom: 8px; }
+      pre { background: #111; color: #0f0; padding: 12px; border-radius: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>MediaRuntime + FakeProvider Demo</h1>
+
+    <div>
+      <button id="open">Open default</button>
+      <button id="next">Next</button>
+      <button id="prev">Prev</button>
+      <button id="shuffle">Shuffle</button>
+      <button id="remove">Remove current</button>
+      <button id="favorite">Toggle favorite</button>
+    </div>
+
+    <pre id="out"></pre>
+
+    <script type="module">
+      import { MediaRuntime } from '../runtime/media-runtime.js';
+      import { FakeProvider } from '../providers/fake-provider.js';
+
+      const out = document.getElementById('out');
+      const provider = new FakeProvider();
+      const rt = new MediaRuntime({ provider });
+
+      function render(event = 'init') {
+        out.textContent = JSON.stringify(
+          {
+            event,
+            collectionId: rt.state.collectionId,
+            index: rt.state.index,
+            current: rt.state.current,
+            totalItems: rt.state.items.length,
+            order: rt.state.order
+          },
+          null,
+          2
+        );
+      }
+
+      rt.onChange(({ event }) => render(event));
+
+      document.getElementById('open').onclick = async () => {
+        await rt.openCollection('default');
+      };
+      document.getElementById('next').onclick = () => rt.next();
+      document.getElementById('prev').onclick = () => rt.previous();
+      document.getElementById('shuffle').onclick = () => rt.shuffle();
+      document.getElementById('remove').onclick = async () => { await rt.removeCurrent(); };
+      document.getElementById('favorite').onclick = async () => { await rt.toggleFavoriteCurrent(); };
+
+      render();
+    </script>
+  </body>
+</html>
