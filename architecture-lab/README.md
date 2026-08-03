@@ -17,6 +17,7 @@ Validate that:
 - Provider contract
 - FakeProvider
 - URLProvider (lab-only shim around existing URL DB shape)
+- LocalFolderProvider (`local://` path model)
 - Minimal tests
 - Minimal browser demo
 
@@ -26,6 +27,19 @@ Validate that:
 - Workspace switching / serialization
 - Undo stack integration
 - Extension integration
+
+## Run locally
+
+From repo root:
+
+```bash
+node architecture-lab/tests/media-runtime.test.js
+python -m http.server 8080
+# open http://localhost:8080/architecture-lab/demo/demo.html
+```
+
+> If Node reports ESM import errors, add `"type": "module"` in your root `package.json`
+> (or run tests as `.mjs`).
 
 ## Success Criteria
 
