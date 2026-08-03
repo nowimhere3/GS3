@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triple Screen Mode - Goonerscroll</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230095f6'/><text y='72' x='50' text-anchor='middle' font-size='65' font-family='Arial'>🎬</text></svg>">
+    <script>
+        // Detect if this page is running nested inside another Launchpad
+        // iframe (e.g. via 🚀), and how many levels deep. Same-origin, so
+        // walking window.parent is safe. Runs synchronously before <style>
+        // so classes are set before first paint.
+        (function () {
+            var depth = 0;
+            var win = window;
+            while (win !== win.top) { depth += 1; win = win.parent; }
+            if (depth >= 1) document.documentElement.classList.add('is-nested');
+            if (depth === 1) document.documentElement.classList.add('layer-2');
+
+            // Ghost Mode — reads raw localStorage directly (the Store module
+            // isn't loaded yet at this point). Sets --ghost-opacity plus one
+            // class per target so each surface can opt in independently.
+            try {
+                var opacityRaw = localStorage.getItem('hotswap_ghost_opacity');
+                var opacityPct = opacityRaw !== null ? parseFloat(opacityRaw) : 12;
+                if (isNaN(opacityPct)) opacityPct = 12;
+                opacityPct = Math.max(0, Math.min(100, opacityPct));
+                document.documentElement.style.setProperty('--ghost-opacity', opacityPct / 100);
+
+                var targetsRaw = localStorage.getItem('hotswap_ghost_targets');
+                var targets = targetsRaw ? JSON.parse(targetsRaw) : {};
+                if (targets.trigger) document.documentElement.classList.add('ghost-trigger');
+                if (targets.master)  document.documentElement.classList.add('ghost-master');
+                if (targets.stream)  document.documentElement.classList.add('ghost-stream');
+                if (targets.solo)    document.documentElement.classList.add('ghost-solo');
+            } catch (e) { /* Ghost Mode just won't apply this load */ }
+        })();
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        body { background: #0b0b0b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+
+        #triple-layout {
+            width: 100vw; height: 100vh;
+            display: grid;
+        }
+        /* Layout variants — toggled via JS by swapping the class on #triple-layout.
+           Screen area names (screen1/screen2/screen3) are fixed to the slot divs
+           below, so switching layouts never touches the panels/iframes themselves.
+           Each layout reserves a thin 6px track (named vres/hres/vres1/vres2) between
+           adjacent panels — that's where the draggable resizer handles live. */
+        #triple-layout.layout-top2 {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 vres screen2" "hres hres hres" "screen3 screen3 screen3";
+        }
+        #triple-layout.layout-bottom2 {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 screen1 screen1" "hres hres hres" "screen2 vres screen3";
+        }
+        #triple-layout.layout-3col {
+            grid-template-columns: 1fr 6px 1fr 6px 1fr;
+            grid-template-rows: 1fr;
+            grid-template-areas: "screen1 vres1 screen2 vres2 screen3";
+        }
+        #triple-layout.layout-lefttall {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 vres screen2" "screen1 vres hres" "screen1 vres screen3";
+        }
+        #triple-layout.layout-righttall {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen2 vres screen1" "hres vres screen1" "screen3 vres screen1";
+        }
+        #triple-layout.layout-vsplit {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr;
+            grid-template-areas: "screen1 vres screen2";
+        }
+        #triple-layout.layout-hsplit {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1" "hres" "screen2";
+        }
+        #triple-layout.layout-4grid {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 vres screen2" "hresL vres hresR" "screen3 vres screen4";
+        }
+        .stream-slot { position: relative; border: 1px solid #1d1d1d; overflow: hidden; background: #000; }
+        #screen-1-slot { grid-area: screen1; }
+        #screen-2-slot { grid-area: screen2; }
+        #screen-3-slot { grid-area: screen3; }
+        #screen-4-slot { grid-area: screen4; }
+        .slot-label { position: absolute; left: 8px; top: 8px; z-index: 9998; background: rgba(0,0,0,0.6); border: 1px solid #333; color: #555; border-radius: 8px; font-size: 11px; padding: 3px 8px; }
+        .stream-panel { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
+        .post-iframe  { width: 100%; height: 100%; border: none; display: block; }
+
+        /* Draggable border resizers — injected/positioned via JS per layout */
+        .resizer { background: #1d1d1d; position: relative; z-index: 50; transition: background 0.15s; }
+        .resizer:hover, .resizer.active { background: #0095f6; }
+        .resizer-v { cursor: col-resize; }
+        .resizer-h { cursor: row-resize; }
+        .resizer-v::after { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
+        .resizer-h::after { content: ''; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+
+        /* Full-viewport overlay shown only while actively dragging — prevents
+           iframes from swallowing mousemove/mouseup events mid-drag. */
+        #resizer-drag-overlay { display: none; position: fixed; inset: 0; z-index: 40000; }
+        #resizer-drag-overlay.active { display: block; }
+
+        /* Always-visible floating buttons bottom-right */
+        #floating-btns { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
+
+        /* When this page is loaded inside another Launchpad session (e.g. via
+           🚀), move the master 🎬+⚙ cluster to the left instead of the right
+           so it doesn't collide with the OUTER session's own 🎬+⚙ — which is
+           always fixed to the true browser viewport's bottom-right corner,
+           regardless of which panel this iframe happens to occupy. */
+        html.is-nested #floating-btns { right: auto; left: 18px; }
+        html.is-nested .float-btn { border-color: #f0c020; border-width: 2px; }
+        html.is-nested .float-btn:hover { border-color: #ffd84a; }
+        html.is-nested .float-btn.active { border-color: #f0c020; }
+        .float-btn { background: rgba(0,0,0,0.82); border: 1px solid #444; border-radius: 10px; color: #ccc; font-size: 18px; cursor: pointer; padding: 10px 14px; backdrop-filter: blur(8px); transition: background 0.15s, border-color 0.15s, color 0.15s; user-select: none; line-height: 1; text-decoration: none; display: flex; align-items: center; }
+        .float-btn:hover { background: rgba(0,0,0,0.95); color: #fff; border-color: #666; }
+        .float-btn.active { background: rgba(0,95,200,0.85); border-color: #0095f6; color: #fff; }
+
+        /* Master control bar - hidden until toggled */
+        #master-bar { position: fixed; bottom: -120px; left: 0; right: 0; z-index: 29000; background: rgba(10,10,10,0.96); border-top: 1px solid #2d2d2d; backdrop-filter: blur(12px); padding: 14px 20px; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; transition: bottom 0.25s ease, opacity 0.15s ease; }
+
+        html.ghost-master #master-bar.open { opacity: var(--ghost-opacity, 0.12); }
+        html.ghost-master #master-bar.open:hover { opacity: 1; }
+        #master-bar.open { bottom: 0; }
+        .master-btn { border: 1px solid #333; padding: 9px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px; background: #1a1a1a; color: #eee; transition: background 0.15s, border-color 0.15s; white-space: nowrap; flex-shrink: 0; text-decoration: none; display: inline-flex; align-items: center; }
+        .master-btn:hover { background: #252525; border-color: #555; }
+        .master-btn.folder-btn  { background: #0e1e2e; border-color: #0095f6; color: #4ab0f5; }
+        .master-btn.shuffle-btn { background: #0e1e0e; border-color: #3a7a3a; color: #4caf50; }
+        .master-btn.shuffall-btn{ background: #0e1828; border-color: #2d5073; color: #6eb4f1; }
+        .master-btn.undo-btn    { background: #2a2210; border-color: #6a4a1a; color: #d4a94a; }
+        .master-btn.undo-btn:hover:not(:disabled) { background: #3a2e14; }
+        .master-btn.undo-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .master-btn.save-btn    { background: #241a38; border-color: #9d6dff; color: #c9b3ff; }
+        .master-btn.save-btn:hover { background: #2e2246; }
+        .master-btn.close-btn   { background: #1a1a2a; border-color: #0095f6; color: #0095f6; }
+        .master-btn.back-btn    { background: #1a1a1a; border-color: #555; color: #999; }
+        .master-btn.layout-btn  { padding: 8px 11px; }
+        .master-btn.layout-btn.active { background: #0e1e2e; border-color: #0095f6; }
+        #master-status { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #555; font-family: monospace; }
+
+        /* Mini layout-preview icons for the layout-switcher buttons.
+           These are temporary CSS-drawn placeholders — swap in your 56px
+           custom emoji images here whenever you have them (e.g. replace the
+           <span class="layout-icon ..."> block with an <img>). */
+        .layout-icon { display: grid; width: 26px; height: 20px; gap: 2px; flex-shrink: 0; }
+        .layout-icon i { background: #8ab4d8; display: block; border-radius: 1px; font-style: normal; }
+        .master-btn.layout-btn.active .layout-icon i { background: #4ab0f5; }
+        .layout-icon i:nth-child(1) { grid-area: a; }
+        .layout-icon i:nth-child(2) { grid-area: b; }
+        .layout-icon i:nth-child(3) { grid-area: c; }
+        .layout-icon i:nth-child(4) { grid-area: d; }
+        .li-top2      { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c c"; }
+        .li-bottom2   { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a a" "b c"; }
+        .li-3col      { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b c"; }
+        .li-lefttall  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "a c"; }
+        .li-righttall { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "b a" "c a"; }
+        .li-vsplit    { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b"; }
+        .li-hsplit    { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a" "b"; }
+        .li-4grid     { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c d"; }
+
+        /* Folder drop-up */
+        #master-folder-dropup { position: fixed; bottom: 80px; left: 20px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 320px; overflow-y: auto; z-index: 30001; min-width: 220px; display: none; }
+        #master-folder-dropup.open { display: block; }
+        .dropup-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #222; font-size: 13px; color: #ddd; transition: background 0.1s; display: flex; justify-content: space-between; align-items: center; }
+        .dropup-item:hover { background: #1e2a3a; color: #4ab0f5; }
+        .dropup-item:last-child { border-bottom: none; }
+        .dropup-item.selected { background: #0e1e2e; color: #4ab0f5; font-weight: bold; }
+        .dropup-count { font-size: 11px; color: #555; margin-left: 8px; }
+
+        /* Save Session As drop-up */
+        #master-save-dropup { position: fixed; bottom: 80px; right: 20px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 360px; overflow-y: auto; z-index: 30001; min-width: 240px; display: none; }
+        #master-save-dropup.open { display: block; }
+        .save-session-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #222; transition: background 0.1s; }
+        .save-session-item:hover { background: #241a38; }
+        .save-session-item:last-child { border-bottom: none; }
+        .save-session-item.current { background: #1e1530; }
+        .save-session-item-main { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #ddd; font-weight: bold; }
+        .save-session-current-badge { font-size: 10px; color: #c9b3ff; background: #33245a; border-radius: 6px; padding: 2px 6px; font-weight: normal; }
+        .save-session-item-meta, .save-session-item-saved { font-size: 11px; color: #777; margin-top: 2px; }
+
+        /* Per-panel hotswap trigger */
+        .hotswap-trigger { position: absolute; top: 16px; right: 16px; background: rgba(0,0,0,0.75); border: 1px solid #555; border-radius: 12px; color: #ccc; font-size: 16px; font-weight: bold; letter-spacing: 2px; cursor: pointer; padding: 6px 14px; z-index: 10001; backdrop-filter: blur(6px); transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s; user-select: none; }
+        .hotswap-trigger::before { content: ''; position: absolute; top: -10px; left: -10px; right: -10px; bottom: -10px; }
+        html.ghost-trigger .hotswap-trigger { opacity: var(--ghost-opacity, 0.12); }
+        html.ghost-trigger .hotswap-trigger:hover,
+        html.ghost-trigger .hotswap-trigger.open { opacity: 1; }
+        .hotswap-trigger:hover { background: rgba(0,0,0,0.95); color: #fff; border-color: #888; }
+        .hotswap-trigger.open  { background: rgba(0,95,200,0.85); border-color: #0095f6; color: #fff; }
+
+        /* Per-panel overlay */
+        .hotswap-overlay { position: absolute; top: 16px; right: 90px; background: rgba(0,0,0,0.92); border: 1px solid #333; border-radius: 14px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; z-index: 10000; backdrop-filter: blur(10px); min-width: 190px; opacity: 0; pointer-events: none; transform: translateX(12px) scale(0.95); transform-origin: top right; transition: opacity 0.15s ease, transform 0.15s ease; }
+        .hotswap-overlay.open { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
+        .hotswap-icon-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+
+        /* Layer 2 (running one level nested) — every panel's own ··· trigger
+           and Quick Action shortcuts move to the top-left with a yellow
+           border, since the OUTER layer's own per-panel ··· always lives at
+           top-right for that same panel. Positioned just below the "Screen N"
+           slot-label (which sits at top:8px) so they don't overlap it. The
+           overlay pops out to the right instead of the left, since the
+           trigger itself is now on the left. */
+        html.layer-2 .hotswap-trigger { right: auto; left: 16px; top: 40px; border-color: #f0c020; border-width: 2px; }
+        html.layer-2 .hotswap-trigger:hover { border-color: #ffd84a; }
+        html.layer-2 .hotswap-trigger.open { border-color: #f0c020; }
+        html.layer-2 .hotswap-overlay {
+            right: auto;
+            left: 90px;
+            top: 40px;
+            transform-origin: top left;
+            transform: translateX(-12px) scale(0.95);
+        }
+        html.layer-2 .hotswap-overlay.open { transform: translateX(0) scale(1); }
+
+        /* Small square icon buttons */
+        .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-kill,
+        .btn-purge, .btn-hotswap-position, .btn-hotswap-folder, .btn-hotswap-launchpad {
+            border-radius: 10px;
+            width: 28px;
+            height: 28px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.15s, color 0.15s, transform 0.15s;
+        }
+
+        /* 🌐 URL toggle button */
+        .btn-hotswap-toggle { background: #222; border: 1px solid #444; color: #aaa; font-weight: bold; }
+        .btn-hotswap-toggle:hover { background: #333; color: #fff; }
+        .btn-hotswap-toggle.active { background: #0095f6; border-color: #0095f6; color: #fff; }
+
+        /* 🖥 Position-swap button */
+        .btn-hotswap-position { background: #0a1a1a; border: 1px solid #1a6a5a; color: #4ad4c4; }
+        .btn-hotswap-position:hover { background: #0d2a28; }
+        .btn-hotswap-position.active { background: #0f9080; border-color: #0f9080; color: #fff; }
+
+        /* 📁 Folder-assign button */
+        .btn-hotswap-folder { background: #241a0a; border: 1px solid #6a4a1a; color: #d4a94a; }
+        .btn-hotswap-folder:hover { background: #2e2210; }
+        .btn-hotswap-folder.active { background: #a67a1f; border-color: #a67a1f; color: #fff; }
+
+        /* 🚀 Load Launchpad button */
+        .btn-hotswap-launchpad { background: #3a1f0a; border: 1px solid #a85a1a; color: #ff8c42; }
+        .btn-hotswap-launchpad:hover { background: #4a2810; }
+
+        /* Quick Action shortcuts — always visible below the ··· trigger */
+        .hotswap-shortcut-row {
+            position: absolute;
+            top: 56px;
+            right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 10001;
+        }
+        .hotswap-shortcut-btn {
+            position: relative;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.75);
+            border: 1px solid #555;
+            color: #ccc;
+            font-size: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(6px);
+            transition: background 0.15s, transform 0.15s, border-color 0.15s, opacity 0.15s;
+        }
+        .hotswap-shortcut-btn::before {
+            content: '';
+            position: absolute;
+            top: -8px; left: -8px; right: -8px; bottom: -8px;
+        }
+        html.ghost-trigger .hotswap-shortcut-btn { opacity: var(--ghost-opacity, 0.12); }
+        html.ghost-trigger .hotswap-shortcut-btn:hover { opacity: 1; }
+        .hotswap-shortcut-btn:hover { background: rgba(0, 0, 0, 0.95); border-color: #0095f6; transform: scale(1.1); }
+
+        html.layer-2 .hotswap-shortcut-row { right: auto; left: 16px; top: 80px; }
+        html.layer-2 .hotswap-shortcut-btn { border-color: #f0c020; }
+        html.layer-2 .hotswap-shortcut-btn:hover { border-color: #ffd84a; }
+
+        /* Shuffle / Shuffle All / Delete pill buttons */
+        .btn-hotswap-shuffle { background: #1a2a1a; border: 1px solid #3a6b3a; color: #4caf50; border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer; white-space: nowrap; flex: 1; transition: background 0.15s; }
+        .btn-hotswap-shuffle:hover { background: #223322; }
+        .btn-hotswap-shuffle:active { transform: rotate(15deg) scale(0.95); }
+
+        .btn-hotswap-shuffle-all { background: #0d2038; border: 1px solid #2f6fb3; color: #6db8ff; border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer; white-space: nowrap; flex: 1; transition: background 0.15s; }
+        .btn-hotswap-shuffle-all:hover { background: #123058; }
+
+        /* Purge button (icon-only) */
+        .btn-purge { background: #331417; color: #ed4956; border: 1px solid #4a1a1e; }
+        .btn-purge:hover { background: #ed4956; color: #fff; }
+
+        .btn-hotswap-delete { background: #1a1a1a; border: 1px solid #555; color: #ccc; border-radius: 10px; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
+        .btn-hotswap-delete:hover { background: #333; color: #fff; }
+
+        /* Kill button */
+        .btn-hotswap-kill { background: #1a0808; border: 1px solid #5a2020; color: #888; }
+        .btn-hotswap-kill:hover { background: #3a0a0a; color: #ed4956; }
+
+        /* Star button */
+        .btn-hotswap-star { background: #1a1a0a; border: 1px solid #5a5a00; color: #f0c040; }
+        .btn-hotswap-star:hover { background: #2a2a00; transform: scale(1.15); }
+        .btn-hotswap-star.saved { color: #ffd700; background: #2a2200; border-color: #ffd700; }
+
+        /* Reload button */
+        .btn-hotswap-reload { background: #0a1a2a; border: 1px solid #1a5a8a; color: #4a9fd4; }
+        .btn-hotswap-reload:hover { background: #0d2a3a; }
+        .btn-hotswap-reload.spinning { transform: rotate(360deg); transition: transform 0.4s ease; }
+
+        .hotswap-url-row { display:none; gap:4px; align-items:center; }
+        .hotswap-url-row.open { display:flex; }
+        .hotswap-input { flex:1; background:#1a1a1a; border:1px solid #444; border-radius:12px; padding:4px 9px; color:#fff; font-size:11px; outline:none; min-width:140px; }
+        .hotswap-input:focus { border-color:#0095f6; }
+        .hotswap-submit-btn { background:#0095f6; color:#fff; border:none; border-radius:50%; width:20px; height:20px; font-size:10px; font-weight:bold; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+
+        /* 📁 Folder-picker and 🖥 Position-picker expandable lists */
+        .hotswap-folder-row, .hotswap-position-row { display: none; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+        .hotswap-folder-row.open, .hotswap-position-row.open { display: flex; }
+        .hotswap-folder-item, .hotswap-position-item { background: #181818; border: 1px solid #333; border-radius: 8px; padding: 6px 10px; font-size: 12px; color: #ccc; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.12s; }
+        .hotswap-folder-item:hover, .hotswap-position-item:hover { background: #242424; color: #fff; }
+        .hotswap-folder-count { color: #666; font-size: 11px; }
+
+        /* Bookmark modal */
+        #bookmark-modal { display:none; position:fixed; inset:0; z-index:2147483647; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
+        #bookmark-modal.open { display:flex; }
+        .bookmark-card { background:#161616; border:1px solid #2d2d2d; border-top:3px solid #f0c040; border-radius:16px; padding:24px; max-width:420px; width:92%; box-shadow:0 10px 40px rgba(0,0,0,0.8); }
+        .bookmark-card h3 { font-size:16px; color:#f0c040; margin-bottom:12px; }
+        .bm-url-preview { background:#111; border-radius:6px; padding:8px; margin-bottom:14px; font-size:11px; color:#555; word-break:break-all; font-family:monospace; }
+        .bookmark-card label { display:block; font-size:11px; color:#aaa; font-weight:bold; margin-bottom:5px; margin-top:10px; }
+        .bm-folder-select, .bm-new-folder-input { width:100%; background:#222; border:1px solid #333; padding:9px 11px; color:#fff; border-radius:8px; font-size:13px; margin-bottom:10px; outline:none; }
+        .bm-folder-select:focus, .bm-new-folder-input:focus { border-color:#f0c040; }
+        .bm-actions { display:flex; gap:10px; margin-top:16px; }
+        .bm-actions button { flex:1; padding:10px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:13px; }
+        .btn-bm-cancel { background:#222; color:#777; }
+        .btn-bm-save   { background:#f0c040; color:#111; }
+
+        @media (max-width: 900px) {
+            body { overflow: auto; }
+            #triple-layout {
+                height: auto !important;
+                min-height: 100vh !important;
+                grid-template-columns: 1fr !important;
+                grid-template-rows: none !important;
+                grid-template-areas: none !important;
+                grid-auto-flow: row !important;
+                grid-auto-rows: minmax(40vh, auto) !important;
+            }
+            .stream-slot { grid-area: auto !important; }
+            .resizer { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="triple-layout" class="layout-lefttall">
+        <div id="screen-1-slot" class="stream-slot"><span class="slot-label">Screen 1</span></div>
+        <div id="screen-2-slot" class="stream-slot"><span class="slot-label">Screen 2</span></div>
+        <div id="screen-3-slot" class="stream-slot"><span class="slot-label">Screen 3</span></div>
+        <div id="screen-4-slot" class="stream-slot"><span class="slot-label">Screen 4</span></div>
+    </div>
+
+    <!-- Always-visible floating buttons -->
+    <div id="floating-btns">
+        <button class="float-btn" id="btn-toggle-master" title="Toggle master controls">🎬</button>
+        <a href="index.html" class="float-btn" title="Back to Launchpad">⚙</a>
+    </div>
+
+    <!-- Master control bar (hidden until toggled) -->
+    <div id="master-bar">
+        <div style="position:relative;">
+            <button class="master-btn folder-btn" id="btn-master-folder">🌐 Folder ▲</button>
+            <div id="master-folder-dropup"></div>
+        </div>
+        <button class="master-btn layout-btn" id="btn-layout-top2" data-layout="top2" title="2 Top + 1 Bottom Wide">
+            <span class="layout-icon li-top2"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-bottom2" data-layout="bottom2" title="1 Top Wide + 2 Bottom">
+            <span class="layout-icon li-bottom2"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-3col" data-layout="3col" title="3 Equal Columns">
+            <span class="layout-icon li-3col"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-lefttall" data-layout="lefttall" title="1 Left Tall + 2 Right Stacked">
+            <span class="layout-icon li-lefttall"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-righttall" data-layout="righttall" title="1 Right Tall + 2 Left Stacked">
+            <span class="layout-icon li-righttall"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-vsplit" data-layout="vsplit" title="Vertical 50/50 Split">
+            <span class="layout-icon li-vsplit"><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-hsplit" data-layout="hsplit" title="Horizontal 50/50 Split">
+            <span class="layout-icon li-hsplit"><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-4grid" data-layout="4grid" title="4 Screen Grid">
+            <span class="layout-icon li-4grid"><i></i><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn shuffle-btn"   id="btn-master-shuffle">🎲 Shuffle</button>
+        <button class="master-btn shuffall-btn"  id="btn-master-shuffle-all">🎲🎲 Shuffle All</button>
+        <button class="master-btn undo-btn" id="btn-master-undo" disabled title="Undo the last change to this session">↩ Undo</button>
+        <div style="position:relative;">
+            <button class="master-btn save-btn" id="btn-master-save">💾 Save Session As...</button>
+            <div id="master-save-dropup"></div>
+        </div>
+        <span id="master-status">Not connected</span>
+        <button class="master-btn close-btn" id="btn-master-close">🎬 Close</button>
+        <a href="index.html" class="master-btn back-btn">⚙ Launchpad</a>
+    </div>
+
+    <!-- Bookmark modal -->
+    <div id="bookmark-modal">
+        <div class="bookmark-card">
+            <h3>⭐ Save to Playlist</h3>
+            <div class="bm-url-preview" id="bm-url-preview"></div>
+            <label>Choose existing folder</label>
+            <select class="bm-folder-select" id="bm-folder-select"><option value="">— select a folder —</option></select>
+            <label>Or create a new folder</label>
+            <input type="text" class="bm-new-folder-input" id="bm-new-folder-input" placeholder="New playlist name...">
+            <div class="bm-actions">
+                <button class="btn-bm-cancel" id="btn-bm-cancel">Cancel</button>
+                <button class="btn-bm-save"   id="btn-bm-save">⭐ Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./js/triple-mode.js"></script>
+</body>
+</html>
