@@ -1,5 +1,3 @@
-Content is user-generated and unverified.
-Learn about artifacts
 /**
  * launch.js — Stream Loop Launchpad
  * ─────────────────────────────────────────────────────────────────────────────
