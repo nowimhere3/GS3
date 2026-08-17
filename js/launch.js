@@ -92,14 +92,31 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     };
 
     /** Sync iframe src, input field, and persisted URL list */
-    const setIframeUrl = (newUrl) => {
+    /** Update the iframe + (if present) input field, and persist the change.
+     * If ctx provides onPanelContentChanged (only true for index3.html's
+     * Grid, which owns its own runtime session), delegate persistence to
+     * it entirely — this panel must never write to the shared Store surface
+     * directly in that context, or a Grid-session edit would leak into
+     * whatever workspace is active on index.html. Otherwise (plain
+     * index.html), this write IS the correct persistence path — the
+     * setup-screen's own auto-save only covers its own inputs, not an
+     * already-launched panel like this one. */
+    const setIframeUrl = (newUrl, newFolder) => {
         iframe.src = newUrl;
         iframe.setAttribute('data-last-src', newUrl);
+        if (newFolder !== undefined) iframe.setAttribute('data-source-folder', newFolder || '');
         if (inputField) inputField.value = newUrl;
-        // Update persisted URL list at this index
-        const urls = JSON.parse(localStorage.getItem('loop_matrix_urls') || '[]');
-        urls[index] = newUrl;
-        Store.set('matrixUrls', urls);
+
+        if (typeof ctx.onPanelContentChanged === 'function') {
+            ctx.onPanelContentChanged(index, newUrl, newFolder);
+        } else {
+            const urls = JSON.parse(localStorage.getItem('loop_matrix_urls') || '[]');
+            urls[index] = newUrl;
+            Store.set('matrixUrls', urls);
+            if (newFolder !== undefined) {
+                setUrlFolderMap({ ...getUrlFolderMap(), [index]: newFolder });
+            }
+        }
     };
 
     // ── Overlay HTML ─────────────────────────────────────────────────────────
@@ -213,10 +230,13 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
             item.innerHTML = `<span>${folderName}</span><span class="hotswap-folder-count">${currentDb[folderName].length}</span>`;
             item.onclick = (ev) => {
                 ev.stopPropagation();
-                iframe.setAttribute('data-source-folder', folderName);
                 const newUrl = loadReplacement(folderName);
-                if (newUrl) setIframeUrl(newUrl);
-                setUrlFolderMap({ ...getUrlFolderMap(), [index]: folderName });
+                const currentUrl = iframe.getAttribute('data-last-src') || iframe.src;
+                // Folder assignment always applies, even if that folder has
+                // no available URL right now — same as before, just funneled
+                // through one path instead of a direct attribute write plus
+                // a separate, session-unaware setUrlFolderMap() call.
+                setIframeUrl(newUrl || currentUrl, folderName);
                 folderRow.classList.remove('open');
                 folderBtn.classList.remove('active');
             };
@@ -274,6 +294,10 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
             panel.remove();
             const remaining = ctx.feedContainerEl?.querySelectorAll('.stream-panel').length ?? 0;
             if (ctx.statusEl) ctx.statusEl.textContent = `${remaining} streams`;
+            if (typeof ctx.onPanelRemoved === 'function') {
+                if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
+                ctx.onPanelRemoved(index);
+            }
         }, 250);
     };
 
@@ -284,6 +308,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         if (!folder) { alert('No source folder tracked for this panel. Use 🌐 to set a URL manually.'); return; }
         const newUrl = loadReplacement(folder);
         if (!newUrl) { alert('No available URLs in this folder (empty or all blacklisted).'); return; }
+        if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
         setIframeUrl(newUrl);
     };
 
@@ -297,9 +322,11 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         const randomFolder = allFolders[Math.floor(Math.random() * allFolders.length)];
         const newUrl = loadReplacement(randomFolder);
         if (!newUrl) return;
-        // Update source folder so future single-shuffles use the new folder
-        iframe.setAttribute('data-source-folder', randomFolder);
-        setIframeUrl(newUrl);
+        if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
+        // Folder + URL update together — setIframeUrl's second argument
+        // handles the data-source-folder attribute too, so future
+        // single-shuffles correctly use the new folder.
+        setIframeUrl(newUrl, randomFolder);
     };
 
     // ❌ Delete — remove URL from folder, load replacement, sync silently
@@ -318,6 +345,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         setDatabaseStructure(currentDb);
 
         const replacement = loadReplacement(folder);
+        if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
         setIframeUrl(replacement || 'about:blank');
         await pushDatabaseToRemote(`Deleted URL from folder: ${folder}`, true);
     };
@@ -335,6 +363,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         const folder      = getSourceFolder();
         const currentDb   = getDatabaseStructure();
         const replacement = (folder && loadReplacement(folder)) || 'https://example.com';
+        if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
         setIframeUrl(replacement);
 
         if (currentDb) {
@@ -373,7 +402,10 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // with a fresh Launchpad instance; every other panel keeps running.
     launchpadBtn.onclick = (e) => {
         e.stopPropagation();
-        setIframeUrl('index.html');
+        if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
+        // Clear the folder — this panel is no longer sourced from a content
+        // folder now that it's showing the Launchpad itself.
+        setIframeUrl('index.html', '');
     };
 
     // ── Overlay Button Visibility + Quick Action Shortcuts ────────────────────

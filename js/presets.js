@@ -55,6 +55,7 @@ export function createEmptyPreset(id) {
         panels: [],
         folderMap: {},
         lockState: {},
+        layout: null,
         rowCount: 0,
         streamCount: 0,
         isEmpty: true,
@@ -140,7 +141,7 @@ export function formatRelativeTime(isoString) {
  *                  is normalized here, so callers that still only have plain
  *                  URL strings on hand don't need to convert first)
  */
-export function buildPresetFromWorkspace(id, name, { panels, folderMap, lockState }) {
+export function buildPresetFromWorkspace(id, name, { panels, folderMap, lockState, layout = null }) {
     const safePanels = normalizePanelsArray(panels);
     const streamCount = safePanels.filter((p) => !isEmptyPanel(p)).length;
     return {
@@ -149,6 +150,7 @@ export function buildPresetFromWorkspace(id, name, { panels, folderMap, lockStat
         panels: safePanels,
         folderMap: folderMap || {},
         lockState: lockState || {},
+        layout,
         rowCount: safePanels.length,
         streamCount,
         isEmpty: streamCount === 0,
@@ -165,7 +167,12 @@ export function buildPresetFromWorkspace(id, name, { panels, folderMap, lockStat
 export function updatePresetInMemory(id, workspaceData) {
     const presets = getPresets();
     const existing = presets.find((p) => p.id === id);
-    const updated = buildPresetFromWorkspace(id, existing?.name, workspaceData);
+    // Preserve the existing layout when the caller doesn't specify one —
+    // index.html's auto-save calls never pass `layout` at all (it has no
+    // orientation concept), so without this a plain index.html edit would
+    // silently wipe out a layout Grid previously saved for this preset.
+    const layout = workspaceData.layout !== undefined ? workspaceData.layout : (existing?.layout ?? null);
+    const updated = buildPresetFromWorkspace(id, existing?.name, { ...workspaceData, layout });
     const next = presets.map((p) => (p.id === id ? updated : p));
     setPresetsStructure(next);
     return updated;

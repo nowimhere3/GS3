@@ -16,6 +16,8 @@ import {
     initGridSession, updateGridSession, setGridSessionSilently, getSessionUrls,
     getSessionFolderMap, getSourceWorkspaceInfo, setSessionSource,
     canUndoGridSession, undoGridSession,
+    getSessionArrangement, setSessionArrangement, setSessionLayout,
+    pushGridSessionCheckpoint,
 } from './grid-session.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
@@ -340,11 +342,10 @@ function _injectResizers(layoutName, tripleLayoutEl) {
     });
 }
 
-// Tracks which named grid-area (screen1/screen2/screen3) each slot-index is
-// CURRENTLY rendering as. Starts as the identity mapping and only ever
-// changes via swaps — reset back to identity whenever the orientation
-// changes (see _applyLayout).
-let _slotAreaAssignment = ['screen1', 'screen2', 'screen3', 'screen4'];
+// The slot-index -> grid-area arrangement now lives in grid-session.js
+// (getSessionArrangement/setSessionArrangement), so it's owned by the runtime
+// session and travels into Save Session As, rather than being a local that the
+// UI privately owns. This file only reads/writes it through the session.
 
 /**
  * Swap what's showing in two screen slots — driven by the 🖥 button in each
@@ -355,28 +356,29 @@ let _slotAreaAssignment = ['screen1', 'screen2', 'screen3', 'screen4'];
  * is playing live inside (video, slideshow, etc.) keeps running exactly like
  * it does when switching orientations — because this is the same kind of
  * change: pure CSS, zero DOM manipulation of the iframe itself.
- * Also swaps the two slots' entries in the in-memory folder map, so a
- * subsequent master-overlay "own folder" Shuffle stays consistent with what's
- * now actually showing. Session-only — never written to Store, same as the
- * border-drag sizing.
+ *
+ * A swap is PRESENTATION only: it mutates the session's arrangement, never its
+ * content. URLs and folder assignments stay bound to their slot-index, not to
+ * the visual position — so this deliberately does NOT swap the folder map (a
+ * later "own folder" Shuffle acts on the slot's own assignment, matching how
+ * URLs stay put). The arrangement is owned by the runtime session
+ * (grid-session.js), and a swap is checkpoint-worthy so undo can restore it.
  */
 function _swapSlotContents(slotIndexA, slotIndexB) {
     const slotAEl = document.getElementById(SLOT_IDS[slotIndexA]);
     const slotBEl = document.getElementById(SLOT_IDS[slotIndexB]);
     if (!slotAEl || !slotBEl) return;
 
-    const tmpArea = _slotAreaAssignment[slotIndexA];
-    _slotAreaAssignment[slotIndexA] = _slotAreaAssignment[slotIndexB];
-    _slotAreaAssignment[slotIndexB] = tmpArea;
+    pushGridSessionCheckpoint();
 
-    slotAEl.style.gridArea = _slotAreaAssignment[slotIndexA];
-    slotBEl.style.gridArea = _slotAreaAssignment[slotIndexB];
+    const arrangement = getSessionArrangement();
+    const tmpArea = arrangement[slotIndexA];
+    arrangement[slotIndexA] = arrangement[slotIndexB];
+    arrangement[slotIndexB] = tmpArea;
+    setSessionArrangement(arrangement);
 
-    const map = { ...getUrlFolderMap() };
-    const tmpFolder = map[slotIndexA];
-    map[slotIndexA] = map[slotIndexB];
-    map[slotIndexB] = tmpFolder;
-    setUrlFolderMap(map);
+    slotAEl.style.gridArea = arrangement[slotIndexA];
+    slotBEl.style.gridArea = arrangement[slotIndexB];
 }
 
 /**
@@ -400,10 +402,14 @@ function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
 
     _injectResizers(safeName, tripleLayoutEl);
 
-    // A swap made via 🖥 was specific to the previous arrangement — reset back
-    // to identity on any orientation change so slots don't carry a stale swap
-    // into a layout it was never set up for.
-    _slotAreaAssignment = ['screen1', 'screen2', 'screen3', 'screen4'];
+    // A swap made via 🖥 was specific to the previous arrangement — reset it on
+    // any orientation change so slots don't carry a stale swap into a layout it
+    // was never set up for. setSessionLayout() records the new orientation on
+    // the session AND resets its arrangement to identity in one call; the slot
+    // elements' own inline grid-area is cleared just below, so DOM and session
+    // agree. (Store.set('tripleLayout') below is a separate concern: the global
+    // default orientation for brand-new sessions, not this session's own truth.)
+    setSessionLayout(safeName);
 
     // Show only the slots this layout actually uses (2-screen splits only use
     // 2 of the 4 slots, 3-screen layouts use 3, only the 4-way grid uses all 4).
@@ -467,6 +473,13 @@ function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
     if (skipUndoSnapshot) {
         setGridSessionSilently(urls, map);
     } else {
+        // updateGridSession() no longer pushes undo on its own, so the master-bar
+        // actions that re-render through here (Shuffle, Shuffle All, folder
+        // select) take an explicit checkpoint first — mirroring the old coupled
+        // behavior exactly, just made explicit. Per-panel actions never reach
+        // this path: launch.js pushes its own checkpoint before setIframeUrl ->
+        // onPanelContentChanged, so there's no double checkpoint.
+        pushGridSessionCheckpoint();
         updateGridSession(urls, map);
     }
     // These calls update index3.html's own state.js module instance only.
@@ -642,6 +655,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         openBookmarkModal: _openBookmarkModal,
         getPositionOrder: () => LAYOUT_POSITION_ORDER[_currentLayout] || [0, 1, 2],
         swapWithSlot: (slotIndexA, slotIndexB) => _swapSlotContents(slotIndexA, slotIndexB),
+        // Runtime-session write-backs for launch.js's per-panel overlay. These
+        // are how a single panel's own hotswap action (manual URL edit, folder
+        // assign, per-panel Shuffle / Shuffle All, Delete, Purge, Kill, 🚀)
+        // reaches the authoritative session without the panel ever writing to
+        // Store. launch.js pushes its own checkpoint before the content-changing
+        // actions, so onPanelContentChanged/onPanelRemoved don't checkpoint again.
+        onPanelContentChanged: (idx, newUrl, newFolder) => {
+            const urls = getSessionUrls();
+            const folderMap = getSessionFolderMap();
+            urls[idx] = newUrl;
+            if (newFolder !== undefined) folderMap[idx] = newFolder;
+            updateGridSession(urls, folderMap);
+            setTargetUrls(urls);      // keep state.js's compat view in sync
+            setUrlFolderMap(folderMap);
+        },
+        onPanelRemoved: (idx) => {
+            const urls = getSessionUrls();
+            urls[idx] = '';
+            updateGridSession(urls, getSessionFolderMap());
+            setTargetUrls(urls);
+        },
+        pushUndoCheckpoint: () => pushGridSessionCheckpoint(),
     };
 
     // 🎬 toggle open/close for the master control bar
@@ -660,8 +695,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     closeMasterBtn.onclick = closeMasterBar;
 
-    // 🖥 Layout switcher — restore persisted layout, then wire each button
-    _applyLayout(Store.get('tripleLayout') || DEFAULT_LAYOUT, tripleLayoutEl, layoutBtns);
+    // 🖥 Layout switcher — wire each button now. The INITIAL layout is applied
+    // after the session loads (below): initGridSession() resolves it from the
+    // source workspace's own saved layout, so it can't be known until then.
     Object.entries(layoutBtns).forEach(([name, btn]) => {
         btn.onclick = () => _applyLayout(name, tripleLayoutEl, layoutBtns);
     });
@@ -695,7 +731,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // every slot with random picks instead of the actual saved workspace.
     await loadPresetsSilently();
 
-    const initialSession = initGridSession(); // Phase 4B: load the working copy from the URL-selected workspace
+    const initialSession = initGridSession(DEFAULT_LAYOUT); // Phase 4B/4D: load working copy + resolved layout from the URL-selected workspace
+    // Now that the session exists, apply its resolved layout (preset.layout, or
+    // the global tripleLayout preference, or DEFAULT_LAYOUT — decided inside
+    // initGridSession). This is the single initial _applyLayout call for boot,
+    // and it runs before the first render so _renderPanels reads the right
+    // _currentLayout for its visible-slot count.
+    _applyLayout(initialSession.layout, tripleLayoutEl, layoutBtns);
     _traceGrid('after session initialization', {
         source: getSourceWorkspaceInfo(),
         initialSession,
@@ -741,6 +783,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             setTargetUrls(restored.urls);
             setUrlFolderMap(restored.folderMap);
             _renderPanels(restored.urls, restored.folderMap, ctx, { skipUndoSnapshot: true });
+            // undoGridSession() already restored the session's arrangement; now
+            // reflect it on the slot elements. Without this, undoing a position
+            // swap would restore content but leave the swapped slots in place.
+            // _renderPanels only rebuilds panels inside slots — it never touches
+            // slot grid-area — so this must be applied explicitly, per slot.
+            restored.arrangement.forEach((area, slotIndex) => {
+                const slotEl = document.getElementById(SLOT_IDS[slotIndex]);
+                if (slotEl) slotEl.style.gridArea = area;
+            });
         };
     }
     _updateGridUndoButtonState();
