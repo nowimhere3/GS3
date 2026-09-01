@@ -18,7 +18,10 @@ import {
 } from './folders.js';
 import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { getPresets, getPresetSummary, loadPresetsSilently } from './presets.js';
-import { getActiveWorkspaceId, switchWorkspace, isLiveBuilder } from './workspace.js';
+import {
+    getActiveWorkspaceId, switchWorkspace, isLiveBuilder,
+    flushPendingWorkspaceSync, rehydrateActiveWorkspaceIfStale,
+} from './workspace.js';
 import { initGrid, renderInputRows, saveInputsToState } from './grid.js';
 import { initScrollEngine, stopScrolling } from './scroll.js';
 import { launchMatrix } from './launch.js';
@@ -214,6 +217,7 @@ async function boot() {
     // boot, which could race if e.g. multiple tabs are open).
     document.getElementById('btn-launch-grid')?.addEventListener('click', () => {
         saveInputsToState({ checkpoint: false });
+        flushPendingWorkspaceSync(); // do not abandon the pending mirror to a dying debounce
         const workspaceId = getActiveWorkspaceId();
         window.location.href = `index3.html?workspace=${encodeURIComponent(workspaceId)}`;
     });
@@ -244,6 +248,7 @@ async function _initWorkspaceTabs() {
     if (!tabsEl) return;
 
     await loadPresetsSilently();
+    if (rehydrateActiveWorkspaceIfStale()) renderInputRows();
     _renderWorkspaceTabs(tabsEl);
 }
 

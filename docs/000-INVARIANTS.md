@@ -90,6 +90,26 @@ Runtime must never silently modify its source Workspace.
 
 ---
 
+# Builder Projection Freshness
+
+The Builder's shared editing surface must never present, and then itself
+persist, a stale copy of the active Preset.
+
+On resume, the Builder compares its current surface against the active
+Preset's persisted content and rehydrates from the Preset when they differ.
+
+Live Builder is excluded: its data has no second authority to diverge from.
+
+Rehydration is comparison-gated, never unconditional — resuming with nothing
+changed must not clear Builder undo history for free.
+
+A pending debounced mirror to the active Preset must be flushed, never
+abandoned, before the Builder navigates away.
+
+See docs/Claude Reports/Part-1-6 (stale Workspace projection diagnosis).
+
+---
+
 # Runtime Boot
 
 Runtime copies its initial state exactly once.

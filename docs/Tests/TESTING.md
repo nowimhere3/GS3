@@ -8,6 +8,8 @@ Part 1-3 established Runway-attached picker geometry. It also proves Position-le
 
 Part 1-4 supersedes only the picker-location portion of Part 1-3: Top, Runway, and Deep Cuts now resolve Edit URL and Assign Folder to one compact website-top-right dock (measured 8px top / 12px right in the bordered panel). Tests normalize against `--hotswap-website-inset`, prove Runway invocation leaves Top closed, exercise document click-away and non-intercepting iframe-focus dismissal, retain timer/focus/caret/continuity checks, and prove the same Shuffle All handler renders horizontal dice in Top but vertical dice inside the unchanged 30×30 Runway button.
 
+Part 1-5 tightens only the two existing Runway Shuffle All spans: their measured line boxes overlap by 2px on an upper-left to lower-right diagonal. Focused coverage keeps Top horizontal, proves two distinct glyph nodes, the unchanged 30×30 button and 6px neighbour spacing, and exact forwarding from both surfaces to the same canonical action.
+
 **Audience:** an AI coding agent (Claude Code, Codex, Antigravity, etc.) with shell access to this repo.
 
 **Prime directive:** *Prove it, don't eyeball it.* Do not ask the human to manually verify
@@ -283,6 +285,27 @@ module load). Report any control that is present in the DOM but inert.
 - Edits auto-save locally *immediately* (assert `localStorage` mutation synchronously), while
   the GitHub push is debounced (~1.5s) — assert the mocked push fires **once** after N rapid
   edits, not N times
+
+### 3.4a ★ Builder rehydration (Part 1-6)
+`switchWorkspace()` was the only path that copied a Preset's persisted content into the shared
+Builder surface, and it only ran when the tab actually changed — so returning to the Builder
+with the SAME Preset still active re-rendered whatever `matrixUrls`/`folderMap`/`lockState` the
+Store held from before a Runtime launch. Worse: the Builder's own auto-save then mirrored those
+stale rows back over the Preset on the very next edit, silently destroying a Runtime save. Full
+end-to-end coverage (`boot-smoke.test.js`, against a mocked GitHub backend so persistence
+actually round-trips across real page navigations):
+- **The reported bug, fixed** — Preset active in the Builder, Launch Grid, edit the Runtime,
+  Save Session As back into the SAME Preset, return via a fresh full page load. The Builder must
+  show the Runtime's save, not the stale pre-launch rows, and `Store.get('matrixUrls')` must
+  match. The very next Builder edit must land on top of that rehydrated content.
+- **Flush before navigating** — edit a Builder row and click Launch Grid with no pause for the
+  1500ms GitHub-sync debounce. Assert the edit reached the Preset before the Runtime's own boot
+  read it (`getSessionUrls()`), not merely before the page unloaded.
+- **Isolation preserved** — a Runtime change that is never saved never appears in the Builder;
+  saving into a DIFFERENT preset never disturbs the one still active; Live Builder is NEVER
+  rehydrated no matter what a Preset does, since its data has no second authority; resuming twice
+  with nothing changed returns `false` the second time and does not clear Builder undo history
+  for free.
 
 ### 3.5 Undo on `index.html`
 Each of these must produce exactly one undo step, and undo must fully restore prior state:
@@ -650,6 +673,37 @@ and `_order` byte-identical, and structural controls always fit.
 **Alignment:** every Hotswap `.switch` right edge lands on one axis (±1px). This caught a real
 110px misalignment — the switches carried an inline `style="margin:0"` that outranked the
 stylesheet's `margin-left: auto`, so they sat wherever the heading text ended.
+
+**Part 1-6 update:** Toolbar Shortcuts no longer carries its own ON/OFF switch —
+`#top-shortcuts-enabled` must not exist in the DOM. Assert count/order still render and persist
+identically, and that a legacy `hotswap_top_shortcuts_enabled=false` left over from before this
+pass is silently ignored rather than suppressing the toolbar. Quick Action Shortcut Runway keeps
+its own ON/OFF switch unchanged — this removal applies to Toolbar Shortcuts only.
+
+### 4.23 ★ Utility dismissal consistency (Part 1-6B)
+Edit URL and Assign Folder are presented as sibling utilities and must dismiss identically:
+completion, Escape, or a click outside — never only by completing the action.
+- **Narrow click-away boundary** — the dismissal boundary for an OPEN utility is the utility
+  itself plus the control that invoked it, never `inChromeFamily` (that predicate answers a
+  different question: whether the 850ms retract timer should run). Clicking ANY other GS3
+  control — the Top Toolbar rail, the Position button, Deep Cuts, the Runway — closes the open
+  utility, and that control's own click still fires in the same gesture (e.g. Edit URL open,
+  click Reload: Edit URL closes AND Reload still spins). The same-control toggle still closes in
+  exactly one click, not close-then-reopen, because the invoking control counts as "inside" while
+  its own utility is open.
+- **No swallowed clicks** — the dismissal `pointerdown` handler never calls `preventDefault`.
+- **Assign Folder owns focus** — on open it takes focus on its own container (`tabIndex=-1`,
+  `focus({preventScroll:true})`), matching Edit URL's explicit `input.focus()`. This is what
+  makes Escape reach the panel's keydown handler deterministically — before the fix, a plain
+  `<div>` folder row focused nothing, `document.activeElement` fell to `BODY`, and Escape only
+  worked when a click happened to land on a focusable child by accident. Taking focus must not
+  auto-select a folder, scroll the page, or reveal the Top Toolbar.
+- **Cross-origin residual case, documented not faked** — the honest boundary is iframe `focus`,
+  which fires on the transition into the frame and reliably closes an open utility. If the
+  iframe already holds focus when a utility opens, a subsequent click inside that website
+  produces no parent-visible event at all, and the utility remains open until Escape, an outside
+  click, or an action. This is a real browser limitation — no transparent overlay is introduced
+  to paper over it, since that would intercept the customer's own first click into their site.
 
 ---
 

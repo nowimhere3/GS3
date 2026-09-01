@@ -43,7 +43,7 @@ import { pushDatabaseToRemote } from './sync.js';
 import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
 import {
     getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
-    getVisibleTopDeepActions, getTopShortcutCount, isTopShortcutsEnabled,
+    getVisibleTopDeepActions, getTopShortcutCount,
     isLayerTwoUrl, LAYER_1, LAYER_2, CHROME_RETRACT_DELAY_MS,
     isEligibleFor, SURFACES,
 } from './hotswap-chrome.js';
@@ -384,9 +384,14 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const launchpadBtn   = overlay.querySelector('.btn-hotswap-launchpad');
     const pickerRows = [folderRow, urlRow];
     const hasOpenPicker = () => pickerRows.some((row) => row.classList.contains('open'));
+    // Retained while a utility is open so the control that opened it counts as
+    // "inside" — otherwise pointerdown closes it and the following click event
+    // re-opens it, breaking the same-control toggle. Cleared in closePicker().
+    let activePickerAnchor = null;
     const closePicker = () => {
         pickerRows.forEach((row) => row.classList.remove('open'));
         [folderBtn, toggleBtn].forEach((button) => button.classList.remove('active'));
+        activePickerAnchor = null;
     };
 
     // ── Retractable top toolbar ──────────────────────────────────────────────
@@ -451,6 +456,12 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const inRailFamily = (node) => node instanceof Node
         && (toolbar.contains(node) || overlay.contains(node)
             || activationEl.contains(node) || positionMenuEl.contains(node));
+    // The dismissal boundary for an OPEN utility: itself + its invoking control.
+    // Deliberately NOT inChromeFamily — that predicate answers a different
+    // question (should the 850ms retract timer run) and is far too broad here.
+    const inActiveUtility = (node) => node instanceof Node
+        && (pickerRows.some((row) => row.classList.contains('open') && row.contains(node))
+            || (activePickerAnchor && activePickerAnchor.contains(node)));
 
     let retractTimer = null;
     const cancelRetract = () => { clearTimeout(retractTimer); retractTimer = null; };
@@ -679,9 +690,15 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // Observable outside clicks dismiss too. This is a supplement, never the
     // primary mechanism: a click inside a cross-origin iframe does not reach us.
     document.addEventListener('pointerdown', (e) => {
-        if (!overlay.classList.contains('open') && positionMenuEl.hidden && !hasOpenPicker()) return;
+        // An open utility is dismissed by ANY click outside itself, including
+        // other GS3 Chrome (Top Toolbar, Position, ···, Runway). Runs first and
+        // independently, and never returns early, so the tray/position-menu
+        // rules below still apply. No preventDefault: the click must still
+        // reach whatever the customer aimed at, in the same gesture.
+        if (hasOpenPicker() && !inActiveUtility(e.target)) closePicker();
+
+        if (!overlay.classList.contains('open') && positionMenuEl.hidden) return;
         if (inChromeFamily(e.target)) return;
-        closePicker();
         closeDeepCuts();
         closePositionMenu();
     });
@@ -798,7 +815,16 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         closePicker();
         folderRow.classList.add('open');
         folderBtn.classList.add('active');
+        activePickerAnchor = folderBtn;
         placePicker(folderRow);
+
+        // Assign Folder owns focus on its own container (not a real button, so
+        // nothing focuses it by accident) — this is what makes Escape reach the
+        // panel's keydown handler deterministically, matching Edit URL below.
+        folderRow.tabIndex = -1;
+        requestAnimationFrame(() => {
+            if (folderRow.classList.contains('open')) folderRow.focus({ preventScroll: true });
+        });
 
         folderRow.innerHTML = '';
         const currentDb = getDatabaseStructure();
@@ -834,6 +860,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         closePicker();
         urlRow.classList.add('open');
         toggleBtn.classList.add('active');
+        activePickerAnchor = toggleBtn;
         placePicker(urlRow);
         inputField.value = iframe.getAttribute('data-last-src') || iframe.src;
         requestAnimationFrame(() => {
@@ -1054,8 +1081,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // surface can be reordered or removed without touching it.
     const visibility = Store.get('hotswapButtonVisibility') || {};
     const visibleTopDeepKeys = getVisibleTopDeepActions(visibility);
-    const configuredTopKeys = isTopShortcutsEnabled()
-        ? visibleTopDeepKeys.slice(0, getTopShortcutCount()) : [];
+    const configuredTopKeys = visibleTopDeepKeys.slice(0, getTopShortcutCount());
 
     // Actions this host page cannot perform at all already hid their own button
     // above. They stay hidden regardless of Settings, and are never offered on

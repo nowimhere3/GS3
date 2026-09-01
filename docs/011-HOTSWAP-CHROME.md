@@ -2,6 +2,42 @@
 
 The per-panel control surface.
 
+## Part 1-6 utility dismissal + Toolbar Shortcuts toggle breadcrumb
+
+WAS: outside-click dismissal used the whole Hotswap Chrome family (`inChromeFamily`) as its
+boundary, so a click on the Top Toolbar rail, the Position button, or the `···` Deep Cuts
+trigger left an open utility open — the Runway happened to close correctly only because it had
+never been added to that predicate. Assign Folder focused nothing on open, so
+`document.activeElement` fell to `BODY` and Escape only worked when a click happened to land on
+a focusable child by accident. Separately, Toolbar Shortcuts carried its own ON/OFF switch in
+Settings, in addition to a count and an order.
+
+IS: an open utility's dismissal boundary is itself plus the control that invoked it
+(`inActiveUtility`) — a narrower, purpose-built predicate, never `inChromeFamily` (which still
+answers its own, different question: whether the 850ms retract timer should run). Any other GS3
+Chrome closes an open utility without swallowing that control's own click — no `preventDefault`,
+so the clicked control still performs its own action in the same gesture. Assign Folder now
+takes focus on its own container (`tabIndex=-1`, `focus({preventScroll:true})`) the moment it
+opens, matching Edit URL's explicit input focus, which makes Escape deterministic. Both utilities
+still share exactly one `closePicker()`. Toolbar Shortcuts no longer has a separate enable
+switch — it is structurally available whenever the Top Toolbar is revealed, and the user
+configures it through count and order alone; a stale `hotswap_top_shortcuts_enabled=false` left
+over from before this pass is now simply ignored rather than deleted or migrated.
+
+WHY: two sibling utilities behaving differently was invisible to the user until they happened to
+click in the "wrong" place, and dismissal must never require completing an action. The Top/Deep
+Cuts cutoff already expresses how much belongs directly on the Top Toolbar, so a second
+independent enable decision for Toolbar Shortcuts only duplicated a choice the user had already
+made elsewhere.
+
+## Part 1-5 Runway dice-cuddle breadcrumb
+
+WAS: Right Runway Shuffle All used a vertical pair, but ordinary color-emoji ink inside its glyph line boxes left visibly more spacing than the horizontal Top pair.
+
+IS: the existing two Runway-only spans form a compact upper-left to lower-right pair with a 2px line-box overlap, allowing the dice to slightly kiss while remaining distinct. Top, Deep Cuts, Settings, the 30x30 Runway hitbox, and the canonical `shuffleAll` action are unchanged.
+
+WHY: the same canonical action should read as the same tight paired icon adapted to the orientation of its surface.
+
 ## Part 1-4 canonical utility dock breadcrumb
 
 WAS: Edit URL and Assign Folder placement depended on invocation surface: Top opened below, while Runway and Deep Cuts opened leftward. Runway Shuffle All used the same horizontal glyph arrangement as Top.

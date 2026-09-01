@@ -330,6 +330,218 @@ test('Save Session As writes current layout to Preset 6 and leaves source untouc
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Part 1-6: Builder rehydration / data-loss fix.
+//
+// The human's exact scenario: Preset 5 active in the Builder, Launch Grid,
+// change the Runtime, Save Session As back into Preset 5, return to the
+// Builder. Before the fix the Builder kept rendering its stale pre-launch
+// rows, and the NEXT Builder edit mirrored those stale rows back over the
+// Preset, destroying the Runtime save. This drives the real UI end to end
+// across a real page navigation (not a direct function call), against a
+// mocked GitHub backend, so persistence genuinely round-trips like production.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('Builder rehydrates a stale Workspace projection instead of clobbering a Runtime save', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(8000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173|api\.github\.com).*/, (route) =>
+        route.fulfill({ status: 204, body: '' }));
+
+    const encode = (value) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
+    const decode = (base64) => JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+    const emptyPreset = (id) => ({
+        id, name: `Preset ${id}`, panels: [], folderMap: {}, lockState: {}, layout: null,
+        rowCount: 0, streamCount: 0, isEmpty: true, savedAt: null,
+    });
+    // The human's exact scenario: 4 rows, with a duplicate the Runtime edit
+    // collapses. The Grid Runtime session always resolves 4 slots regardless
+    // of layout — an unspecified slot is auto-filled with 'https://example.com'
+    // — so all 4 are supplied explicitly here to keep the session fully
+    // deterministic.
+    const X = [
+        '/test/fixtures/canary.html?id=A1', '/test/fixtures/canary.html?id=A1',
+        '/test/fixtures/canary.html?id=B1', '/test/fixtures/canary.html?id=C1',
+    ];
+    let remotePresets = [1, 2, 3, 4].map(emptyPreset).concat([{
+        id: 5, name: 'Preset 5', panels: X, folderMap: {}, lockState: {}, layout: null,
+        rowCount: X.length, streamCount: X.length, isEmpty: false, savedAt: '2026-01-01T00:00:00.000Z',
+    }]).concat([6, 7, 8, 9].map(emptyPreset));
+    let remoteSha = 'sha-0';
+
+    await page.route('https://api.github.com/**', async (route) => {
+        const req = route.request();
+        const pathname = new URL(req.url()).pathname;
+        if (!pathname.endsWith('/contents/presets.json')) {
+            await route.fulfill({ status: 404, body: '{}' });
+            return;
+        }
+        if (req.method() === 'PUT') {
+            remotePresets = decode(JSON.parse(req.postData()).content);
+            remoteSha = `sha-${Date.now()}`;
+            await route.fulfill({ json: { content: { sha: remoteSha } } });
+        } else {
+            await route.fulfill({ json: { sha: remoteSha, encoding: 'base64', content: encode(remotePresets) } });
+        }
+    });
+
+    await page.addInitScript(() => {
+        localStorage.setItem('git_sync_token', 'test-token');
+        localStorage.setItem('git_sync_repo', 'owner/repo');
+        localStorage.setItem('workspace_active_id', '5');
+    });
+
+    // 1. Builder boots directly into Preset 5 and shows its persisted content
+    //    (a fresh boot with nothing in Store yet also exercises the rehydrate
+    //    path, since an empty Store surface diverges from the Preset).
+    await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+    // The DOM renders 3 EMPTY rows immediately on boot, before presets.json
+    // has even been fetched — waiting on row count alone would race the
+    // rehydrate this test exists to prove. Wait on the actual values instead.
+    await page.waitForFunction((expected) =>
+        [...document.querySelectorAll('.url-grid-field')].map((i) => i.value).join('|') === expected.join('|'), X);
+    const rowsBefore = await page.locator('.url-grid-field').evaluateAll((inputs) => inputs.map((i) => i.value));
+    assert.deepEqual(rowsBefore, X, 'Builder shows the persisted Preset 5 content');
+
+    // 2. Edit a row and IMMEDIATELY Launch Grid, with no pause for the 1500ms
+    //    debounce — proving the pending preset mirror is flushed rather than
+    //    abandoned to a dying timer when the page navigates away.
+    const X0_EDITED = '/test/fixtures/canary.html?id=A2';
+    await page.locator('.url-grid-field').first().fill(X0_EDITED);
+    await Promise.all([
+        page.waitForURL(/index3\.html/),
+        page.click('#btn-launch-grid'),
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    const XFlushed = [X0_EDITED, X[1], X[2], X[3]];
+    const initialSessionUrls = await page.evaluate(async () => {
+        const { getSessionUrls } = await import('./js/grid-session.js');
+        return getSessionUrls();
+    });
+    assert.deepEqual(initialSessionUrls, XFlushed,
+        'the flushed edit reached the Preset before the Runtime read it, not just before navigation');
+
+    // 3. Change ONE panel in the Runtime — row 1, collapsing the duplicate.
+    // This is the human's exact scenario: [A2, A1, B1, C1] -> [A2, B1, B1, C1].
+    const Y = [X0_EDITED, X[2], X[2], X[3]];
+    await page.evaluate((newUrl) => {
+        const panel = document.querySelectorAll('.stream-panel')[1];
+        panel.querySelector('.btn-hotswap-toggle').click();
+        panel.querySelector('.hotswap-input').value = newUrl;
+        panel.querySelector('.hotswap-submit-btn').click();
+    }, Y[1]);
+    await page.waitForLoadState('networkidle');
+
+    // 4. Save Session As -> Preset 5, the SAME preset the Runtime came from.
+    await page.evaluate(() => document.getElementById('btn-master-save').click());
+    await Promise.all([
+        page.waitForResponse((res) =>
+            res.url().endsWith('/contents/presets.json') && res.request().method() === 'PUT'),
+        page.evaluate(() => {
+            const item = [...document.querySelectorAll('.save-session-item')]
+                .find((candidate) => candidate.textContent.includes('Preset 5'));
+            if (!item) throw new Error('Preset 5 was not listed by Save Session As');
+            item.click();
+        }),
+    ]);
+    assert.deepEqual(remotePresets.find((p) => p.id === 5).panels.map((p) => p.source ?? p), Y,
+        'the mocked remote actually received the Runtime save');
+
+    // 5. Return to the Builder via a FRESH full page load. Preset 5 is still
+    //    active — exactly the path that used to render stale rows and then
+    //    clobber the Runtime save on the next edit.
+    await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+    await page.waitForFunction((expected) =>
+        [...document.querySelectorAll('.url-grid-field')].map((i) => i.value).join('|') === expected.join('|'),
+        Y);
+    const rowsAfter = await page.locator('.url-grid-field').evaluateAll((inputs) => inputs.map((i) => i.value));
+    assert.deepEqual(rowsAfter, Y, 'Builder rehydrates to the Runtime save instead of staying stale');
+
+    // 6. The next Builder edit must land on TOP of the rehydrated content, not
+    //    clobber it with the stale pre-launch rows (the actual data-loss bug).
+    await page.locator('.url-grid-field').first().fill('/test/fixtures/canary.html?id=EDITED');
+    await page.waitForTimeout(1700); // past the 1500ms debounce
+    assert.deepEqual(remotePresets.find((p) => p.id === 5).panels.map((p) => p.source ?? p),
+        ['/test/fixtures/canary.html?id=EDITED', ...Y.slice(1)],
+        'the edit applies on top of the rehydrated content, not the stale pre-launch rows');
+
+    await page.close();
+});
+
+test('Builder rehydration respects isolation: no-save, Live Builder, and a different-preset save', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+
+    const result = await page.evaluate(async () => {
+        const { Store } = await import('./js/storage.js');
+        const { setPresetsStructure } = await import('./js/state.js');
+        const {
+            switchWorkspace, notifyWorkspaceEdited, rehydrateActiveWorkspaceIfStale,
+            flushPendingWorkspaceSync, clearUndoHistory, pushUndoSnapshot, canUndo,
+        } = await import('./js/workspace.js');
+        const { createEmptyPreset } = await import('./js/presets.js');
+
+        const out = {};
+
+        // ── No-save isolation: a Runtime change that was never saved must
+        // never appear in the Builder, and the Preset itself must stay X. ──
+        const presetA = { ...createEmptyPreset(1), panels: ['X0', 'X1'], isEmpty: false };
+        setPresetsStructure([presetA, createEmptyPreset(2)]);
+        switchWorkspace('1');
+        clearUndoHistory();
+        // Nothing ever calls notifyWorkspaceEdited for a Runtime change that
+        // was not saved — the Preset itself is simply never touched.
+        out.noSaveRehydrated = rehydrateActiveWorkspaceIfStale();
+        out.noSaveRows = Store.get('matrixUrls');
+
+        // ── Different-preset save: saving into Preset 2 must never disturb
+        // the still-active Preset 1. ──
+        Store.set('matrixUrls', ['Y0', 'Y1']);
+        notifyWorkspaceEdited(['Y0', 'Y1'], {}, {}); // pending mirror targets Preset 1
+        flushPendingWorkspaceSync(); // Preset 1 now persisted as Y0,Y1
+        switchWorkspace('2');
+        Store.set('matrixUrls', ['Z0']);
+        notifyWorkspaceEdited(['Z0'], {}, {}); // pending mirror targets Preset 2 instead
+        flushPendingWorkspaceSync(); // Preset 2 now persisted as Z0, Preset 1 untouched
+        switchWorkspace('1'); // return with Preset 1 still the target
+        out.preset1AfterOtherSave = Store.get('matrixUrls');
+
+        // ── Live Builder is never rehydrated, even if a preset changed. ──
+        switchWorkspace('live');
+        Store.set('matrixUrls', ['LIVE0', 'LIVE1']);
+        setPresetsStructure([{ ...presetA, panels: ['CHANGED-BY-SOMETHING-ELSE'] }, createEmptyPreset(2)]);
+        out.liveRehydrated = rehydrateActiveWorkspaceIfStale();
+        out.liveRows = Store.get('matrixUrls');
+
+        // ── No unnecessary rehydration: resuming twice with nothing changed
+        // must return false the second time and not clear undo history. ──
+        setPresetsStructure([{ ...createEmptyPreset(3), panels: ['P0', 'P1'] }, createEmptyPreset(2)]);
+        switchWorkspace('3');
+        clearUndoHistory();
+        pushUndoSnapshot();
+        out.firstRehydrate = rehydrateActiveWorkspaceIfStale(); // same content -> false
+        out.undoSurvivedFirst = canUndo();
+        out.secondRehydrate = rehydrateActiveWorkspaceIfStale();
+        out.undoSurvivedSecond = canUndo();
+
+        return out;
+    });
+
+    assert.equal(result.noSaveRehydrated, false, 'nothing changed the Preset, so nothing to rehydrate');
+    assert.deepEqual(result.noSaveRows, ['X0', 'X1'], 'Builder keeps showing the unsaved-but-never-diverged content');
+    assert.deepEqual(result.preset1AfterOtherSave, ['Y0', 'Y1'],
+        'saving into a DIFFERENT preset never disturbs the still-active one');
+    assert.equal(result.liveRehydrated, false, 'Live Builder is never rehydrated, no matter what a preset does');
+    assert.deepEqual(result.liveRows, ['LIVE0', 'LIVE1'], 'Live Builder surface is untouched');
+    assert.equal(result.firstRehydrate, false, 'nothing diverged, so the first resume is already a no-op');
+    assert.equal(result.undoSurvivedFirst, true);
+    assert.equal(result.secondRehydrate, false, 'resuming again with still nothing changed stays a no-op');
+    assert.equal(result.undoSurvivedSecond, true, 'undo history is not cleared for a no-op rehydrate');
+    await page.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fixed Positions, panel-scoped history, and Copy to Position.
 //
 // Every test below runs against the real Grid Runtime with three live
@@ -1699,20 +1911,28 @@ test('Settings drives all three collections and the runway-only opacity pair', a
     assert.equal(await page.evaluate(() =>
         getComputedStyle(document.getElementById('slot-count-row')).gridTemplateColumns.split(' ').length), 4);
 
-    // ON/OFF independent of count, for both collections.
+    // Runway: ON/OFF independent of count. Toolbar Shortcuts have no enable
+    // switch at all — they are structurally available whenever the toolbar is
+    // revealed, controlled only through count and order.
+    assert.equal(await page.locator('#top-shortcuts-enabled').count(), 0,
+        'Toolbar Shortcuts ON/OFF switch is gone');
     await setSwitch('quick-actions-enabled', true);
     await page.locator('#slot-count-row .btn-slot-count[data-count="6"]').click();
-    await setSwitch('top-shortcuts-enabled', true);
     await page.locator('#top-count-row .btn-slot-count[data-count="9"]').click();
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '6');
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_count')), '9');
     await setSwitch('quick-actions-enabled', false);
-    await setSwitch('top-shortcuts-enabled', false);
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_actions_enabled')), 'false');
-    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcuts_enabled')), 'false');
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '6',
         'switching a surface off keeps its configuration');
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_count')), '9');
+    // A stale stored "disabled" value from before this pass must be ignored.
+    await page.evaluate(() => localStorage.setItem('hotswap_top_shortcuts_enabled', 'false'));
+    await page.reload();
+    assert.equal(await page.locator('.hotswap-toggle-row', { has: page.locator('[data-key]') }).count() > 0, true);
+    assert.equal(await page.evaluate(() => document.getElementById('top-count-row')
+        .querySelector('.btn-slot-count.active')?.dataset.count), '9',
+        'Toolbar Shortcuts count/order still render normally despite the legacy disabled flag');
 
     // Exactly two opacity values, and they live in the RUNWAY card.
     await page.locator('#ghost-opacity-input').fill('0');
@@ -2283,8 +2503,8 @@ test('Shuffle All stays horizontal in Top and stacks vertically in the same Runw
             localStorage.setItem('hotswap_top_shortcut_count', '2');
             localStorage.setItem('hotswap_top_shortcut_order', JSON.stringify(['shuffleAll', 'star']));
             localStorage.setItem('hotswap_quick_actions_enabled', 'true');
-            localStorage.setItem('hotswap_quick_action_count', '1');
-            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['shuffleAll']));
+            localStorage.setItem('hotswap_quick_action_count', '2');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['shuffleAll', 'star']));
             localStorage.setItem('loop_matrix_urls', JSON.stringify([
                 '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
                 '/test/fixtures/canary.html?id=C',
@@ -2320,12 +2540,17 @@ test('Shuffle All stays horizontal in Top and stacks vertically in the same Runw
 
     const runwayIcon = await page.evaluate(() => {
         const button = document.querySelector('.hotswap-runway-btn[data-action-key="shuffleAll"]');
+        const neighbour = document.querySelector('.hotswap-runway-btn[data-action-key="star"]');
         const box = button.getBoundingClientRect();
         const dice = [...button.children].map((die) => die.getBoundingClientRect());
         return { width: Math.round(box.width), height: Math.round(box.height), dice: dice.length,
-            stacked: dice[1].top > dice[0].top, sameColumn: Math.abs(dice[1].left - dice[0].left) <= 1 };
+            diagonalX: Math.round(dice[1].left - dice[0].left),
+            visualGap: Math.round(dice[1].top - dice[0].bottom),
+            neighbourWidth: Math.round(neighbour.getBoundingClientRect().width),
+            neighbourGap: Math.round(neighbour.getBoundingClientRect().top - box.bottom) };
     });
-    assert.deepEqual(runwayIcon, { width: 30, height: 30, dice: 2, stacked: true, sameColumn: true });
+    assert.deepEqual(runwayIcon, { width: 30, height: 30, dice: 2,
+        diagonalX: 4, visualGap: -2, neighbourWidth: 30, neighbourGap: 6 });
 
     // Behavior is untouched: the icon is a mirror, and clicking it dispatches
     // to the ONE canonical Shuffle All button rather than reimplementing it.
@@ -2830,6 +3055,116 @@ test('Part 1-4 picker actions share one website-top-right dock and canonical cli
         src: window.__p14.src === document.querySelector('.stream-panel iframe').getAttribute('src'),
         loads: window.__p14.loads,
     })), { same: true, parent: true, src: true, loads: 0 });
+    await page.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Part 1-6B: utility dismissal consistency.
+//
+// WAS: the click-away boundary was `inChromeFamily` — the WHOLE Hotswap Chrome
+// family — so clicking the Top Toolbar, Position, or Deep Cuts left an open
+// utility open, and Assign Folder focused nothing so Escape only worked by
+// accident. IS: the boundary is the utility itself plus its invoking control;
+// any other GS3 Chrome closes it WITHOUT swallowing that control's own click,
+// and Assign Folder owns focus on its own container so Escape is deterministic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('an open utility is dismissed by ANY other GS3 control, without swallowing that control\'s own click', async () => {
+    const page = await bootCanaryGrid();
+    // Every Hotswap Chrome test in this file drives these controls via a raw
+    // DOM call rather than Playwright's locator .click() (CSS opacity/pointer-
+    // events transitions on this Chrome make its own actionability checks
+    // unreliable). A plain .click() alone only fires 'click', never
+    // 'pointerdown' — so the dismissal handler under test would never see it.
+    // This dispatches both, in order, matching a real user gesture.
+    const realClick = (selector) => page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        el.click();
+    }, selector);
+
+    // Edit URL open -> click Reload (a sibling Top Toolbar control). Before
+    // the fix, inChromeFamily treated the whole toolbar as "inside", so this
+    // left Edit URL open.
+    await revealChrome(page);
+    await realClick('.stream-panel .btn-hotswap-toggle');
+    await page.waitForFunction(() => document.querySelector('.hotswap-url-row').classList.contains('open'));
+    await realClick('.stream-panel .btn-hotswap-reload');
+    assert.deepEqual(await page.evaluate(() => ({
+        urlOpen: document.querySelector('.hotswap-url-row').classList.contains('open'),
+        reloadFired: document.querySelector('.btn-hotswap-reload').classList.contains('spinning'),
+    })), { urlOpen: false, reloadFired: true },
+        'clicking a sibling Top Toolbar control closes Edit URL AND still performs its own action, in the same gesture');
+
+    // Assign Folder open -> click the rail's own Position button. A
+    // structurally different Top Toolbar control, also outside the utility.
+    await revealChrome(page);
+    await realClick('.stream-panel .btn-hotswap-folder');
+    await page.waitForFunction(() => document.querySelector('.hotswap-folder-row').classList.contains('open'));
+    await realClick('.stream-panel .hotswap-position-btn');
+    assert.deepEqual(await page.evaluate(() => ({
+        folderOpen: document.querySelector('.hotswap-folder-row').classList.contains('open'),
+        positionMenuOpen: !document.querySelector('.hotswap-position-menu').hidden,
+    })), { folderOpen: false, positionMenuOpen: true },
+        'clicking the rail Position button closes Assign Folder AND still opens its own menu');
+    await page.keyboard.press('Escape'); // close the position menu we just opened
+
+    // Same-control toggle still closes cleanly in one click (not close, then
+    // re-open on the same gesture) — the anchor exception exists for this.
+    await revealChrome(page);
+    await realClick('.stream-panel .btn-hotswap-toggle');
+    await page.waitForFunction(() => document.querySelector('.hotswap-url-row').classList.contains('open'));
+    await realClick('.stream-panel .btn-hotswap-toggle');
+    assert.equal(await page.evaluate(() => document.querySelector('.hotswap-url-row').classList.contains('open')), false,
+        'clicking the SAME control that opened it still toggles closed exactly once');
+
+    // No preventDefault anywhere in the dismissal path — regression guard.
+    assert.equal(await page.evaluate(() => {
+        let prevented = null;
+        const probe = (e) => { prevented = e.defaultPrevented; };
+        document.addEventListener('pointerdown', probe, { capture: true });
+        document.querySelector('.stream-panel .hotswap-position-btn')
+            .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        document.removeEventListener('pointerdown', probe, { capture: true });
+        return prevented;
+    }), false, 'the dismissal pointerdown handler never calls preventDefault');
+
+    await page.close();
+});
+
+test('Assign Folder owns its own focus, so Escape closes it deterministically', async () => {
+    const page = await bootCanaryGrid();
+    await revealChrome(page);
+    await page.evaluate(() => {
+        const el = document.querySelector('.stream-panel .btn-hotswap-folder');
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        el.click();
+    });
+    await page.waitForFunction(() => document.querySelector('.hotswap-folder-row').classList.contains('open'));
+    // Focus is taken inside a requestAnimationFrame scheduled by the click
+    // handler, one tick after the 'open' class itself lands.
+    await page.waitForTimeout(50);
+
+    const beforeEscape = await page.evaluate(() => ({
+        panelOwnsFocus: document.querySelector('.stream-panel').contains(document.activeElement),
+        focusIsFolderRow: document.activeElement === document.querySelector('.hotswap-folder-row'),
+        scrollY: window.scrollY,
+        src: document.querySelector('.stream-panel iframe').getAttribute('data-last-src'),
+    }));
+    assert.equal(beforeEscape.panelOwnsFocus, true, 'focus lands inside the panel on open, matching Edit URL');
+    assert.equal(beforeEscape.focusIsFolderRow, true, 'the folder picker container itself owns focus');
+    assert.equal(beforeEscape.scrollY, 0, 'taking focus does not scroll the page');
+
+    // The direct regression test: before the fix, activeElement was BODY and
+    // Escape never reached the panel's keydown handler.
+    await page.keyboard.press('Escape');
+    const afterEscape = await page.evaluate(() => ({
+        folderOpen: document.querySelector('.hotswap-folder-row').classList.contains('open'),
+        src: document.querySelector('.stream-panel iframe').getAttribute('data-last-src'),
+    }));
+    assert.equal(afterEscape.folderOpen, false, 'Escape closes Assign Folder now that it owns its own focus');
+    assert.equal(afterEscape.src, beforeEscape.src, 'taking focus never auto-selects a folder or navigates the panel');
+
     await page.close();
 });
 

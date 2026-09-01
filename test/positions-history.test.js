@@ -945,9 +945,10 @@ test('Layer 2 is recognised only for our own runtime pages, same-origin', async 
 
 test('Top Shortcuts are their own collection, independent of the runway', async () => {
     const chrome = await freshChrome();
-    assert.equal(chrome.isTopShortcutsEnabled(), true, 'on by default — the rail is already summoned');
     assert.equal(chrome.MAX_TOP_SHORTCUTS, 10,
         'structural controls no longer consume configurable capacity');
+    assert.equal('isTopShortcutsEnabled' in chrome, false,
+        'no separate enable switch — the Top/Deep Cuts cutoff already expresses this');
 
     chrome.setTopShortcutOrder(['star', 'shuffle', 'reload']);
     chrome.setTopShortcutCount(2);
@@ -965,11 +966,12 @@ test('Top Shortcuts are their own collection, independent of the runway', async 
     assert.deepEqual(chrome.getActiveTopShortcuts(), ['reload', 'star']);
     assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo']);
 
-    chrome.setTopShortcutsEnabled(false);
-    assert.deepEqual(chrome.getActiveTopShortcuts(), []);
-    assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo'], 'the runway is unaffected');
-    chrome.setTopShortcutsEnabled(true);
-    assert.deepEqual(chrome.getActiveTopShortcuts(), ['reload', 'star'], 'configuration survived');
+    // A stale stored "disabled" value from before this pass must be ignored —
+    // Toolbar Shortcuts are structurally available whenever the toolbar is
+    // revealed, controlled only through count and order.
+    localStorage.setItem('hotswap_top_shortcuts_enabled', 'false');
+    assert.deepEqual(chrome.getActiveTopShortcuts(), ['reload', 'star'],
+        'a legacy disabled flag no longer suppresses Toolbar Shortcuts');
 
     chrome.setTopShortcutCount(99);
     assert.equal(chrome.getTopShortcutCount(), 10);

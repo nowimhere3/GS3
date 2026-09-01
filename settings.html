@@ -371,7 +371,7 @@
         /* No per-section compensation: a subsection's padding narrows its
            content box on the LEFT only, so its right edge already coincides
            with the surface's. The switches land on one axis by construction. */
-        #quick-actions-config.disabled, #top-shortcuts-config.disabled { opacity: 0.35; pointer-events: none; }
+        #quick-actions-config.disabled { opacity: 0.35; pointer-events: none; }
         .hotswap-toggle-row[draggable="true"] { cursor: grab; }
         .hotswap-toggle-row.dragging { opacity: 0.4; }
         .hotswap-toggle-row.outside-cutoff { opacity: 0.48; }
@@ -578,12 +578,8 @@
         <div class="hotswap-subsection">
         <div class="section-header hotswap-sub-header">
             <h4>Toolbar Shortcuts</h4>
-            <label class="switch">
-                <input type="checkbox" id="top-shortcuts-enabled">
-                <span class="slider"></span>
-            </label>
         </div>
-        <p class="subtitle">The configurable middle of the toolbar. Narrow panels show fewer; widening restores them. Your saved count and order never change to fit.</p>
+        <p class="subtitle">The configurable middle of the toolbar, available whenever the toolbar is revealed. Narrow panels show fewer; widening restores them. Your saved count and order never change to fit.</p>
         <div id="top-shortcuts-config">
             <div class="input-group">
                 <label>Number of Shortcuts</label>

@@ -16,7 +16,6 @@ import {
     getQuickActionCount, setQuickActionCount, isQuickActionRunwayEnabled,
     setQuickActionRunwayEnabled, getChromeOpacity, setChromeOpacity,
     getTopShortcutOrder, setTopShortcutOrder, getTopShortcutCount, setTopShortcutCount,
-    isTopShortcutsEnabled, setTopShortcutsEnabled,
 } from './hotswap-chrome.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -295,20 +294,21 @@ function _initHotswapControls() {
     }
 
     /**
-     * Wire one shortcut collection: an on/off switch, a 1-N count, and a
-     * drag-ordered list. Top Shortcuts and the Runway share this shape
-     * deliberately — two surfaces configured the same way, rather than each
-     * inventing its own grammar. They remain INDEPENDENT collections: the same
+     * Wire one shortcut collection: a 1-N count and a drag-ordered list, plus
+     * an optional on/off switch. The Runway carries a switch — the Top
+     * Toolbar does not: whether Toolbar Shortcuts exist at all is already
+     * expressed by the Top/Deep Cuts cutoff, so a second enable decision would
+     * only duplicate it. They remain INDEPENDENT collections: the same
      * canonical action may legitimately appear on both.
      */
     function _wireCollection({ enabledId, configId, countRowId, listId, echoId, withToggle = false,
                                isEnabled, setEnabled, getCount, setCount, getOrder, setOrder }) {
-        const enabledEl = document.getElementById(enabledId);
+        const enabledEl = enabledId && document.getElementById(enabledId);
         const configEl = document.getElementById(configId);
         const countRowEl = document.getElementById(countRowId);
         const listEl = document.getElementById(listId);
         const echoEl = echoId && document.getElementById(echoId);
-        if (!enabledEl || !configEl || !countRowEl || !listEl) return;
+        if (!configEl || !countRowEl || !listEl) return;
 
         const renderCount = () => {
             const count = getCount();
@@ -326,6 +326,7 @@ function _initHotswapControls() {
             });
         };
         const renderEnabled = () => {
+            if (!enabledEl) return;
             const on = isEnabled();
             enabledEl.checked = on;
             // Off means the surface does not exist. The configuration below is
@@ -333,7 +334,7 @@ function _initHotswapControls() {
             configEl.classList.toggle('disabled', !on);
         };
 
-        enabledEl.onchange = () => { setEnabled(enabledEl.checked); renderEnabled(); };
+        if (enabledEl) enabledEl.onchange = () => { setEnabled(enabledEl.checked); renderEnabled(); };
         countRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
             btn.onclick = () => { setCount(parseInt(btn.dataset.count, 10)); renderCount(); };
         });
@@ -343,9 +344,8 @@ function _initHotswapControls() {
     }
 
     _wireCollection({
-        enabledId: 'top-shortcuts-enabled', configId: 'top-shortcuts-config',
+        configId: 'top-shortcuts-config',
         countRowId: 'top-count-row', listId: 'top-order-list', echoId: 'top-count-echo',
-        isEnabled: isTopShortcutsEnabled, setEnabled: setTopShortcutsEnabled,
         getCount: getTopShortcutCount, setCount: setTopShortcutCount,
         getOrder: getTopShortcutOrder, setOrder: setTopShortcutOrder,
         withToggle: true,

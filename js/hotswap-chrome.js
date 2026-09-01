@@ -235,19 +235,13 @@ export function getActiveQuickActions() {
 }
 
 // ── Top Shortcuts ────────────────────────────────────────────────────────────
-// The horizontal collection that rides the toolbar itself. Same grammar as the
-// runway — enabled, a count, and an order — deliberately, so the two shortcut
-// surfaces are configured the same way rather than each inventing a shape.
-// They are INDEPENDENT collections: exposing the same canonical action on both
-// is presentation duplication, which is allowed, not behavior duplication.
-
-export function isTopShortcutsEnabled() {
-    return Store.get('topShortcutsEnabled') !== false;
-}
-
-export function setTopShortcutsEnabled(enabled) {
-    Store.set('topShortcutsEnabled', Boolean(enabled));
-}
+// The horizontal collection that rides the toolbar itself: a count and an
+// order, structurally available whenever the toolbar is revealed. Unlike the
+// runway, there is no separate enable switch — the Top/Deep Cuts cutoff
+// already expresses how much belongs directly on the rail, so a second on/off
+// decision would only duplicate it. They are INDEPENDENT collections from the
+// runway: exposing the same canonical action on both is presentation
+// duplication, which is allowed, not behavior duplication.
 
 export function getTopShortcutCount() {
     _migrateUnifiedOrderOnce();
@@ -275,7 +269,6 @@ export function getVisibleTopDeepActions(visibility = {}) {
 }
 
 export function getActiveTopShortcuts(visibility = {}) {
-    if (!isTopShortcutsEnabled()) return [];
     return getVisibleTopDeepActions(visibility).slice(0, getTopShortcutCount());
 }
 
