@@ -17,15 +17,29 @@
             if (depth >= 1) document.documentElement.classList.add('is-nested');
             if (depth === 1) document.documentElement.classList.add('layer-2');
 
-            // Ghost Mode — reads raw localStorage directly (the Store module
-            // isn't loaded yet at this point). Sets --ghost-opacity plus one
-            // class per target so each surface can opt in independently.
+            // Ghost Mode / Hotswap Chrome opacity — reads raw localStorage
+            // directly (the Store module isn't loaded yet at this point).
+            //
+            // BREADCRUMBS — WAS: one opacity value, with hover hardcoded to 1.
+            // IS: exactly TWO customer-facing values, RESTING and HOVER, shared
+            // by every Chrome surface.
+            // WHY: the top toolbar and the Quick Action runway are one control
+            // surface split across two edges, not two features. Giving each its
+            // own resting/hover pair would be four settings to keep in sync for
+            // a distinction the user never asked for. The resting key name is
+            // deliberately unchanged so existing preferences survive.
             try {
-                var opacityRaw = localStorage.getItem('hotswap_ghost_opacity');
-                var opacityPct = opacityRaw !== null ? parseFloat(opacityRaw) : 12;
-                if (isNaN(opacityPct)) opacityPct = 12;
-                opacityPct = Math.max(0, Math.min(100, opacityPct));
-                document.documentElement.style.setProperty('--ghost-opacity', opacityPct / 100);
+                var readPct = function (key, fallback) {
+                    var raw = localStorage.getItem(key);
+                    var pct = raw !== null ? parseFloat(raw) : fallback;
+                    if (isNaN(pct)) pct = fallback;
+                    return Math.max(0, Math.min(100, pct));
+                };
+                var restingPct = readPct('hotswap_ghost_opacity', 12);
+                var hoverPct = readPct('hotswap_hover_opacity', 100);
+                document.documentElement.style.setProperty('--ghost-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-resting-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-hover-opacity', hoverPct / 100);
 
                 var targetsRaw = localStorage.getItem('hotswap_ghost_targets');
                 var targets = targetsRaw ? JSON.parse(targetsRaw) : {};

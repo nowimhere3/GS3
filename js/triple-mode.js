@@ -11,7 +11,10 @@ import { initBlacklist } from './blacklist.js';
 import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { loadPresetsSilently, getPresets, getPresetSummary, saveWorkspaceToPreset } from './presets.js';
 import { populateBookmarkFolderSelect } from './folders.js';
-import { buildStreamPanel, updateRenderedPanel, updatePanelHistoryButtons, navigatePanelTo } from './launch.js';
+import {
+    buildStreamPanel, updateRenderedPanel, updatePanelHistoryButtons,
+    updatePanelToolbar, navigatePanelTo, LAYER_MESSAGE_SOURCE, LAYER_SCOPED_ACTIONS,
+} from './launch.js';
 import {
     initGridSession, updateGridSession, setGridSessionSilently, getSessionUrls,
     getSessionFolderMap, getSourceWorkspaceInfo, setSessionSource,
@@ -24,6 +27,7 @@ import {
 import {
     getLayoutSlotOrder, listPositions, resolvePositionOfSlot, resolveSlotAtPosition,
 } from './positions.js';
+import { isLayerTwoUrl, LAYER_1, LAYER_2 } from './hotswap-chrome.js';
 import {
     resetPanelNavigation, canNavigateBack, canNavigateForward,
     navigateBack, navigateForward,
@@ -397,13 +401,22 @@ function _moveSlotToPosition(slotIndex, position) {
  * shows the same Position number — which is the whole promise of the model:
  * "Position 1 is that place", not "Position 1 is wherever screen 1 went".
  */
+function _positionLabelFor(slotIndex) {
+    const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
+    return position === null ? '' : `Position ${position}`;
+}
+
 function _refreshPositionLabels() {
-    const arrangement = getSessionArrangement();
     SLOT_IDS.forEach((id, slotIndex) => {
-        const label = document.getElementById(id)?.querySelector('.slot-label');
-        if (!label) return;
-        const position = resolvePositionOfSlot(_currentLayout, arrangement, slotIndex);
-        label.textContent = position === null ? '' : `Position ${position}`;
+        const slot = document.getElementById(id);
+        if (!slot) return;
+        const text = _positionLabelFor(slotIndex);
+        const label = slot.querySelector('.slot-label');
+        if (label) label.textContent = text;
+        // The toolbar states the PHYSICAL Position it is sitting in. When two
+        // panels swap, Position 1 stays Position 1 and the panel under that
+        // label changes — so this is re-derived, never carried by the panel.
+        updatePanelToolbar(slot.querySelector('.stream-panel'), { positionLabel: text });
     });
 }
 
@@ -532,6 +545,7 @@ function _refreshHistoryButtons() {
     // Master Undo is Runtime-action-only and deliberately ignores browsing.
     const btn = document.getElementById('btn-master-undo');
     if (btn) btn.disabled = !canUndoGridSession();
+    _refreshMasterLayerSelector();
 
     SLOT_IDS.forEach((id, index) => {
         const panel = document.getElementById(id)?.querySelector('.stream-panel');
@@ -760,6 +774,76 @@ function _renderFolderDropup(folderDropupEl, ctx) {
     });
 }
 
+// ── Master layer scope ───────────────────────────────────────────────────────
+// BREADCRUMBS — WAS: a nested Grid moved its whole master cluster to the
+// opposite side of the screen so it would not sit under the outer session's.
+// IS: the master bar carries the same [L2][L1] selector as a panel's toolbar,
+// and stays exactly where it is.
+// WHY: identical reasoning to the panel toolbar, and deliberately the same
+// visual grammar so "which layer will this act on?" is answered the same way
+// everywhere. There is no separate Layer 2 master bar to keep in sync.
+let _masterLayerScope = LAYER_2;
+
+/** True when ANY panel in this session is hosting a Layer 2 runtime. */
+function _sessionHasLayerTwo() {
+    return getSessionUrls().some((url) => isLayerTwoUrl(url));
+}
+
+function _refreshMasterLayerSelector() {
+    const selector = document.getElementById('master-layer-selector');
+    if (!selector) return;
+    // Same rule as a panel's own selector: the scope is a preference and is
+    // never rewritten by Layer 2 merely being absent right now.
+    selector.hidden = !_sessionHasLayerTwo();
+    selector.querySelectorAll('.hotswap-layer-btn').forEach((button) => {
+        const isActive = button.dataset.layer === _masterLayerScope;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+    });
+}
+
+/**
+ * Hand a master action to every nested runtime instead of running it here.
+ * Master means "all panels" at Layer 1, so at Layer 2 it means "every nested
+ * runtime" — the same breadth, one layer down. Same-origin by construction.
+ * Returns true when the action was forwarded.
+ */
+function _dispatchMasterToLayerTwo(actionKey) {
+    if (_masterLayerScope !== LAYER_2 || !LAYER_SCOPED_ACTIONS.has(actionKey)) return false;
+    const targets = SLOT_IDS
+        .map((id) => document.getElementById(id)?.querySelector('.stream-panel iframe'))
+        .filter((iframe) => iframe && isLayerTwoUrl(iframe.getAttribute('data-last-src') || ''));
+    if (targets.length === 0) return false;
+    targets.forEach((iframe) => {
+        try {
+            iframe.contentWindow?.postMessage(
+                { source: LAYER_MESSAGE_SOURCE, action: actionKey }, window.location.origin);
+        } catch { /* a nested runtime that has gone away is simply skipped */ }
+    });
+    return true;
+}
+
+/**
+ * Receive an action forwarded from the runtime one layer OUT, and run it as if
+ * the user had pressed this session's own master control.
+ *
+ * BREADCRUMBS — WHY a message rather than reaching into the frame: even though
+ * Layer 2 is always same-origin (isLayerTwoUrl only matches our own executor
+ * pages), a message keeps the boundary explicit and one-directional, and is the
+ * same seam a future native/WebView host would speak. The origin is checked and
+ * the payload is a fixed action key from the canonical registry — never code,
+ * never a URL.
+ */
+function _installLayerScopeReceiver(handlers) {
+    window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) return;
+        const data = event.data;
+        if (!data || data.source !== LAYER_MESSAGE_SOURCE) return;
+        if (!LAYER_SCOPED_ACTIONS.has(data.action)) return;
+        handlers[data.action]?.();
+    });
+}
+
 /**
  * Build the 💾 Save Session As... dropup — one row per preset, each showing
  * enough context (rows/streams, or "Empty", plus when it was last saved) to
@@ -861,6 +945,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         openBookmarkModal: _openBookmarkModal,
         // Fixed Positions — the complete, stable Position list for this layout,
         // plus the two Position-targeting actions. See positions.js.
+        getPositionLabel: (slotIndex) => _positionLabelFor(slotIndex),
         getPositionOptions: (slotIndex) => _getPositionOptions(slotIndex),
         moveToPosition: (slotIndex, position) => _moveSlotToPosition(slotIndex, position),
         copyUrlToPosition: (slotIndex, position) => _copyUrlToPosition(slotIndex, position, ctx),
@@ -986,6 +1071,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🎲 Shuffle — reshuffle every panel independently, each from its OWN
     // currently-assigned folder (same folder it was launched with from index.html)
     shuffleBtn.onclick = () => {
+        if (_dispatchMasterToLayerTwo('shuffle')) return;
         const db = getDatabaseStructure();
         const set = _reshuffleOwnFolders(db);
         _renderPanels(set.urls, set.map, ctx);
@@ -994,6 +1080,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🎲🎲 Shuffle All — ignore every slot's assigned folder, pick a brand new
     // random folder + link for each one independently
     shuffleAllBtn.onclick = () => {
+        if (_dispatchMasterToLayerTwo('shuffleAll')) return;
         const db = getDatabaseStructure();
         _activeFolder = '';
         const set = _reshuffleRandomFolders(db);
@@ -1013,10 +1100,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     // change can never be undone twice.
     if (undoBtn) {
         undoBtn.onclick = () => {
+            if (_dispatchMasterToLayerTwo('undo')) return;
             _applyRestoredHistory(undoGridSession(), ctx);
         };
     }
     _refreshHistoryButtons();
+
+    // Layer scope: the selector appears only once a Layer 2 runtime exists.
+    document.querySelectorAll('#master-layer-selector .hotswap-layer-btn').forEach((button) => {
+        button.onclick = () => {
+            _masterLayerScope = button.dataset.layer === LAYER_1 ? LAYER_1 : LAYER_2;
+            _refreshMasterLayerSelector();
+        };
+    });
+    _refreshMasterLayerSelector();
+
+    // This session can itself be somebody's Layer 2.
+    _installLayerScopeReceiver({
+        shuffle: () => shuffleBtn.click(),
+        shuffleAll: () => shuffleAllBtn.click(),
+        undo: () => { _applyRestoredHistory(undoGridSession(), ctx); },
+        redo: () => { /* the Grid master bar has no Redo of its own */ },
+        reload: () => { window.location.reload(); },
+    });
 
     // 💾 Save Session As... — the ONLY way this session's changes ever reach
     // a real preset. Nothing else in this file writes to presets.json.

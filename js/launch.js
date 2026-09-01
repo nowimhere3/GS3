@@ -41,6 +41,10 @@ import { getDatabaseStructure, setDatabaseStructure, getDatabaseSha, setDatabase
 import { isBlacklisted, addToBlacklist } from './blacklist.js';
 import { pushDatabaseToRemote } from './sync.js';
 import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
+import {
+    getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
+    isLayerTwoUrl, LAYER_1, LAYER_2, CHROME_RETRACT_DELAY_MS,
+} from './hotswap-chrome.js';
 
 /**
  * Read a panel iframe's current URL, or null when the browsing context is
@@ -75,6 +79,7 @@ export function updateRenderedPanel(panel, { url, folder } = {}) {
         iframe.src = url;
         iframe.setAttribute('data-last-src', url);
         if (input) input.value = url;
+        refreshPanelLayerScope(panel); // this content may have created or removed Layer 2
     }
     if (folder !== undefined) iframe.setAttribute('data-source-folder', folder || '');
 }
@@ -99,8 +104,17 @@ export function navigatePanelTo(panel, url) {
 // than firing immediately — those stay tray-only, since a tiny always-visible
 // shortcut button isn't a good home for a full picker UI.
 export const HOTSWAP_ACTIONS = [
-    { key: 'position',   emoji: '📍',  title: 'Move to Position',                                     className: 'btn-hotswap-position',    shortcutable: false },
-    { key: 'copyPosition', emoji: '📋', title: "Copy this panel's URL to another Position",            className: 'btn-hotswap-copy-position', shortcutable: false },
+    // BREADCRUMBS — WAS: these were generic Deep Cuts entries, while
+    // [Position N] sat in the toolbar as an inert label.
+    // IS: `positionOwned` marks them as presented by the Position button, and
+    // they no longer render in the Deep Cuts tray or its Settings list.
+    // WHY: actions about a physical Position belong behind the control that
+    // NAMES that Position. Leaving duplicates in the tray would be clutter and
+    // would hide the relationship between Position identity and Position
+    // actions. The canonical implementations are untouched — only their
+    // redundant tray presentation is retired.
+    { key: 'position',   emoji: '📍',  title: 'Move to Position',                                     className: 'btn-hotswap-position',    shortcutable: false, positionOwned: true },
+    { key: 'copyPosition', emoji: '📋', title: "Copy this panel's URL to another Position",            className: 'btn-hotswap-copy-position', shortcutable: false, positionOwned: true },
     { key: 'folder',     emoji: '📁',  title: 'Assign a folder for this panel',                       className: 'btn-hotswap-folder',      shortcutable: false },
     { key: 'star',       emoji: '⭐',  title: 'Save to Playlist',                                     className: 'btn-hotswap-star',        shortcutable: true },
     { key: 'toggle',     emoji: '🌐',  title: 'Edit URL',                                             className: 'btn-hotswap-toggle',      shortcutable: false },
@@ -128,17 +142,92 @@ export const HOTSWAP_ACTIONS = [
  * against two panels at once), without the runtime needing to know this
  * module's class names.
  */
+/**
+ * The parent -> Layer 2 message contract. Only OUR OWN runtime executor pages
+ * are ever addressed (isLayerTwoUrl proves same-origin), and the message is
+ * posted with an explicit same-origin target, never '*'.
+ */
+export const LAYER_MESSAGE_SOURCE = 'gs3-layer-scope';
+
+/**
+ * Actions that mean something different when aimed at Layer 2, and can
+ * therefore be forwarded into the nested runtime.
+ *
+ * BREADCRUMBS — WHY this is a subset: the rest act on the CONTAINER — which URL
+ * this panel holds, which folder it draws from, where it sits, whether it still
+ * exists. Those have exactly one sensible target no matter which scope is
+ * selected, and forwarding them would be inventing a meaning ("copy to
+ * Position 3" inside a nested grid is not the same request). Being honest about
+ * which actions are scopable beats pretending every button changes meaning.
+ */
+export const LAYER_SCOPED_ACTIONS = new Set(['undo', 'redo', 'shuffle', 'shuffleAll', 'reload']);
+
+/**
+ * Refresh a rendered panel's toolbar identity strip: the fixed Position it
+ * currently occupies, and whether a Layer 2 selector applies.
+ *
+ * BREADCRUMBS — WHY the label is refreshed rather than owned: POSITION is a
+ * property of the physical slot, not of the panel. When two panels swap,
+ * Position 1 stays Position 1 and the panel occupying it changes — so the label
+ * has to be re-derived from the arrangement, while the controls beside it keep
+ * targeting the panel that is now there.
+ */
+export function updatePanelToolbar(panel, { positionLabel } = {}) {
+    if (!panel) return;
+    const labelEl = panel.querySelector('.hotswap-position-label');
+    if (labelEl && positionLabel !== undefined) labelEl.textContent = positionLabel || '';
+    refreshPanelLayerScope(panel);
+}
+
+/**
+ * Re-derive whether this panel currently offers a Layer 2 scope, and light the
+ * active one. Layer 2 comes and goes with the panel's CONTENT — loading a
+ * nested runtime creates it, replacing that content destroys it — so this is
+ * refreshed on every content change rather than decided once at build.
+ *
+ * BREADCRUMBS — WHY hidden when absent: with only one possible target there is
+ * no choice to present. A permanently-lit lone [L1] would be pure clutter, and
+ * worse, would imply a scope decision the user does not actually have.
+ */
+export function refreshPanelLayerScope(panel) {
+    if (!panel) return;
+    const selector = panel.querySelector('.hotswap-layer-selector');
+    const iframe = panel.querySelector('iframe');
+    if (!selector || !iframe) return;
+    const available = isLayerTwoUrl(iframe.getAttribute('data-last-src') || '');
+    selector.hidden = !available;
+    // `layerScope` is a PREFERENCE, not a live fact: it is never overwritten
+    // just because Layer 2 is currently absent. Forcing it to L1 while there is
+    // no Layer 2 would make the default silently stick at L1 the moment one
+    // appeared — the user would have to notice and correct it every time.
+    // Absence is handled where it matters instead: dispatch requires Layer 2 to
+    // actually exist, so an L2 preference with nothing nested simply acts here.
+    selector.querySelectorAll('.hotswap-layer-btn').forEach((button) => {
+        const isActive = button.dataset.layer === panel.dataset.layerScope;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+    });
+}
+
 export function updatePanelHistoryButtons(panel, { canUndo, canRedo } = {}) {
     if (!panel) return;
+    // BREADCRUMBS — WHY availability is scope-aware: local history describes
+    // THIS panel. When the controls are aimed at Layer 2 that history is not
+    // the thing being undone, and the nested runtime's own history is not
+    // visible from here — so disabling on local state would be a guess that
+    // hides a legitimate action. The forwarded request is always well-formed;
+    // the nested runtime decides what it can do with it.
+    const aimedAtLayerTwo = panel.dataset.layerScope === LAYER_2
+        && panel.querySelector('.hotswap-layer-selector')?.hidden === false;
     const set = (key, className, enabled) => {
         if (enabled === undefined) return;
         const trayBtn = panel.querySelector(`.${className}`);
         if (trayBtn) trayBtn.disabled = !enabled;
-        const mirror = panel.querySelector(`.hotswap-shortcut-btn[data-action-key="${key}"]`);
-        if (mirror) mirror.disabled = !enabled;
+        panel.querySelectorAll(`.hotswap-mirror-btn[data-action-key="${key}"]`)
+            .forEach((mirror) => { mirror.disabled = !enabled; });
     };
-    set('undo', 'btn-hotswap-undo', canUndo);
-    set('redo', 'btn-hotswap-redo', canRedo);
+    set('undo', 'btn-hotswap-undo', aimedAtLayerTwo ? true : canUndo);
+    set('redo', 'btn-hotswap-redo', aimedAtLayerTwo ? true : canRedo);
 }
 
 // ── Panel builder ─────────────────────────────────────────────────────────────
@@ -269,18 +358,256 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const folderRow      = overlay.querySelector('.hotswap-folder-row');
     const launchpadBtn   = overlay.querySelector('.btn-hotswap-launchpad');
 
-    // ── Overlay trigger (always-visible ··· button) ──────────────────────────
+    // ── Retractable top toolbar ──────────────────────────────────────────────
+    // BREADCRUMBS — WAS: an always-visible "···" trigger pinned to the panel's
+    // top-right corner, with the tray popping out beside it, permanently
+    // occupying territory an arbitrary website almost certainly wants.
+    // IS: a toolbar anchored immediately inside the panel's TOP boundary that
+    // is retracted to zero height at rest and, when revealed, INSETS the
+    // content — the iframe is pushed down rather than covered.
+    // WHY: the website should own essentially all panel real estate whenever
+    // GS3's controls are not in use. Overlaying the top strip would sit on the
+    // site's own header; permanently reserving the strip would shrink every
+    // site forever. Insetting only while revealed does neither. Revealing and
+    // retracting is a pure layout change on a container the iframe already
+    // lives in, so the document inside is never touched — see PART 18.
+    const toolbar = document.createElement('div');
+    toolbar.className = 'hotswap-toolbar';
+    toolbar.innerHTML = `
+        <button class="hotswap-position-btn" type="button"><span class="hotswap-position-label"></span> <span class="hotswap-caret">\u25be</span></button>
+        <div class="hotswap-layer-selector" hidden>
+            <button class="hotswap-layer-btn" data-layer="L2">L2</button>
+            <button class="hotswap-layer-btn" data-layer="L1">L1</button>
+        </div>
+        <div class="hotswap-top-shortcuts"></div>
+        <span class="hotswap-toolbar-spacer"></span>
+        <div class="hotswap-toolbar-actions"></div>
+    `;
+    const positionBtnEl = toolbar.querySelector('.hotswap-position-btn');
+    const positionLabelEl = toolbar.querySelector('.hotswap-position-label');
+    // BREADCRUMBS — the pop-under is a PANEL child, never a toolbar child. The
+    // rail is `overflow: hidden` so it can animate from zero height, which also
+    // clips anything hanging below it — that is exactly what made the Position
+    // button appear inert: the menu opened, fully clipped and un-hittable.
+    const positionMenuEl = document.createElement('div');
+    positionMenuEl.className = 'hotswap-position-menu';
+    positionMenuEl.hidden = true;
+    const layerSelectorEl = toolbar.querySelector('.hotswap-layer-selector');
+    const topShortcutsEl = toolbar.querySelector('.hotswap-top-shortcuts');
+    const toolbarActionsEl = toolbar.querySelector('.hotswap-toolbar-actions');
+
+    // BREADCRUMBS — WHY: the resize boundary and the Chrome activation region
+    // are deliberately SEPARATE hit targets. The true border keeps resize; this
+    // strip sits just inside it, clear of the resizer's own grab zone, so a
+    // given pixel always means exactly one thing. Sharing the target would make
+    // pointer intent ambiguous — a drag that sometimes opens a menu instead.
+    const activationEl = document.createElement('div');
+    activationEl.className = 'hotswap-activation';
+
     const triggerBtn = document.createElement('button');
     triggerBtn.className   = 'hotswap-trigger';
-    triggerBtn.textContent = '···';
-    triggerBtn.title       = 'Open controls';
+    triggerBtn.textContent = '\u00b7\u00b7\u00b7';
+    triggerBtn.title       = 'Deep Cuts';
+
+    // ── Chrome lifecycle ─────────────────────────────────────────────────────
+    // Everything the user could plausibly be reaching for is ONE interaction
+    // family. While pointer or focus is inside it, Chrome stays. When both
+    // leave, a short countdown retracts it — see CHROME_RETRACT_DELAY_MS.
+    const inChromeFamily = (node) => node instanceof Node
+        && (toolbar.contains(node) || overlay.contains(node)
+            || activationEl.contains(node) || positionMenuEl.contains(node));
+
+    let retractTimer = null;
+    const cancelRetract = () => { clearTimeout(retractTimer); retractTimer = null; };
+
+    /** Close the deepest open child, or report that there was none. */
+    const closeDeepestChild = () => {
+        const openChild = overlay.querySelector('.hotswap-position-row.open, .hotswap-copy-row.open, .hotswap-folder-row.open, .hotswap-url-row.open');
+        if (openChild) {
+            openChild.classList.remove('open');
+            overlay.querySelectorAll('.hotswap-icon-row .active').forEach((b) => b.classList.remove('active'));
+            return true;
+        }
+        if (!positionMenuEl.hidden) { closePositionMenu(); return true; }
+        if (overlay.classList.contains('open')) { closeDeepCuts(); return true; }
+        return false;
+    };
+
+    const setToolbarRevealed = (revealed) => {
+        panel.classList.toggle('chrome-revealed', revealed);
+        if (revealed) { cancelRetract(); layoutTopShortcuts(); return; }
+        closePositionMenu();
+        closeDeepCuts();
+    };
+
+    const scheduleRetract = () => {
+        cancelRetract();
+        retractTimer = setTimeout(() => {
+            retractTimer = null;
+            // Deliberately unconditional: an open tray must not be able to hold
+            // the website's height hostage once the user has walked away. While
+            // they are still IN the family every leave is cancelled above, so
+            // this only ever fires after they are genuinely done.
+            setToolbarRevealed(false);
+        }, CHROME_RETRACT_DELAY_MS);
+    };
+
+    const revealToolbar = () => { cancelRetract(); setToolbarRevealed(true); };
+
+    activationEl.addEventListener('pointerenter', revealToolbar);
+    [toolbar, overlay, positionMenuEl].forEach((surface) => {
+        surface.addEventListener('pointerenter', revealToolbar);
+        surface.addEventListener('pointerleave', (e) => {
+            if (!inChromeFamily(e.relatedTarget)) scheduleRetract();
+        });
+    });
+    // Keyboard users are part of the family too — focus keeps Chrome alive.
+    panel.addEventListener('focusin', (e) => { if (inChromeFamily(e.target)) revealToolbar(); });
+    panel.addEventListener('focusout', (e) => {
+        if (inChromeFamily(e.target) && !inChromeFamily(e.relatedTarget)) scheduleRetract();
+    });
+    // Leaving the panel entirely — including onto a cross-origin iframe, whose
+    // own events GS3 can never see — is the reliable signal that the user is
+    // back on the content.
+    panel.addEventListener('pointerleave', (e) => {
+        if (!inChromeFamily(e.relatedTarget)) scheduleRetract();
+    });
+    // Moving onto the content INSIDE this panel counts as leaving Chrome. The
+    // iframe swallows its own pointer events, so this is the last observable
+    // moment before the pointer disappears into content GS3 cannot watch.
+    iframe.addEventListener('pointerenter', scheduleRetract);
+
+    /**
+     * Fit the Top Shortcuts to the rail.
+     *
+     * BREADCRUMBS — WHY a priority rather than wrapping: a second row would
+     * double the height the toolbar steals from the website, and clipping
+     * mid-button looks broken. Survival order is Position button, layer
+     * selector, Undo, Redo, "...", and Top Shortcuts consume whatever is left —
+     * they are the only genuinely optional group, and Deep Cuts still reaches
+     * every one of them. Nothing is written back to preferences: a narrow panel
+     * renders fewer, and widening restores them automatically.
+     */
+    function layoutTopShortcuts() {
+        const shortcuts = [...topShortcutsEl.children];
+        if (shortcuts.length === 0) return;
+        const railWidth = toolbar.clientWidth;
+        if (railWidth === 0) return; // retracted; measured again on reveal
+        shortcuts.forEach((button) => { button.hidden = false; });
+        const reserved = positionBtnEl.offsetWidth
+            + (layerSelectorEl.hidden ? 0 : layerSelectorEl.offsetWidth)
+            + toolbarActionsEl.offsetWidth
+            + 40; // rail padding, gaps, and a little breathing room
+        const each = shortcuts[0].offsetWidth + 6;
+        const fits = Math.max(0, Math.floor((railWidth - reserved) / each));
+        shortcuts.forEach((button, i) => { button.hidden = i >= fits; });
+    }
+
+    // ── Deep Cuts ────────────────────────────────────────────────────────────
+    // BREADCRUMBS — WAS: the tray opened on "..." and stayed until the user
+    // hunted down the X.
+    // IS: X still closes it, and so does Escape, an observable outside click, or
+    // simply going back to the content.
+    // WHY: resuming work in the website already means "I am done with GS3".
+    // Making that require a second, precise click was friction with no purpose.
+    // X is kept as the explicit "close this now" affordance, not the only one.
+    function closeDeepCuts() {
+        overlay.classList.remove('open');
+        overlay.querySelectorAll('.open').forEach((row) => row.classList.remove('open'));
+        overlay.querySelectorAll('.hotswap-icon-row .active').forEach((b) => b.classList.remove('active'));
+        triggerBtn.classList.remove('open');
+        triggerBtn.textContent = '\u00b7\u00b7\u00b7';
+    }
 
     triggerBtn.onclick = (e) => {
         e.stopPropagation();
-        const isOpen = overlay.classList.toggle('open');
-        triggerBtn.classList.toggle('open', isOpen);
-        triggerBtn.textContent = isOpen ? '✕' : '···';
+        const willOpen = !overlay.classList.contains('open');
+        closePositionMenu();
+        if (willOpen) {
+            overlay.classList.add('open');
+            triggerBtn.classList.add('open');
+            triggerBtn.textContent = '\u2715';
+            revealToolbar();
+        } else {
+            closeDeepCuts();
+        }
     };
+
+    // ── Position button ──────────────────────────────────────────────────────
+    // BREADCRUMBS — WAS: "Position N" was an inert label, and the actions about
+    // this physical place lived deeper in the tray.
+    // IS: it is the button those actions hang from.
+    // WHY: the question "what should happen relative to THIS physical place?"
+    // is best answered behind the thing that names the place. It is deliberately
+    // not a general shortcut surface — only genuinely Position-owned actions
+    // belong here, or it becomes a second miscellaneous tray.
+    function closePositionMenu() {
+        positionMenuEl.hidden = true;
+        positionBtnEl.classList.remove('open');
+    }
+
+    function buildPositionMenu() {
+        positionMenuEl.innerHTML = '';
+        const group = (title, onPick) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'hotswap-position-group';
+            const heading = document.createElement('div');
+            heading.className = 'hotswap-position-group-title';
+            heading.textContent = title;
+            wrap.appendChild(heading);
+            ctx.getPositionOptions(index).forEach(({ position, isCurrent }) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'hotswap-position-item' + (isCurrent ? ' current' : '');
+                item.innerHTML = `<span>Position ${position}</span>`
+                    + (isCurrent ? '<span class="hotswap-position-note">current</span>' : '');
+                if (isCurrent) item.disabled = true;
+                else item.onclick = (ev) => { ev.stopPropagation(); onPick(position); closePositionMenu(); };
+                wrap.appendChild(item);
+            });
+            return wrap;
+        };
+        // The SAME canonical pathways the tray uses — no second swap engine, no
+        // second copy implementation, no second history stack.
+        if (typeof ctx.moveToPosition === 'function') {
+            positionMenuEl.appendChild(group('Swap Position', (position) => ctx.moveToPosition(index, position)));
+        }
+        if (typeof ctx.copyUrlToPosition === 'function') {
+            positionMenuEl.appendChild(group('Copy To Position', (position) => ctx.copyUrlToPosition(index, position)));
+        }
+    }
+
+    if (typeof ctx.getPositionOptions === 'function') {
+        positionBtnEl.onclick = (e) => {
+            e.stopPropagation();
+            if (!positionMenuEl.hidden) { closePositionMenu(); return; }
+            closeDeepCuts();
+            buildPositionMenu();          // clicking alone moves nothing
+            positionMenuEl.hidden = false;
+            positionBtnEl.classList.add('open');
+            revealToolbar();
+        };
+    } else {
+        positionBtnEl.disabled = true;
+        toolbar.querySelector('.hotswap-caret')?.remove();
+    }
+
+    // Escape unwinds UI depth, one level at a time. Presentation only — it
+    // never triggers a Runtime action.
+    panel.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (closeDeepestChild()) { e.stopPropagation(); return; }
+        if (panel.classList.contains('chrome-revealed')) { setToolbarRevealed(false); e.stopPropagation(); }
+    });
+
+    // Observable outside clicks dismiss too. This is a supplement, never the
+    // primary mechanism: a click inside a cross-origin iframe does not reach us.
+    document.addEventListener('pointerdown', (e) => {
+        if (!overlay.classList.contains('open') && positionMenuEl.hidden) return;
+        if (inChromeFamily(e.target)) return;
+        closeDeepCuts();
+        closePositionMenu();
+    });
 
     // ── Button handlers ───────────────────────────────────────────────────────
 
@@ -591,53 +918,162 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         setIframeUrl('index.html', '');
     };
 
-    // ── Overlay Button Visibility + Quick Action Shortcuts ────────────────────
-    // Hide any button the user turned off in Settings, and pull out whichever
-    // ones are assigned to a Quick Action slot (those move below ··· instead
-    // of living in the tray — never both).
-    const visibility = Store.get('hotswapButtonVisibility') || {};
-    const quickSlots = (Store.get('quickActionSlots') || []).filter(Boolean);
+    // ── Layer scope ──────────────────────────────────────────────────────────
+    // BREADCRUMBS — WAS: Layer 2 was expressed by MOVING controls to the
+    // opposite corner, so "which layer does this button act on?" had to be
+    // inferred from where the button happened to sit.
+    // IS: one control surface in one place, with an explicit, strongly
+    // highlighted [L2][L1] selector naming the target.
+    // WHY: placement was never a legible signal for scope — it was collision
+    // avoidance that users had to reverse-engineer. Stating the scope makes it
+    // unmistakable and lets both layers share one surface. The selector is
+    // HIDDEN ENTIRELY when no Layer 2 exists: with only one possible target
+    // there is no choice to present, and a lone permanently-lit [L1] would be
+    // pure clutter. Two scopes only — there is no Layer 3 in the product.
+    // Scope lives on the element rather than in this closure so ANY surface —
+    // including a later content change that creates or removes Layer 2 — can
+    // re-derive it without a handle on the panel's internals.
+    panel.dataset.layerScope = LAYER_2; // Layer 2, when it exists, is the default
+    layerSelectorEl.querySelectorAll('.hotswap-layer-btn').forEach((button) => {
+        button.onclick = (e) => {
+            e.stopPropagation();
+            panel.dataset.layerScope = button.dataset.layer === LAYER_1 ? LAYER_1 : LAYER_2;
+            refreshPanelLayerScope(panel);
+        };
+    });
 
-    // Actions this host page can't perform at all already hid their own button
-    // above. They must stay hidden regardless of what Settings says, and they
-    // must never be offered as a Quick Action here.
+    /**
+     * Forward an action into the nested runtime instead of acting on this
+     * panel. Same-origin by construction — isLayerTwoUrl() only ever matches
+     * our own executor pages — so the message is posted to our own origin and
+     * never to arbitrary third-party content.
+     * Returns true when the action was handed to Layer 2.
+     */
+    const dispatchToLayerTwo = (key) => {
+        if (panel.dataset.layerScope !== LAYER_2) return false;
+        if (!isLayerTwoUrl(iframe.getAttribute('data-last-src') || '')) return false;
+        if (!LAYER_SCOPED_ACTIONS.has(key)) return false; // see LAYER_SCOPED_ACTIONS
+        try {
+            iframe.contentWindow?.postMessage(
+                { source: LAYER_MESSAGE_SOURCE, action: key }, window.location.origin);
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    // ── Tray order, visibility, and the mirrored surfaces ─────────────────────
+    // BREADCRUMBS — WHY: the tray, the toolbar and the runway are three
+    // PRESENTATION collections over one canonical action registry. Only the
+    // tray button carries a handler; every other surface forwards its click to
+    // that same button. Ordering and membership therefore never fork the
+    // behavior — there is exactly one implementation of each action, and a
+    // surface can be reordered or removed without touching it.
+    const visibility = Store.get('hotswapButtonVisibility') || {};
+
+    // Actions this host page cannot perform at all already hid their own button
+    // above. They stay hidden regardless of Settings, and are never offered on
+    // any other surface.
     const unsupported = new Set();
     if (!positionsSupported) { unsupported.add('position'); unsupported.add('copyPosition'); }
     if (!historySupported)   { unsupported.add('undo'); unsupported.add('redo'); }
+    // Position-owned actions are reachable through [Position N] only.
+    HOTSWAP_ACTIONS.forEach((action) => { if (action.positionOwned) unsupported.add(action.key); });
 
-    HOTSWAP_ACTIONS.forEach(({ key, className }) => {
-        const btn = overlay.querySelector(`.${className}`);
-        if (!btn || unsupported.has(key)) return;
-        const isShortcut  = quickSlots.includes(key);
-        const trayVisible = visibility[key] !== false && !isShortcut;
-        btn.style.display = trayVisible ? '' : 'none';
+    // Render the tray in the user's configured order without re-creating any
+    // button: the nodes (and their handlers) are simply re-appended in place.
+    const iconRow = overlay.querySelector('.hotswap-icon-row');
+    getHotswapTrayOrder().forEach((key) => {
+        const action = HOTSWAP_ACTIONS.find((candidate) => candidate.key === key);
+        const button = action && overlay.querySelector(`.${action.className}`);
+        if (button) iconRow.appendChild(button);
     });
 
-    let shortcutRow = null;
-    const eligibleShortcuts = quickSlots.filter((key) =>
-        !unsupported.has(key) && HOTSWAP_ACTIONS.find((a) => a.key === key)?.shortcutable
-    );
-    if (eligibleShortcuts.length > 0) {
-        shortcutRow = document.createElement('div');
-        shortcutRow.className = 'hotswap-shortcut-row';
-        eligibleShortcuts.forEach((key) => {
-            const action = HOTSWAP_ACTIONS.find((a) => a.key === key);
-            const trayBtn = overlay.querySelector(`.${action.className}`);
-            if (!trayBtn) return;
-            const shortcutBtn = document.createElement('button');
-            shortcutBtn.className = 'hotswap-shortcut-btn';
-            // Lets updatePanelHistoryButtons() find and disable the ↩/↪ mirrors
-            // in lockstep with their tray buttons.
-            shortcutBtn.dataset.actionKey = key;
-            shortcutBtn.title = action.title;
-            shortcutBtn.textContent = action.emoji;
-            shortcutBtn.onclick = (e) => {
-                e.stopPropagation();
-                if (shortcutBtn.disabled) return;
-                trayBtn.click(); // reuses that action's exact existing handler
-            };
-            shortcutRow.appendChild(shortcutBtn);
+    /** Build a click-forwarding mirror of a tray button for another surface. */
+    const buildMirror = (key, className) => {
+        const action = HOTSWAP_ACTIONS.find((candidate) => candidate.key === key);
+        const trayBtn = action && overlay.querySelector(`.${action.className}`);
+        if (!trayBtn || unsupported.has(key)) return null;
+        const mirror = document.createElement('button');
+        mirror.className = className;
+        mirror.dataset.actionKey = key;
+        mirror.title = action.title;
+        mirror.textContent = action.emoji;
+        mirror.onclick = (e) => {
+            e.stopPropagation();
+            if (mirror.disabled) return;
+            trayBtn.click(); // the one canonical implementation of this action
+        };
+        return mirror;
+    };
+
+    HOTSWAP_ACTIONS.forEach(({ key, className, positionOwned }) => {
+        const btn = overlay.querySelector(`.${className}`);
+        if (!btn) return;
+        // Position-owned actions are retired from the tray's PRESENTATION —
+        // their implementations stay, reached through [Position N] instead.
+        if (positionOwned) { btn.style.display = 'none'; return; }
+        if (unsupported.has(key)) return; // already hid itself: this page can't do it
+        btn.style.display = visibility[key] === false ? 'none' : '';
+    });
+
+    // Layer scope is enforced ONCE, on the canonical tray button, so it applies
+    // no matter which surface invoked the action. Enforcing it on the mirrors
+    // instead would leave the tray — the button that actually carries the
+    // handler — silently ignoring the selected scope.
+    LAYER_SCOPED_ACTIONS.forEach((key) => {
+        const action = HOTSWAP_ACTIONS.find((candidate) => candidate.key === key);
+        const btn = action && overlay.querySelector(`.${action.className}`);
+        if (!btn || unsupported.has(key)) return;
+        const canonical = btn.onclick;
+        btn.onclick = (e) => {
+            if (dispatchToLayerTwo(key)) { e?.stopPropagation?.(); return; }
+            if (typeof canonical === 'function') canonical.call(btn, e);
+        };
+    });
+
+    // ── Top Shortcuts ────────────────────────────────────────────────────────
+    // BREADCRUMBS — WAS: common actions were disproportionately routed through
+    // the "..." tray, with one limited shortcut mechanism beside it.
+    // IS: three presentation surfaces — Top Shortcuts (frequent, while the rail
+    // is open), the Right Runway (fastest, straight over content), and Deep Cuts
+    // (the deeper toolbox) — all invoking the SAME canonical actions.
+    // WHY: different ergonomics deserve different surfaces; they do not deserve
+    // different implementations.
+    getActiveTopShortcuts().forEach((key) => {
+        const mirror = buildMirror(key, 'hotswap-mirror-btn hotswap-toolbar-btn hotswap-top-shortcut');
+        if (mirror) topShortcutsEl.appendChild(mirror);
+    });
+
+    // Undo/Redo stay directly visible whenever the rail is open — they are the
+    // two actions worth reaching without opening anything else.
+    ['undo', 'redo'].forEach((key) => {
+        const mirror = buildMirror(key, 'hotswap-mirror-btn hotswap-toolbar-btn');
+        if (mirror) toolbarActionsEl.appendChild(mirror);
+    });
+    toolbarActionsEl.appendChild(triggerBtn);
+
+    // ── Quick Action runway ──────────────────────────────────────────────────
+    // BREADCRUMBS — WHY: the runway stays an OVERLAY while the toolbar insets.
+    // Insetting from the right would change the iframe's WIDTH, and width is
+    // what triggers substantial responsive reflow on a real website; height
+    // changes are comparatively cheap. It also deliberately surrenders the
+    // top-right corner (see --shortcut-runway-top-offset): almost every site
+    // puts account/settings/notification controls there, and a GS3 hitbox
+    // across them — even a fully transparent one — would silently steal clicks.
+    let runwayEl = null;
+    const activeQuickActions = getActiveQuickActions().filter((key) => !unsupported.has(key));
+    if (activeQuickActions.length > 0) {
+        runwayEl = document.createElement('div');
+        runwayEl.className = 'hotswap-runway';
+        activeQuickActions.forEach((key) => {
+            const mirror = buildMirror(key, 'hotswap-mirror-btn hotswap-runway-btn');
+            if (mirror) runwayEl.appendChild(mirror);
         });
+        // The runway is exactly as long as it needs to be. A full-height strip
+        // would be an invisible wall down the side of every website.
+        runwayEl.style.setProperty('--runway-count', String(runwayEl.children.length));
+        if (runwayEl.children.length === 0) runwayEl = null;
     }
 
     // ── Viewport Director (postMessage play/pause) ────────────────────────────
@@ -650,10 +1086,27 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     viewportObserver.observe(panel);
 
     // ── Assemble ─────────────────────────────────────────────────────────────
+    // Order matters: the toolbar is a FLEX SIBLING placed before the iframe, so
+    // revealing it insets the content. Everything else is absolutely positioned
+    // and cannot affect the iframe's box.
+    panel.appendChild(activationEl);
+    panel.appendChild(toolbar);
+    panel.appendChild(positionMenuEl);
     panel.appendChild(iframe);
-    panel.appendChild(triggerBtn);
-    if (shortcutRow) panel.appendChild(shortcutRow);
+    if (runwayEl) panel.appendChild(runwayEl);
     panel.appendChild(overlay);
+
+    layoutTopShortcuts();
+    if (typeof ResizeObserver === 'function') {
+        // Re-measure whenever the panel changes width — a Position swap into a
+        // narrower slot, an orientation change, or a border drag.
+        new ResizeObserver(() => layoutTopShortcuts()).observe(panel);
+    }
+
+    refreshPanelLayerScope(panel);
+    if (typeof ctx.getPositionLabel === 'function') {
+        positionLabelEl.textContent = ctx.getPositionLabel(index) || '';
+    }
 
     // A freshly built panel starts with whatever history it actually has — a
     // panel rebuilt mid-session by a master Shuffle may well have some.

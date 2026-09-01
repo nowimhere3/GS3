@@ -70,6 +70,8 @@ touched:
 | `triple-mode.js` / `grid-session.js` | `positions.js` | `getLayoutSlotOrder`, `getPositionAreas`, `listPositions`, `resolvePositionOfSlot`, `resolveSlotAtPosition`, `IDENTITY_ARRANGEMENT`, `LAYOUT_POSITION_ORDER` |
 | `launch.js` | `triple-mode.js`'s `ctx` object | `ctx.onPanelContentChanged(index, url, folder)`, `ctx.onPanelRemoved(index)`, `ctx.pushUndoCheckpoint()`, `ctx.getPositionOptions(index)`, `ctx.moveToPosition(index, position)`, `ctx.copyUrlToPosition(index, position)`, `ctx.getPanelHistory(index)`, `ctx.undoPanel(index)`, `ctx.redoPanel(index)`. Each group is optional — a host page that omits it gets those buttons hidden |
 | `triple-mode.js` | `launch.js` | `buildStreamPanel`, `updateRenderedPanel`, `updatePanelHistoryButtons`, `navigatePanelTo`, `HOTSWAP_ACTIONS` |
+| `launch.js` / `settings.js` | `hotswap-chrome.js` | `getHotswapTrayOrder`, `setHotswapTrayOrder`, `getOrderedHotswapActions`, `getActiveQuickActions`, `getQuickActionOrder`, `setQuickActionOrder`, `getQuickActionCount`, `setQuickActionCount`, `isQuickActionRunwayEnabled`, `setQuickActionRunwayEnabled`, `getChromeOpacity`, `setChromeOpacity`, `isLayerTwoUrl`, `LAYER_1`, `LAYER_2`, `MAX_QUICK_ACTIONS` |
+| `triple-mode.js` | `launch.js` (Chrome) | `updatePanelToolbar`, `refreshPanelLayerScope`, `LAYER_MESSAGE_SOURCE`, `LAYER_SCOPED_ACTIONS` |
 | `launch.js` / `triple-mode.js` | `panel-navigation.js` | `beginPanelContent`, `notePanelLoad`, `canNavigateBack`, `canNavigateForward`, `navigateBack`, `navigateForward`, `resetPanelNavigation`, `getPanelNavigationState` |
 | `grid-session.js` / `workspace.js` | `presets.js` | `getPresetById`, `getPresetPanels`, `saveWorkspaceToPreset`, `getPresets`, `getPresetSummary` |
 | `presets.js` / `state.js` | `panels.js` | `normalizePanelsArray`, `isEmptyPanel`, `getUrlPanelSource` |
@@ -521,6 +523,88 @@ reported symptom.
 any origin; a hash change, an SPA `pushState`, and a nested-iframe load are **not** observed at
 all. A cross-origin SPA is therefore invisible in both directions, and Undo correctly falls
 through for it.
+
+### 4.18 ★ Hotswap Chrome
+The retractable toolbar, the right runway, and layer scope. Assert:
+- **Inset, not overlay** — retracted, `toolbarHeight === 0` and the iframe gets the full panel;
+  revealed, `iframeTop === toolbarHeight`; retracted again, full panel restored. Through the
+  whole cycle: zero loads, same nodes/parents/documents, `src` untouched. Revealing Chrome is
+  a layout change on the iframe's existing parent, so it must never touch the document.
+- **Separate hit targets** — `elementFromPoint` at the border resolves to the resizer, inside
+  the panel to the activation strip, and in the content to the iframe. The activation strip
+  starts clear of the resizer's ±4px grab zone, so no pixel is ambiguous.
+- **Safe zone** — the runway's top offset is authored as `calc(toolbar * 2.5)` and resolves to
+  it; `elementFromPoint` at the panel's top-right returns the **iframe**, not a GS3 hitbox; the
+  iframe's width is unchanged (the runway overlays — insetting sideways is what reflows sites).
+- **Runway length** — the interactive area matches the configured count; OFF renders no runway
+  element at all, and the count survives being switched off.
+- **Layer selector** — absent (panel and master) with only L1; appears when a panel loads one
+  of our own runtime pages; L2 lit by default; switching retargets with no reload; disappears
+  when the nested runtime is replaced. The scope is a *preference* and is not overwritten while
+  Layer 2 is absent — otherwise the default silently sticks at L1.
+- **Position labels** — after a swap, Position 1 is still Position 1 and the panel under it
+  changed; each toolbar states the physical place it is actually in. Zero loads.
+- **Settings** — 1-8 in a 4-column grid; ON/OFF independent of count; both lists drag-enabled;
+  exactly two opacity range inputs, both persisted, 0 and 100 usable.
+- **Ordering** — the runway and tray each render in their own configured order, and an action
+  in the runway is still present in the tray (they are independent presentation collections).
+- **Small panels** — 8 shortcuts stay configured and stay inside the panel box; the tray remains
+  the complete fallback. Configuration is never silently deleted to fit.
+
+Unit coverage (`positions-history.test.js`) pins the preference model: order reconciliation
+against the registry, on/off vs count independence, the 1-8 clamp, uniqueness by construction,
+legacy `quickActionSlots` migration (without deleting the legacy key), the two opacity values,
+and that `isLayerTwoUrl` matches only our own same-origin runtime pages.
+
+**Harness note:** the styled `.switch` hides its real checkbox, so Playwright's `check()` times
+out on it — set `.checked` and dispatch `change` instead. And a CSS custom property holds the
+literal `calc(...)` text, not a resolved number, so assert on measured geometry.
+
+### 4.19 ★ Chrome lifecycle and the three surfaces
+- **Autonomous retraction** — reveal, then leave the whole interaction family: Chrome must
+  retract *by itself* within the configured delay (850ms), with **no other panel touched**.
+  Returning before it expires cancels it. Moving between family members (toolbar → tray) is
+  not leaving. Focus inside the family holds it open. An open tray must **not** hold the
+  website's height hostage once the user has genuinely walked away.
+- **Deep Cuts dismissal** — inside clicks keep it open; an observable outside click, Escape,
+  or X all close it. Escape unwinds one level at a time (submenu → tray → retract) and never
+  triggers a Runtime action. Correctness must not depend on cross-origin iframe clicks
+  bubbling, because they never do — the countdown is the primary mechanism.
+- **Position button** — clicking it opens a menu and moves *nothing*; the menu offers exactly
+  Swap Position and Copy To Position; picking one goes through the canonical atomic pathway
+  (`history.at(-1)` is a `position` action with `atomic: true`); zero reloads throughout. A
+  completed Swap or Copy closes the menu; Escape and an observable outside pointerdown close
+  it; it holds the toolbar open while up, then retracts with it.
+  **Assert the menu is actually on screen** — parented outside the rail, below it, and
+  returned by `elementFromPoint`. A test that only checked its text content passed for an
+  entire pass while the menu was being clipped away by the rail's `overflow: hidden`.
+- **Deep Cuts retirement** — `position` and `copyPosition` no longer render in the tray or
+  appear in its Settings list, every other action still does, and both remain reachable
+  through the Position button. Read only *visible* tray buttons: hidden ones keep their markup
+  position and are not part of the presented order.
+- **Shuffle All icon** — `white-space: nowrap`, no wrapping, the button is wider than it is
+  tall (side-by-side, not stacked), it fits the rail, and the rail is still 30px. Behavior is
+  proven by counting clicks on the canonical `.btn-hotswap-shuffle-all`, not by driving a real
+  shuffle: `loadReplacement` closes over the database captured at panel-build time.
+- **Top Shortcuts** — render in configured order; drop from the **end** on a narrow rail while
+  Position / Undo / Redo / "···" always survive; the stored count is never rewritten to fit;
+  widening restores them; clicking one reuses the canonical action.
+- **Opacity scope** — with Resting 0%, the toolbar computes `opacity: 1` and the runway `0`.
+  A fully transparent runway still leaves the site's top-right and lower-right to the iframe.
+- **Compact rail** — every control is the same height and sits fully inside the rail. This
+  guards the specific regression: `.hotswap-trigger` kept `position:absolute; top:16px` from
+  the corner era, which inside a flex rail pushed it 16px below the toolbar.
+
+**Waiting on a restore:** `data-last-src` is set SYNCHRONOUSLY by
+`updateRenderedPanel`, so waiting on it alone returns before the iframe's `load` event has
+fired. Any assertion about load COUNTS must additionally wait for that panel's pending GS3
+load to land (`__navState(slot).pendingLoads === 0`). This was a real intermittent failure in
+the Master-Shuffle partial-undo test — `loads.C2` read 0 instead of 1 roughly one run in eight.
+
+**Harness notes:** a narrow *viewport* is not a narrow *panel* — index3.html stacks its layout
+below a breakpoint, which makes each panel wider; drive the panel narrow instead. And an action
+configured as a Top Shortcut also matches `.hotswap-mirror-btn[data-action-key=…]`, so scope
+survival checks to `.hotswap-toolbar-actions`.
 
 ---
 

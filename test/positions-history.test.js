@@ -792,3 +792,163 @@ test('a fresh session starts with an empty history', async () => {
     assert.ok(!session.canUndoGridSession());
     assert.ok(!session.canRedoPanelHistory(0));
 });
+
+// ── Hotswap Chrome preferences ───────────────────────────────────────────────
+// Ordering, the runway's on/off + count, and the two opacity values. The
+// rendered behavior is proven in boot-smoke.test.js; this pins the model.
+
+async function freshChrome(seed = {}) {
+    globalThis.localStorage = makeStorage();
+    globalThis.window = { location: { search: '', href: 'https://host.test/index3.html', origin: 'https://host.test' } };
+    globalThis.URL = URL;
+    Object.entries(seed).forEach(([key, value]) => localStorage.setItem(key, value));
+    const chrome = await import('../js/hotswap-chrome.js');
+    const { Store } = await import('../js/storage.js');
+    ['hotswapTrayOrder', 'quickActionSlots', 'quickActionsEnabled', 'quickActionCount',
+        'quickActionOrder', 'ghostOpacity', 'hotswapHoverOpacity'].forEach((key) => Store.invalidate(key));
+    return chrome;
+}
+
+test('tray order reconciles against the canonical registry, never forking it', async () => {
+    const chrome = await freshChrome();
+    const { HOTSWAP_ACTIONS } = await import('../js/launch.js');
+    // Position-owned actions are presented by the [Position N] button, so the
+    // tray — and its Settings list — deliberately do not offer them.
+    const everyKey = HOTSWAP_ACTIONS.filter((a) => !a.positionOwned).map((action) => action.key);
+    assert.ok(HOTSWAP_ACTIONS.some((a) => a.positionOwned), 'the registry still defines them');
+    assert.ok(!everyKey.includes('position') && !everyKey.includes('copyPosition'));
+
+    assert.deepEqual(chrome.getHotswapTrayOrder(), everyKey, 'an unset order is registry order');
+
+    // A stored order that is stale in both directions: it names an action that
+    // no longer exists and omits ones that were added since.
+    chrome.setHotswapTrayOrder(['redo', 'ghost-action-that-was-removed', 'undo']);
+    const order = chrome.getHotswapTrayOrder();
+    assert.deepEqual(order.slice(0, 2), ['redo', 'undo'], 'the stored preference is honoured');
+    assert.equal(order.length, everyKey.length, 'and every real action still appears exactly once');
+    assert.deepEqual([...new Set(order)].sort(), [...everyKey].sort());
+    assert.deepEqual(chrome.getOrderedHotswapActions().map((action) => action.key), order);
+});
+
+test('the runway on/off is independent of its count', async () => {
+    const chrome = await freshChrome();
+    assert.equal(chrome.isQuickActionRunwayEnabled(), false, 'off by default');
+    assert.deepEqual(chrome.getActiveQuickActions(), [], 'off means no runway at all');
+
+    chrome.setQuickActionCount(6);
+    chrome.setQuickActionOrder(['undo', 'redo', 'star']);
+    assert.deepEqual(chrome.getActiveQuickActions(), [], 'still nothing while off');
+
+    chrome.setQuickActionRunwayEnabled(true);
+    assert.equal(chrome.getActiveQuickActions().length, 6);
+    assert.deepEqual(chrome.getActiveQuickActions().slice(0, 3), ['undo', 'redo', 'star']);
+
+    // Switching off and on again must not have destroyed the configuration —
+    // this is the whole reason count and enablement are separate.
+    chrome.setQuickActionRunwayEnabled(false);
+    chrome.setQuickActionRunwayEnabled(true);
+    assert.equal(chrome.getQuickActionCount(), 6);
+    assert.deepEqual(chrome.getActiveQuickActions().slice(0, 3), ['undo', 'redo', 'star']);
+});
+
+test('the runway count is clamped to 1-8', async () => {
+    const chrome = await freshChrome();
+    chrome.setQuickActionRunwayEnabled(true);
+    chrome.setQuickActionCount(99);
+    assert.equal(chrome.getQuickActionCount(), chrome.MAX_QUICK_ACTIONS);
+    assert.equal(chrome.MAX_QUICK_ACTIONS, 8);
+    chrome.setQuickActionCount(0);
+    assert.equal(chrome.getQuickActionCount(), 1, 'zero is no longer a way to express "off"');
+    chrome.setQuickActionCount(8);
+    assert.equal(chrome.getActiveQuickActions().length, 8);
+});
+
+test('runway assignments are unique by construction', async () => {
+    const chrome = await freshChrome();
+    chrome.setQuickActionRunwayEnabled(true);
+    chrome.setQuickActionCount(8);
+    chrome.setQuickActionOrder(['undo', 'undo', 'redo', 'undo']);
+    const active = chrome.getActiveQuickActions();
+    assert.deepEqual(active.slice(0, 2), ['undo', 'redo'], 'duplicates collapse');
+    assert.equal(new Set(active).size, active.length, 'no action can occupy two runway slots');
+});
+
+test('legacy Quick Action slots migrate once, without destroying the old key', async () => {
+    const chrome = await freshChrome({ hotswap_quick_action_slots: JSON.stringify(['star', '', 'reload']) });
+    assert.equal(chrome.isQuickActionRunwayEnabled(), true, 'a configured legacy user keeps their runway');
+    assert.equal(chrome.getQuickActionCount(), 2, 'empty legacy slots are not counted');
+    assert.deepEqual(chrome.getActiveQuickActions(), ['star', 'reload']);
+    assert.ok(localStorage.getItem('hotswap_quick_action_slots'), 'the legacy key is left in place');
+
+    // A legacy user who had the feature off (all slots empty) stays off.
+    const off = await freshChrome({ hotswap_quick_action_slots: JSON.stringify(['', '', '']) });
+    assert.equal(off.isQuickActionRunwayEnabled(), false);
+});
+
+test('exactly two opacity preferences, clamped and persisted', async () => {
+    const chrome = await freshChrome();
+    assert.deepEqual(chrome.getChromeOpacity(), { resting: 12, hover: 100 });
+
+    chrome.setChromeOpacity({ resting: 0 });
+    chrome.setChromeOpacity({ hover: 100 });
+    assert.deepEqual(chrome.getChromeOpacity(), { resting: 0, hover: 100 }, 'boundaries are usable');
+    // The resting key is deliberately the pre-existing one, so an upgrading
+    // user keeps the value they already chose.
+    assert.equal(localStorage.getItem('hotswap_ghost_opacity'), '0');
+
+    chrome.setChromeOpacity({ resting: 140, hover: -20 });
+    assert.deepEqual(chrome.getChromeOpacity(), { resting: 100, hover: 0 });
+});
+
+test('Layer 2 is recognised only for our own runtime pages, same-origin', async () => {
+    const chrome = await freshChrome();
+    assert.equal(chrome.isLayerTwoUrl('index3.html'), true);
+    assert.equal(chrome.isLayerTwoUrl('https://host.test/index.html'), true);
+    assert.equal(chrome.isLayerTwoUrl('/index2.html?workspace=2'), true);
+
+    assert.equal(chrome.isLayerTwoUrl('https://example.com/index3.html'), false,
+        'a third-party page that merely shares a filename is not our runtime');
+    assert.equal(chrome.isLayerTwoUrl('https://host.test/other.html'), false);
+    assert.equal(chrome.isLayerTwoUrl(''), false);
+    assert.equal(chrome.isLayerTwoUrl(null), false);
+    assert.equal(chrome.isLayerTwoUrl('not a url at all'), false, 'never throws on junk');
+});
+
+test('Top Shortcuts are their own collection, independent of the runway', async () => {
+    const chrome = await freshChrome();
+    assert.equal(chrome.isTopShortcutsEnabled(), true, 'on by default — the rail is already summoned');
+    assert.equal(chrome.MAX_TOP_SHORTCUTS, 6, 'a lower ceiling than the runway: it shares the rail');
+
+    chrome.setTopShortcutOrder(['star', 'shuffle', 'reload']);
+    chrome.setTopShortcutCount(2);
+    chrome.setQuickActionRunwayEnabled(true);
+    chrome.setQuickActionOrder(['undo', 'redo']);
+    chrome.setQuickActionCount(2);
+
+    assert.deepEqual(chrome.getActiveTopShortcuts(), ['star', 'shuffle']);
+    assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo'],
+        'the two collections do not influence each other');
+
+    // Deliberately exposing the same action on both is presentation
+    // duplication, which is allowed — behavior is still one implementation.
+    chrome.setTopShortcutOrder(['undo', 'star']);
+    assert.deepEqual(chrome.getActiveTopShortcuts(), ['undo', 'star']);
+    assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo']);
+
+    chrome.setTopShortcutsEnabled(false);
+    assert.deepEqual(chrome.getActiveTopShortcuts(), []);
+    assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo'], 'the runway is unaffected');
+    chrome.setTopShortcutsEnabled(true);
+    assert.deepEqual(chrome.getActiveTopShortcuts(), ['undo', 'star'], 'configuration survived');
+
+    chrome.setTopShortcutCount(99);
+    assert.equal(chrome.getTopShortcutCount(), 6);
+    chrome.setTopShortcutCount(0);
+    assert.equal(chrome.getTopShortcutCount(), 1, 'zero is not a way to express "off" here either');
+});
+
+test('the retract delay is forgiving but prompt', async () => {
+    const chrome = await freshChrome();
+    assert.ok(chrome.CHROME_RETRACT_DELAY_MS >= 750 && chrome.CHROME_RETRACT_DELAY_MS <= 1000,
+        `${chrome.CHROME_RETRACT_DELAY_MS}ms is within the intended window`);
+});

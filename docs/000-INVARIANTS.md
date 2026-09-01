@@ -240,6 +240,49 @@ must not silently fall through to an older, unrelated action.
 
 ---
 
+# Panel Real Estate
+
+The website owns essentially all panel real estate
+whenever GS3's controls are not in use.
+
+GS3 keeps the panel border and the sliver immediately inside it.
+
+Chrome must not permanently occupy a panel corner:
+an arbitrary website already uses its own.
+
+Revealing Chrome may temporarily inset content.
+
+Chrome retracts itself once the customer stops using it.
+
+It must never depend on an unrelated interaction
+elsewhere in the Runtime to close.
+
+It must never permanently reserve space,
+and must never overlay a website's own corner controls
+with an invisible hitbox.
+
+Resize and Chrome activation are separate hit targets.
+
+A given pixel means exactly one thing.
+
+---
+
+# Chrome Is Presentation
+
+Revealing, retracting, ghosting or reordering Chrome
+is presentation only.
+
+It must never recreate, replace, reparent, re-src or reload an iframe,
+and never creates an Undo checkpoint.
+
+Chrome surfaces are ordered VIEWS over one canonical action registry.
+
+Ordering and membership never fork behavior.
+
+See docs/011-HOTSWAP-CHROME.md.
+
+---
+
 # Surgical Restoration
 
 History restoration is surgical.

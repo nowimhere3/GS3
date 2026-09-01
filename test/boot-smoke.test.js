@@ -405,13 +405,18 @@ function readPositionMap(page) {
 }
 
 /** Drive the real 📍 Move to Position control on the panel showing `canaryId`. */
+/** Drive the real [Position N] pop-under, the only customer-facing path. */
 function moveCanaryToPosition(page, canaryId, position) {
     return page.evaluate(([id, target]) => {
         const panel = [...document.querySelectorAll('.stream-panel')].find((candidate) =>
             (candidate.querySelector('iframe')?.getAttribute('data-last-src') || '').endsWith(`id=${id}`));
         if (!panel) throw new Error(`no panel is showing canary ${id}`);
-        panel.querySelector('.btn-hotswap-position').click();
-        const item = [...panel.querySelectorAll('.hotswap-position-row .hotswap-position-item:not(.current)')]
+        panel.classList.add('chrome-revealed');
+        panel.querySelector('.hotswap-position-btn').click();
+        const group = [...panel.querySelectorAll('.hotswap-position-group')]
+            .find((candidate) => candidate.querySelector('.hotswap-position-group-title')
+                .textContent === 'Swap Position');
+        const item = [...group.querySelectorAll('.hotswap-position-item:not(.current)')]
             .find((candidate) => candidate.textContent.trim().startsWith(`Position ${target}`));
         if (!item) throw new Error(`Position ${target} was not offered to canary ${id}`);
         item.click();
@@ -457,8 +462,10 @@ test('Move to Position always lands media in the physical Position, whatever the
     const offered = await page.evaluate(() => {
         const panel = [...document.querySelectorAll('.stream-panel')].find((candidate) =>
             (candidate.querySelector('iframe')?.getAttribute('data-last-src') || '').endsWith('id=B'));
-        panel.querySelector('.btn-hotswap-position').click();
-        return [...panel.querySelectorAll('.hotswap-position-item')].map((item) => ({
+        panel.classList.add('chrome-revealed');
+        panel.querySelector('.hotswap-position-btn').click();
+        const group = [...panel.querySelectorAll('.hotswap-position-group')][0];
+        return [...group.querySelectorAll('.hotswap-position-item')].map((item) => ({
             text: item.textContent.trim(), current: item.classList.contains('current'),
         }));
     });
@@ -688,13 +695,15 @@ test('a stale panel Redo cannot overwrite newer state on that panel', async () =
     await page.close();
 });
 
-test('Quick Action mirrors of ↩/↪ track real availability instead of sitting there dead', async () => {
+test('Quick Action runway mirrors track real availability instead of sitting there dead', async () => {
     const page = await browser.newPage();
     page.setDefaultTimeout(5000);
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
     await page.addInitScript(() => {
         if (window === window.top) {
-            localStorage.setItem('hotswap_quick_action_slots', JSON.stringify(['undo', 'redo']));
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '2');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['undo', 'redo']));
             localStorage.setItem('loop_matrix_urls', JSON.stringify([
                 '/test/fixtures/canary.html?id=A',
                 '/test/fixtures/canary.html?id=B',
@@ -705,14 +714,15 @@ test('Quick Action mirrors of ↩/↪ track real availability instead of sitting
     await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
     await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
 
-    const mirrors = (slotIndex) => page.evaluate((index) =>
-        [...document.querySelectorAll('.stream-panel')[index].querySelectorAll('.hotswap-shortcut-btn')]
+    const runway = (slotIndex) => page.evaluate((index) =>
+        [...document.querySelectorAll('.stream-panel')[index].querySelectorAll('.hotswap-runway-btn')]
             .map((button) => ({ key: button.dataset.actionKey, enabled: !button.disabled })), slotIndex);
 
-    // An action assigned to a Quick Action slot leaves the tray, as always.
+    // The tray and the runway are independent presentation collections now, so
+    // an action on the runway is ALSO still reachable in the tray.
     assert.equal(await page.evaluate(() =>
-        document.querySelectorAll('.stream-panel')[1].querySelector('.btn-hotswap-undo').style.display), 'none');
-    assert.deepEqual(await mirrors(1), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: false }]);
+        document.querySelectorAll('.stream-panel')[1].querySelector('.btn-hotswap-undo').style.display), '');
+    assert.deepEqual(await runway(1), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: false }]);
 
     await page.evaluate(() => {
         const panel = document.querySelectorAll('.stream-panel')[1];
@@ -721,16 +731,16 @@ test('Quick Action mirrors of ↩/↪ track real availability instead of sitting
         panel.querySelector('.hotswap-submit-btn').click();
     });
     await page.waitForLoadState('networkidle');
-    assert.deepEqual(await mirrors(1), [{ key: 'undo', enabled: true }, { key: 'redo', enabled: false }]);
-    assert.deepEqual(await mirrors(0), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: false }],
+    assert.deepEqual(await runway(1), [{ key: 'undo', enabled: true }, { key: 'redo', enabled: false }]);
+    assert.deepEqual(await runway(0), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: false }],
         'availability is per panel, not global');
 
-    // The mirror really drives the action, and its own state follows.
+    // The mirror really drives the canonical action, and its own state follows.
     await page.evaluate(() => document.querySelectorAll('.stream-panel')[1]
-        .querySelector('.hotswap-shortcut-btn[data-action-key="undo"]').click());
+        .querySelector('.hotswap-runway-btn[data-action-key="undo"]').click());
     await page.waitForFunction(() =>
         document.querySelectorAll('.stream-panel iframe')[1].getAttribute('data-last-src').endsWith('id=B'));
-    assert.deepEqual(await mirrors(1), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: true }]);
+    assert.deepEqual(await runway(1), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: true }]);
     await page.close();
 });
 
@@ -743,7 +753,9 @@ test('pages without Position geometry or panel history hide those actions entire
     // and must never be offered as a Quick Action there either.
     await page.addInitScript(() => {
         if (window === window.top) {
-            localStorage.setItem('hotswap_quick_action_slots', JSON.stringify(['undo', 'redo']));
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '2');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['undo', 'redo']));
         }
     });
     await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
@@ -755,10 +767,15 @@ test('pages without Position geometry or panel history hide those actions entire
         return {
             hidden: ['position', 'copy-position', 'undo', 'redo']
                 .map((name) => panel.querySelector(`.btn-hotswap-${name}`).style.display),
-            shortcuts: panel.querySelectorAll('.hotswap-shortcut-btn').length,
+            // Supported actions may legitimately ride the toolbar here; what
+            // must never appear is a mirror for an action this page cannot do.
+            unsupportedMirrors: [...panel.querySelectorAll('.hotswap-mirror-btn')]
+                .map((button) => button.dataset.actionKey)
+                .filter((key) => ['position', 'copyPosition', 'undo', 'redo'].includes(key)),
         };
     });
-    assert.deepEqual(state, { hidden: ['none', 'none', 'none', 'none'], shortcuts: 0 });
+    assert.deepEqual(state, { hidden: ['none', 'none', 'none', 'none'], unsupportedMirrors: [] },
+        'an action this page cannot perform is never offered on any other surface either');
     await page.close();
 });
 
@@ -832,6 +849,11 @@ test('Panel Undo after a Master Shuffle restores only that panel, leaving the re
         [{ undo: false, redo: true }, { undo: true, redo: false }, { undo: false, redo: true }],
         'each panel tracks its own portion of the one shuffle');
 
+    // `data-last-src` is set synchronously by the restore, so waiting on it
+    // alone races the `load` event that the counters actually observe. Wait for
+    // each panel's pending GS3 load to land before reading load counts.
+    await waitForPanelSettled(page, 0);
+    await waitForPanelSettled(page, 2);
     probe = await readContinuityProbe(page);
     assert.equal(probe.loads.A2, 1, 'A reloaded exactly once, for its own Undo');
     assert.equal(probe.loads.C2, 1, 'C reloaded exactly once, for its own Undo');
@@ -1359,5 +1381,933 @@ test('a panel that loads via a redirect anchors on where it actually landed', as
         'the anchor is where GS3 assignment came to rest, not the pre-redirect URL');
     assert.equal(state.cursor, 0, 'a redirect is part of the assignment, not a user navigation');
     assert.equal(state.canBack, false, 'so it does not advertise a pointless Undo');
+    await page.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HOTSWAP CHROME — retractable top toolbar, right runway, layer scope.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Geometry of one panel's Chrome, measured relative to the panel box. */
+function chromeGeometry(page, slotIndex = 0) {
+    return page.evaluate((index) => {
+        const panel = document.querySelectorAll('.stream-panel')[index];
+        const box = panel.getBoundingClientRect();
+        const iframe = panel.querySelector('iframe').getBoundingClientRect();
+        const toolbar = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const activation = panel.querySelector('.hotswap-activation').getBoundingClientRect();
+        const runwayEl = panel.querySelector('.hotswap-runway');
+        const runway = runwayEl && runwayEl.getBoundingClientRect();
+        const style = getComputedStyle(panel);
+        return {
+            panelHeight: Math.round(box.height),
+            iframeHeight: Math.round(iframe.height),
+            iframeTop: Math.round(iframe.top - box.top),
+            toolbarHeight: Math.round(toolbar.height),
+            activationTop: Math.round(activation.top - box.top),
+            activationHeight: Math.round(activation.height),
+            runwayTop: runway ? Math.round(runway.top - box.top) : null,
+            runwayHeight: runway ? Math.round(runway.height) : null,
+            runwayButtons: runwayEl ? runwayEl.children.length : 0,
+            toolbarHeightVar: parseFloat(style.getPropertyValue('--hotswap-toolbar-height')),
+            // The offset is authored as calc(toolbar * 2.5), so the custom
+            // property holds that expression rather than a number — the real
+            // geometry is what matters, and is measured above.
+            runwayOffsetExpr: style.getPropertyValue('--shortcut-runway-top-offset').trim(),
+        };
+    }, slotIndex);
+}
+
+function revealChrome(page, slotIndex = 0) {
+    return page.evaluate((index) => {
+        document.querySelectorAll('.stream-panel')[index]
+            .querySelector('.hotswap-activation')
+            .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+    }, slotIndex);
+}
+
+function retractChrome(page, slotIndex = 0) {
+    return page.evaluate((index) => {
+        document.querySelectorAll('.stream-panel')[index]
+            .dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+    }, slotIndex);
+}
+
+test('the top toolbar insets content only while revealed, and never touches the iframe', async () => {
+    const page = await bootCanaryGrid();
+    const before = await readCanaries(page, ['A', 'B', 'C']);
+    await armContinuityProbe(page);
+
+    // Retracted: the website owns essentially the entire panel.
+    const retracted = await chromeGeometry(page);
+    assert.equal(retracted.toolbarHeight, 0, 'no toolbar height is permanently reserved');
+    assert.equal(retracted.iframeTop, 0);
+    assert.equal(retracted.iframeHeight, retracted.panelHeight, 'the iframe gets the full panel');
+
+    await revealChrome(page);
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-toolbar').getBoundingClientRect().height > 0);
+    await page.waitForTimeout(250); // let the height transition settle
+    const revealed = await chromeGeometry(page);
+    assert.equal(revealed.toolbarHeight, revealed.toolbarHeightVar,
+        'revealing grows the toolbar to its configured height');
+    assert.equal(revealed.iframeTop, revealed.toolbarHeight,
+        'the content is PUSHED DOWN, not overlaid');
+    assert.equal(revealed.iframeHeight, revealed.panelHeight - revealed.toolbarHeight);
+
+    await retractChrome(page);
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-toolbar').getBoundingClientRect().height === 0);
+    await page.waitForTimeout(250);
+    const again = await chromeGeometry(page);
+    assert.equal(again.iframeTop, 0, 'retracting returns the full panel to the website');
+    assert.equal(again.iframeHeight, again.panelHeight);
+
+    // The whole reveal/retract cycle is presentation only.
+    const probe = await readContinuityProbe(page);
+    const after = await readCanaries(page, ['A', 'B', 'C']);
+    assert.deepEqual(probe.loads, { A: 0, B: 0, C: 0 }, 'no iframe reloaded');
+    assert.ok(probe.sameNodes && probe.sameParents, 'no iframe was recreated or reparented');
+    assert.ok(['A', 'B', 'C'].every((id) => after[id].startedAt === before[id].startedAt), 'same documents');
+    assert.ok(['A', 'B', 'C'].every((id) => after[id].ticks > before[id].ticks), 'still playing');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel iframe')[0]
+        .getAttribute('data-last-src')), '/test/fixtures/canary.html?id=A', 'src untouched');
+    await page.close();
+});
+
+test('the resize border and the Chrome activation region are separate hit targets', async () => {
+    const page = await bootCanaryGrid();
+    const geometry = await chromeGeometry(page);
+    // The resizer's own grab zone reaches 4px into the panel; the activation
+    // strip starts beyond it, so a pixel is never both.
+    assert.ok(geometry.activationTop >= 5,
+        `activation starts at ${geometry.activationTop}px, clear of the resizer grab zone`);
+    assert.ok(geometry.activationHeight > 0 && geometry.activationHeight <= 20);
+
+    const owner = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const box = panel.getBoundingClientRect();
+        const at = (offset) => {
+            const el = document.elementFromPoint(box.left + box.width / 2, box.top + offset);
+            if (!el) return 'none';
+            if (el.closest('.resizer')) return 'resize';
+            if (el.classList.contains('hotswap-activation')) return 'activation';
+            return el.tagName.toLowerCase();
+        };
+        return { atBorder: at(1), atActivation: at(12), inContent: at(200) };
+    });
+    assert.notEqual(owner.atActivation, 'resize', 'the activation strip is not the resize target');
+    assert.equal(owner.atActivation, 'activation');
+    assert.equal(owner.inContent, 'iframe', 'the website is clickable everywhere else');
+    await page.close();
+});
+
+test('the Quick Action runway is an overlay below the top-right safe zone', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '4');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([
+                '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
+                '/test/fixtures/canary.html?id=C',
+            ]));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await page.waitForTimeout(200);
+
+    const geometry = await chromeGeometry(page);
+    assert.equal(geometry.runwayButtons, 4, 'the runway is exactly as long as configured');
+    assert.match(geometry.runwayOffsetExpr, /calc\(.*2\.5\)/,
+        'the safe-zone offset is authored proportionally, not as a magic pixel count');
+    assert.equal(geometry.runwayTop, Math.round(geometry.toolbarHeightVar * 2.5),
+        'and resolves to 2.5 toolbar heights below the top of the panel');
+    assert.ok(geometry.runwayHeight < geometry.panelHeight / 2,
+        'and does not reserve a full-height strip');
+
+    // The site keeps its own top-right corner — including its clickability.
+    const topRightOwner = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const box = panel.getBoundingClientRect();
+        const el = document.elementFromPoint(box.right - 12, box.top + 30);
+        return el ? (el.closest('.hotswap-runway') ? 'runway' : el.tagName.toLowerCase()) : 'none';
+    });
+    assert.equal(topRightOwner, 'iframe', 'no GS3 hitbox sits over the site top-right controls');
+
+    // The content is never pushed sideways — width reflow is what breaks sites.
+    assert.equal(await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        return Math.round(panel.querySelector('iframe').getBoundingClientRect().width)
+            === Math.round(panel.getBoundingClientRect().width);
+    }), true, 'the runway overlays rather than insetting');
+    await page.close();
+});
+
+test('turning the runway off removes it entirely, leaving no dead hitbox', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_quick_actions_enabled', 'false');
+            localStorage.setItem('hotswap_quick_action_count', '5');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/canary.html?id=A']));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    assert.equal(await page.locator('.hotswap-runway').count(), 0, 'OFF means the runway does not exist');
+    // The count survives being switched off — configuration is not destroyed.
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '5');
+    await page.close();
+});
+
+test('the layer selector appears only when Layer 2 exists, defaulting to L2', async () => {
+    const page = await bootCanaryGrid();
+    const before = await readCanaries(page, ['B', 'C']);
+
+    const scope = (slotIndex = 0) => page.evaluate((index) => {
+        const panel = document.querySelectorAll('.stream-panel')[index];
+        const selector = panel.querySelector('.hotswap-layer-selector');
+        return {
+            hidden: selector.hidden,
+            preference: panel.dataset.layerScope,
+            lit: [...selector.querySelectorAll('.hotswap-layer-btn')]
+                .filter((button) => button.classList.contains('active')).map((button) => button.dataset.layer),
+            masterHidden: document.getElementById('master-layer-selector').hidden,
+        };
+    }, slotIndex);
+
+    assert.deepEqual(await scope(), { hidden: true, preference: 'L2', lit: ['L2'], masterHidden: true },
+        'with only Layer 1 there is no choice to present, in the panel or the master bar');
+
+    // Load one of our own runtimes into the panel — that IS a Layer 2.
+    await assignPanelUrl(page, 0, 'index3.html');
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-layer-selector').hidden === false);
+    assert.deepEqual(await scope(), { hidden: false, preference: 'L2', lit: ['L2'], masterHidden: false },
+        'Layer 2 is the active default the moment it exists');
+
+    await armContinuityProbe(page);
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-layer-btn[data-layer="L1"]').click());
+    assert.deepEqual((await scope()).lit, ['L1'], 'the active layer is unmistakably lit');
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-layer-btn[data-layer="L2"]').click());
+    assert.deepEqual((await scope()).lit, ['L2']);
+
+    // Nothing physically moved, and no content reloaded, merely because scope changed.
+    const probe = await readContinuityProbe(page);
+    const after = await readCanaries(page, ['B', 'C']);
+    assert.equal(probe.loads.B, 0);
+    assert.equal(probe.loads.C, 0);
+    assert.ok(['B', 'C'].every((id) => after[id].startedAt === before[id].startedAt));
+
+    // Replacing the content removes Layer 2, and the selector goes with it.
+    await assignPanelUrl(page, 0, '/test/fixtures/canary.html?id=Z');
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-layer-selector').hidden === true);
+    assert.equal(await page.evaluate(() => document.getElementById('master-layer-selector').hidden), true);
+    await page.close();
+});
+
+test('a Position swap moves the panel but not the Position labels', async () => {
+    const page = await bootCanaryGrid();
+    const labels = () => page.evaluate(() => [...document.querySelectorAll('.stream-panel')]
+        .slice(0, 3).map((panel) => ({
+            label: panel.querySelector('.hotswap-position-label').textContent,
+            showing: (panel.querySelector('iframe').getAttribute('data-last-src') || '').split('id=')[1],
+        })));
+    assert.deepEqual(await labels(), [
+        { label: 'Position 1', showing: 'A' },
+        { label: 'Position 2', showing: 'B' },
+        { label: 'Position 3', showing: 'C' },
+    ]);
+
+    await armContinuityProbe(page);
+    await moveCanaryToPosition(page, 'A', 3);
+    // Position 1 is still Position 1; the panel occupying it changed, and each
+    // panel's toolbar now states the physical place it is actually sitting in.
+    assert.deepEqual(await labels(), [
+        { label: 'Position 3', showing: 'A' },
+        { label: 'Position 2', showing: 'B' },
+        { label: 'Position 1', showing: 'C' },
+    ]);
+    assert.deepEqual(await readPositionMap(page),
+        { 'Position 1': 'C', 'Position 2': 'B', 'Position 3': 'A' });
+    assert.deepEqual((await readContinuityProbe(page)).loads, { A: 0, B: 0, C: 0 });
+    await page.close();
+});
+
+test('Settings drives all three collections and the runway-only opacity pair', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+
+    const setSwitch = (id, on) => page.evaluate(([elementId, value]) => {
+        const box = document.getElementById(elementId);
+        box.checked = value;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+    }, [id, on]);
+
+    // Three independently ordered collections.
+    for (const listId of ['top-order-list', 'runway-order-list', 'hotswap-toggle-list']) {
+        assert.ok(await page.locator(`#${listId} .hotswap-toggle-row`).count() > 0, listId);
+        assert.equal(await page.evaluate((id) =>
+            document.querySelector(`#${id} .hotswap-toggle-row`).draggable, listId), true);
+    }
+    assert.ok(await page.locator('#hotswap-toggle-list .hotswap-toggle-row').count()
+        > await page.locator('#runway-order-list .hotswap-toggle-row').count(),
+        'only Deep Cuts lists every action');
+    // Only Deep Cuts owns visibility.
+    assert.ok(await page.locator('#hotswap-toggle-list input[type="checkbox"]').count() > 0);
+    assert.equal(await page.locator('#top-order-list input[type="checkbox"]').count(), 0);
+
+    // Runway: 1-8 in two rows of four. Top Shortcuts: 1-6, its own ceiling.
+    assert.deepEqual(await page.locator('#slot-count-row .btn-slot-count').allTextContents(),
+        ['1', '2', '3', '4', '5', '6', '7', '8']);
+    assert.deepEqual(await page.locator('#top-count-row .btn-slot-count').allTextContents(),
+        ['1', '2', '3', '4', '5', '6']);
+    assert.equal(await page.evaluate(() =>
+        getComputedStyle(document.getElementById('slot-count-row')).gridTemplateColumns.split(' ').length), 4);
+
+    // ON/OFF independent of count, for both collections.
+    await setSwitch('quick-actions-enabled', true);
+    await page.locator('#slot-count-row .btn-slot-count[data-count="6"]').click();
+    await setSwitch('top-shortcuts-enabled', true);
+    await page.locator('#top-count-row .btn-slot-count[data-count="5"]').click();
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '6');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcut_count')), '5');
+    await setSwitch('quick-actions-enabled', false);
+    await setSwitch('top-shortcuts-enabled', false);
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_actions_enabled')), 'false');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcuts_enabled')), 'false');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '6',
+        'switching a surface off keeps its configuration');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcut_count')), '5');
+
+    // Exactly two opacity values, and they live in the RUNWAY card.
+    await page.locator('#ghost-opacity-input').fill('0');
+    await page.locator('#ghost-opacity-input').blur();
+    await page.locator('#hover-opacity-input').fill('100');
+    await page.locator('#hover-opacity-input').blur();
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_ghost_opacity')), '0');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_hover_opacity')), '100');
+    assert.equal(await page.locator('input[type="range"][id$="opacity-slider"]').count(), 2,
+        'no third opacity control exists');
+    assert.equal(await page.evaluate(() =>
+        document.getElementById('ghost-opacity-slider').closest('#quick-actions-config') !== null), true,
+        'the opacity pair belongs to the runway, not the toolbar');
+    assert.deepEqual(errors, []);
+    await page.close();
+});
+
+test('reordering in Settings changes what the runtime renders, not what actions do', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '3');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['reload', 'star', 'undo']));
+            localStorage.setItem('hotswap_tray_order', JSON.stringify(['undo', 'redo', 'folder']));
+            localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/canary.html?id=A']));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+
+    assert.deepEqual(await page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-runway-btn')]
+            .map((button) => button.dataset.actionKey)), ['reload', 'star', 'undo'],
+        'the runway renders in the configured order');
+
+    // Only what the tray actually RENDERS — hidden buttons keep their markup
+    // position and are not part of the presented order.
+    const trayOrder = await page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-icon-row button')]
+            .filter((button) => button.style.display !== 'none')
+            .map((button) => button.className.replace('btn-hotswap-', '').replace('btn-', '')));
+    assert.deepEqual(trayOrder.slice(0, 3), ['undo', 'redo', 'folder'],
+        'the tray renders in its own, independent configured order');
+
+    // An action can appear in BOTH collections — they are presentation, not behavior.
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.btn-hotswap-undo').style.display), '');
+    await page.close();
+});
+
+test('a small panel clips the runway instead of overflowing, keeping the config', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.setViewportSize({ width: 900, height: 420 });
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '8');
+            localStorage.setItem('triple_screen_layout', '4grid');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([
+                '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
+                '/test/fixtures/canary.html?id=C', '/test/fixtures/canary.html?id=D',
+            ]));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await page.waitForTimeout(200);
+
+    const fit = await page.evaluate(() => [...document.querySelectorAll('.stream-panel')].map((panel) => {
+        const runway = panel.querySelector('.hotswap-runway');
+        if (!runway) return { present: false };
+        const panelBox = panel.getBoundingClientRect();
+        const runwayBox = runway.getBoundingClientRect();
+        return {
+            present: true,
+            configured: runway.children.length,
+            withinPanel: runwayBox.bottom <= Math.ceil(panelBox.bottom)
+                && runwayBox.right <= Math.ceil(panelBox.right),
+        };
+    }));
+    fit.filter((entry) => entry.present).forEach((entry) => {
+        assert.equal(entry.configured, 8, 'all 8 stay configured — nothing is silently deleted');
+        assert.equal(entry.withinPanel, true, 'and nothing spills outside the panel');
+    });
+
+    // The complete set of actions is still reachable through the tray.
+    assert.ok(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelectorAll('.hotswap-icon-row button').length) >= 8);
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '8');
+    await page.close();
+});
+
+test('the layer selector actually retargets the same controls', async () => {
+    const page = await bootCanaryGrid();
+    const shownBySlot0 = () => page.evaluate(() =>
+        document.querySelectorAll('.stream-panel iframe')[0].getAttribute('data-last-src'));
+
+    // A GS3 action on panel 0, then load a nested runtime into it. Panel 0 now
+    // has both its own action history AND a Layer 2 to aim at.
+    await assignPanelUrl(page, 0, '/test/fixtures/canary.html?id=A2');
+    await waitForLiveId(page, 0, 'A2');
+    await assignPanelUrl(page, 0, 'index3.html');
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-layer-selector').hidden === false);
+
+    // L2 is active by default, so Undo is aimed INTO the nested runtime — it
+    // must not reverse this panel's own action history.
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0].dataset.layerScope), 'L2');
+    await clickPanelHistory(page, 0, 'undo');
+    await page.waitForTimeout(150);
+    assert.equal(await shownBySlot0(), 'index3.html',
+        'with L2 selected the outer panel is left alone');
+
+    // Aim the SAME control at L1 and it reverses this panel's own history.
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-layer-btn[data-layer="L1"]').click());
+    await clickPanelHistory(page, 0, 'undo');
+    await waitForLiveId(page, 0, 'A2');
+    assert.equal(await shownBySlot0(), '/test/fixtures/canary.html?id=A2',
+        'nothing moved — only the stated scope changed');
+    await page.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chrome lifecycle: autonomous retraction, Deep Cuts dismissal, Position button.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const isRevealed = (page, slotIndex = 0) => page.evaluate((index) =>
+    document.querySelectorAll('.stream-panel')[index].classList.contains('chrome-revealed'), slotIndex);
+
+/** Pointer leaves the whole Chrome family — the signal that starts the countdown. */
+const leaveChrome = (page, slotIndex = 0) => page.evaluate((index) => {
+    const panel = document.querySelectorAll('.stream-panel')[index];
+    panel.querySelector('.hotswap-toolbar')
+        .dispatchEvent(new PointerEvent('pointerleave', { bubbles: false, relatedTarget: null }));
+}, slotIndex);
+
+test('the toolbar retracts by itself, with no other panel involved', async () => {
+    const page = await bootCanaryGrid();
+    const delay = await page.evaluate(async () =>
+        (await import('./js/hotswap-chrome.js')).CHROME_RETRACT_DELAY_MS);
+    assert.ok(delay >= 750 && delay <= 1000, `retract delay ${delay}ms is forgiving but prompt`);
+
+    await revealChrome(page);
+    assert.equal(await isRevealed(page), true);
+
+    await leaveChrome(page);
+    // Still open immediately after leaving — the user is not made to race it.
+    assert.equal(await isRevealed(page), true, 'a grace period exists');
+    await page.waitForFunction(() =>
+        !document.querySelectorAll('.stream-panel')[0].classList.contains('chrome-revealed'),
+        undefined, { timeout: delay + 1500 });
+    assert.equal(await isRevealed(page), false, 'it retracted on its own');
+
+    // Nothing else was touched to make that happen.
+    assert.equal(await isRevealed(page, 1), false);
+    assert.equal(await isRevealed(page, 2), false);
+    await page.close();
+});
+
+test('returning before the countdown expires cancels the retract', async () => {
+    const page = await bootCanaryGrid();
+    await revealChrome(page);
+    await leaveChrome(page);
+    await page.waitForTimeout(200);
+    await revealChrome(page); // come back
+    await page.waitForTimeout(900);
+    assert.equal(await isRevealed(page), true, 'coming back cancels the countdown');
+    await page.close();
+});
+
+test('an open menu or keyboard focus holds Chrome open, then it retracts', async () => {
+    const page = await bootCanaryGrid();
+    const openTray = () => page.evaluate(() =>
+        document.querySelectorAll('.stream-panel')[0].querySelector('.hotswap-trigger').click());
+
+    await revealChrome(page);
+    await openTray();
+    // Moving between family members must not start a countdown.
+    await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        panel.querySelector('.hotswap-toolbar').dispatchEvent(new PointerEvent('pointerleave', {
+            bubbles: false, relatedTarget: panel.querySelector('.hotswap-overlay'),
+        }));
+    });
+    await page.waitForTimeout(500);
+    assert.equal(await isRevealed(page), true, 'moving into the tray is not leaving');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-overlay').classList.contains('open')), true);
+
+    // Focus inside the family keeps it alive too.
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-trigger').focus());
+    await page.waitForTimeout(400);
+    assert.equal(await isRevealed(page), true);
+
+    // But walking away still ends it — an open tray cannot hold the website's
+    // height hostage indefinitely.
+    await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        panel.querySelector('.hotswap-trigger').blur();
+        panel.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false, relatedTarget: null }));
+    });
+    await page.waitForFunction(() =>
+        !document.querySelectorAll('.stream-panel')[0].classList.contains('chrome-revealed'),
+        undefined, { timeout: 3000 });
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-overlay').classList.contains('open')), false,
+        'and the tray closes with it');
+    await page.close();
+});
+
+test('Deep Cuts dismisses by outside click, Escape, or X — not only X', async () => {
+    const page = await bootCanaryGrid();
+    const trayOpen = () => page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-overlay').classList.contains('open'));
+    const openTray = async () => {
+        await revealChrome(page);
+        await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+            .querySelector('.hotswap-trigger').click());
+        assert.equal(await trayOpen(), true);
+    };
+
+    // Clicking inside keeps it open.
+    await openTray();
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-overlay').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    assert.equal(await trayOpen(), true, 'interacting inside the tray keeps it open');
+
+    // An observable outside click dismisses it.
+    await page.evaluate(() => document.getElementById('master-bar')
+        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    assert.equal(await trayOpen(), false, 'going back to work dismisses it');
+
+    // Escape unwinds depth: submenu first, then the tray.
+    await openTray();
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.btn-hotswap-folder').click());
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-folder-row').classList.contains('open')), true);
+    const escape = () => page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await escape();
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-folder-row').classList.contains('open')), false, 'submenu closed first');
+    assert.equal(await trayOpen(), true, 'the tray is still open');
+    await escape();
+    assert.equal(await trayOpen(), false, 'the next Escape closes the tray');
+    await escape();
+    assert.equal(await isRevealed(page), false, 'and the next retracts Chrome');
+
+    // X still works — it is kept as the explicit close, not the only one.
+    await openTray();
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-trigger').click());
+    assert.equal(await trayOpen(), false);
+    await page.close();
+});
+
+test('the Position button opens a menu and moves nothing by itself', async () => {
+    const page = await bootCanaryGrid();
+    const before = await readCanaries(page, ['A', 'B', 'C']);
+    await armContinuityProbe(page);
+    await revealChrome(page);
+
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-position-label').textContent), 'Position 1');
+
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-position-btn').click());
+    // Opening alone must not move content.
+    assert.deepEqual(await readPositionMap(page),
+        { 'Position 1': 'A', 'Position 2': 'B', 'Position 3': 'C' });
+
+    const menu = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const el = panel.querySelector('.hotswap-position-menu');
+        const box = el.getBoundingClientRect();
+        const rail = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + 20, box.top + 14);
+        return {
+            parent: el.parentElement.className.split(' ')[0],
+            groups: [...el.querySelectorAll('.hotswap-position-group-title')].map((t) => t.textContent),
+            visible: box.width > 0 && box.height > 0,
+            belowRail: box.top >= rail.bottom - 1,
+            // The regression that made this button look inert: the menu opened
+            // inside the `overflow: hidden` rail and was clipped away entirely.
+            hitTestable: Boolean(hit && hit.closest('.hotswap-position-menu')),
+        };
+    });
+    assert.deepEqual(menu.groups, ['Swap Position', 'Copy To Position']);
+    assert.equal(menu.parent, 'stream-panel', 'the pop-under is not inside the clipped rail');
+    assert.ok(menu.visible && menu.belowRail, 'it renders below the toolbar');
+    assert.equal(menu.hitTestable, true, 'and is actually clickable, not clipped away');
+
+    // Swap goes through the canonical atomic pathway.
+    await page.evaluate(() => {
+        const group = [...document.querySelectorAll('.stream-panel')[0]
+            .querySelectorAll('.hotswap-position-group')][0];
+        [...group.querySelectorAll('.hotswap-position-item:not(.current)')]
+            .find((item) => item.textContent.startsWith('Position 3')).click();
+    });
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-position-menu').hidden), true,
+        'a completed Swap closes the menu — it never hangs open');
+    assert.deepEqual(await readPositionMap(page),
+        { 'Position 1': 'C', 'Position 2': 'B', 'Position 3': 'A' });
+    assert.equal(await page.evaluate(() => window.__hist().at(-1).type), 'position');
+    assert.equal(await page.evaluate(() => window.__hist().at(-1).atomic), true);
+
+    const probe = await readContinuityProbe(page);
+    const after = await readCanaries(page, ['A', 'B', 'C']);
+    assert.deepEqual(probe.loads, { A: 0, B: 0, C: 0 }, 'zero reloads through the whole flow');
+    assert.ok(probe.sameNodes && probe.sameParents);
+    assert.ok(['A', 'B', 'C'].every((id) => after[id].startedAt === before[id].startedAt));
+    await page.close();
+});
+
+test('Top Shortcuts render in order, reuse canonical actions, and adapt to width', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_top_shortcuts_enabled', 'true');
+            localStorage.setItem('hotswap_top_shortcut_count', '6');
+            localStorage.setItem('hotswap_top_shortcut_order', JSON.stringify(
+                ['star', 'shuffle', 'reload', 'shuffleAll', 'undo', 'redo']));
+            localStorage.setItem('triple_screen_layout', '3col');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([
+                '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
+                '/test/fixtures/canary.html?id=C',
+            ]));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await revealChrome(page);
+    await page.waitForTimeout(300);
+
+    const visibleShortcuts = () => page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-top-shortcut')]
+            .filter((button) => !button.hidden).map((button) => button.dataset.actionKey));
+
+    const wide = await visibleShortcuts();
+    assert.deepEqual(wide, ['star', 'shuffle', 'reload', 'shuffleAll', 'undo', 'redo'],
+        'all six fit at this width, in the configured order');
+
+    // Narrow the PANEL. (A merely narrow viewport is not enough: index3.html
+    // stacks its layout below a breakpoint, which makes each panel wider.)
+    await page.setViewportSize({ width: 330, height: 900 });
+    await page.waitForTimeout(400);
+    const narrow = await visibleShortcuts();
+    assert.ok(narrow.length < wide.length, `fewer shortcuts at narrow width (${narrow.length})`);
+    assert.deepEqual(narrow, wide.slice(0, narrow.length), 'and they drop from the end');
+    const survivors = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const rail = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const fits = (sel) => {
+            const el = panel.querySelector(sel);
+            const box = el.getBoundingClientRect();
+            return box.width > 0 && box.right <= rail.right + 1;
+        };
+        // Scoped to the permanent history group: 'undo' is also configured as a
+        // Top Shortcut in this test, and that copy is expected to drop.
+        return { position: fits('.hotswap-position-btn'), trigger: fits('.hotswap-trigger'),
+                 undo: fits('.hotswap-toolbar-actions .hotswap-mirror-btn[data-action-key="undo"]'),
+                 redo: fits('.hotswap-toolbar-actions .hotswap-mirror-btn[data-action-key="redo"]') };
+    });
+    assert.deepEqual(survivors, { position: true, trigger: true, undo: true, redo: true },
+        'Position, Undo/Redo and ··· always survive');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcut_count')), '6',
+        'the preference is never rewritten to fit');
+
+    // Widening restores them automatically.
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForTimeout(400);
+    assert.deepEqual(await visibleShortcuts(), wide, 'widening brings them back');
+
+    // A Top Shortcut invokes the same canonical action as the tray button.
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-top-shortcut[data-action-key="reload"]').click());
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel iframe')[0]
+        .getAttribute('data-last-src')), '/test/fixtures/canary.html?id=A',
+        'reload reused the canonical pathway and kept the panel on its own URL');
+    await page.close();
+});
+
+test('the toolbar is full opacity while the runway ghosts', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_ghost_opacity', '0');
+            localStorage.setItem('hotswap_hover_opacity', '100');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/canary.html?id=A']));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await revealChrome(page);
+    await page.waitForTimeout(300);
+
+    const opacity = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        return {
+            toolbar: getComputedStyle(panel.querySelector('.hotswap-toolbar')).opacity,
+            runway: getComputedStyle(panel.querySelector('.hotswap-runway')).opacity,
+        };
+    });
+    assert.equal(opacity.toolbar, '1', 'a Resting Opacity of 0 must NOT dim the toolbar');
+    assert.equal(opacity.runway, '0', 'it applies to the runway alone');
+
+    // A fully transparent runway must still not be a click-blocking wall over
+    // the site's top-right, nor anywhere it does not occupy.
+    const owner = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const box = panel.getBoundingClientRect();
+        const at = (x, y) => {
+            const el = document.elementFromPoint(x, y);
+            return el && el.closest('.hotswap-runway') ? 'runway' : (el ? el.tagName.toLowerCase() : 'none');
+        };
+        return { topRight: at(box.right - 12, box.top + 30), lowerRight: at(box.right - 12, box.bottom - 40) };
+    });
+    assert.equal(owner.topRight, 'iframe', 'the safe zone stays the site’s');
+    assert.equal(owner.lowerRight, 'iframe', 'and the runway does not span the whole edge');
+    await page.close();
+});
+
+const openPositionMenu = (page, slotIndex = 0) => page.evaluate((index) => {
+    const panel = document.querySelectorAll('.stream-panel')[index];
+    panel.classList.add('chrome-revealed');
+    panel.querySelector('.hotswap-position-btn').click();
+}, slotIndex);
+
+const positionMenuOpen = (page, slotIndex = 0) => page.evaluate((index) =>
+    !document.querySelectorAll('.stream-panel')[index]
+        .querySelector('.hotswap-position-menu').hidden, slotIndex);
+
+test('Copy To Position runs from the Position menu and closes it', async () => {
+    const page = await bootCanaryGrid();
+    const before = await readCanaries(page, ['A', 'B']);
+    await armContinuityProbe(page);
+
+    await openPositionMenu(page, 0);
+    assert.equal(await positionMenuOpen(page), true);
+
+    await page.evaluate(() => {
+        const group = [...document.querySelectorAll('.stream-panel')[0]
+            .querySelectorAll('.hotswap-position-group')]
+            .find((g) => g.querySelector('.hotswap-position-group-title').textContent === 'Copy To Position');
+        [...group.querySelectorAll('.hotswap-position-item:not(.current)')]
+            .find((item) => item.textContent.startsWith('Position 3')).click();
+    });
+    await page.waitForFunction(() =>
+        document.querySelectorAll('.stream-panel iframe')[2].getAttribute('data-last-src').endsWith('id=A'));
+
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.stream-panel iframe')]
+        .slice(0, 3).map((f) => f.getAttribute('data-last-src').split('id=')[1])), ['A', 'B', 'A'],
+        'the canonical Copy pathway ran: source untouched, destination copied');
+    assert.equal(await positionMenuOpen(page), false, 'a completed Copy closes the menu');
+
+    const probe = await readContinuityProbe(page);
+    const after = await readCanaries(page, ['A', 'B']);
+    assert.equal(probe.loads.A, 0, 'the source never reloaded');
+    assert.equal(probe.loads.B, 0, 'nor the unrelated panel');
+    assert.ok(['A', 'B'].every((id) => after[id].startedAt === before[id].startedAt));
+    await page.close();
+});
+
+test('the Position menu dismisses on Escape and on observable outside interaction', async () => {
+    const page = await bootCanaryGrid();
+    const before = await readCanaries(page, ['A', 'B', 'C']);
+    await armContinuityProbe(page);
+
+    // Opening and closing it is pure presentation.
+    await openPositionMenu(page);
+    assert.equal(await positionMenuOpen(page), true);
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    assert.equal(await positionMenuOpen(page), false, 'Escape closes it');
+
+    await openPositionMenu(page);
+    await page.evaluate(() => document.getElementById('master-bar')
+        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    assert.equal(await positionMenuOpen(page), false, 'so does going back to work');
+
+    // It holds the toolbar open while it is up, using the one existing timer.
+    await openPositionMenu(page);
+    await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        panel.querySelector('.hotswap-toolbar').dispatchEvent(new PointerEvent('pointerleave', {
+            bubbles: false, relatedTarget: panel.querySelector('.hotswap-position-menu'),
+        }));
+    });
+    await page.waitForTimeout(500);
+    assert.equal(await isRevealed(page), true, 'moving into the menu is not leaving Chrome');
+
+    // And the ordinary autonomous retract still finishes the job.
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .dispatchEvent(new PointerEvent('pointerleave', { bubbles: false, relatedTarget: null })));
+    await page.waitForFunction(() =>
+        !document.querySelectorAll('.stream-panel')[0].classList.contains('chrome-revealed'),
+        undefined, { timeout: 3000 });
+    assert.equal(await positionMenuOpen(page), false, 'retraction closes the menu with it');
+
+    const probe = await readContinuityProbe(page);
+    const after = await readCanaries(page, ['A', 'B', 'C']);
+    assert.deepEqual(probe.loads, { A: 0, B: 0, C: 0 }, 'opening/closing the menu reloads nothing');
+    assert.ok(probe.sameNodes && probe.sameParents);
+    assert.ok(['A', 'B', 'C'].every((id) => after[id].ticks > before[id].ticks));
+    await page.close();
+});
+
+test('Deep Cuts no longer presents the Position-owned actions', async () => {
+    const page = await bootCanaryGrid();
+    await revealChrome(page);
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-trigger').click());
+
+    const tray = await page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-icon-row button')]
+            .filter((button) => button.style.display !== 'none')
+            .map((button) => button.className));
+    assert.ok(!tray.some((name) => name.includes('btn-hotswap-position')),
+        'Move to Position is gone from the tray');
+    assert.ok(!tray.some((name) => name.includes('btn-hotswap-copy-position')),
+        'Copy To Position is gone from the tray');
+
+    // Nothing else was lost with them.
+    ['btn-hotswap-folder', 'btn-hotswap-star', 'btn-hotswap-reload', 'btn-hotswap-shuffle',
+        'btn-hotswap-kill', 'btn-purge', 'btn-hotswap-launchpad', 'btn-hotswap-undo', 'btn-hotswap-redo']
+        .forEach((name) => {
+            assert.ok(tray.some((candidate) => candidate.includes(name)), `${name} is still in Deep Cuts`);
+        });
+
+    // And Settings no longer offers them either.
+    const settings = await browser.newPage();
+    await settings.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await settings.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+    const listed = await settings.evaluate(() =>
+        [...document.querySelectorAll('#hotswap-toggle-list .hotswap-toggle-row')].map((row) => row.dataset.key));
+    assert.ok(!listed.includes('position') && !listed.includes('copyPosition'));
+    assert.ok(listed.includes('folder') && listed.includes('undo'));
+    await settings.close();
+
+    // But both remain reachable — through the button that owns them.
+    await openPositionMenu(page);
+    assert.deepEqual(await page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0]
+            .querySelectorAll('.hotswap-position-group-title')].map((t) => t.textContent)),
+        ['Swap Position', 'Copy To Position']);
+    await page.close();
+});
+
+test('Shuffle All renders its two dice on one line inside the compact rail', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_top_shortcuts_enabled', 'true');
+            localStorage.setItem('hotswap_top_shortcut_count', '2');
+            localStorage.setItem('hotswap_top_shortcut_order', JSON.stringify(['shuffleAll', 'star']));
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([
+                '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
+                '/test/fixtures/canary.html?id=C',
+            ]));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await revealChrome(page);
+    await page.waitForTimeout(300);
+
+    const icon = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const button = panel.querySelector('.hotswap-top-shortcut[data-action-key="shuffleAll"]');
+        const rail = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const box = button.getBoundingClientRect();
+        return {
+            text: button.textContent,
+            whiteSpace: getComputedStyle(button).whiteSpace,
+            // Wrapping would make the content taller than the box.
+            wrapped: button.scrollHeight > button.clientHeight + 1,
+            wider: box.width >= box.height, // two glyphs side by side, not stacked
+            insideRail: box.top >= rail.top - 0.5 && box.bottom <= rail.bottom + 0.5,
+            railHeight: Math.round(rail.height),
+        };
+    });
+    assert.equal(icon.text, '🎲🎲');
+    assert.equal(icon.whiteSpace, 'nowrap', 'the glyphs cannot break onto a second line');
+    assert.equal(icon.wrapped, false, 'no vertical stacking');
+    assert.equal(icon.wider, true, 'the button grew sideways rather than wrapping');
+    assert.equal(icon.insideRail, true, 'and still fits the rail');
+    assert.equal(icon.railHeight, 30, 'the rail was not enlarged to accommodate it');
+
+    // Behavior is untouched: the icon is a mirror, and clicking it dispatches
+    // to the ONE canonical Shuffle All button rather than reimplementing it.
+    const reachedCanonical = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const canonical = panel.querySelector('.btn-hotswap-shuffle-all');
+        let hits = 0;
+        canonical.addEventListener('click', () => { hits += 1; });
+        panel.querySelector('.hotswap-top-shortcut[data-action-key="shuffleAll"]').click();
+        return hits;
+    });
+    assert.equal(reachedCanonical, 1, 'the top shortcut invoked the canonical action exactly once');
     await page.close();
 });

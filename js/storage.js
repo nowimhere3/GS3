@@ -72,10 +72,26 @@ export const KEYS = Object.freeze({
     // Triple mode
     tripleLayout:       'triple_screen_layout',
 
-    // Hotswap overlay customization
+    // Hotswap Chrome customization
     hotswapButtonVisibility: 'hotswap_button_visibility',
-    quickActionSlots:        'hotswap_quick_action_slots',
-    ghostOpacity:            'hotswap_ghost_opacity',
+    hotswapTrayOrder:        'hotswap_tray_order',
+    quickActionSlots:        'hotswap_quick_action_slots',   // legacy — migration source only
+    topShortcutsEnabled:     'hotswap_top_shortcuts_enabled',
+    topShortcutCount:        'hotswap_top_shortcut_count',
+    topShortcutOrder:        'hotswap_top_shortcut_order',
+    // BREADCRUMBS — the runway keys keep their names. They already carried one
+    // migration from `quickActionSlots`; renaming them to `rightRunway*` would
+    // force a second migration for zero customer benefit.
+    quickActionsEnabled:     'hotswap_quick_actions_enabled',
+    quickActionCount:        'hotswap_quick_action_count',
+    quickActionOrder:        'hotswap_quick_action_order',
+    // BREADCRUMBS — WAS: one 'ghostOpacity' value, with hover hardcoded to 1.
+    // IS: the same key is now Hotswap Chrome's RESTING opacity, joined by a
+    // single HOVER value. WHY: two values, shared by the top toolbar and the
+    // Quick Action runway, rather than a per-surface opacity system each. The
+    // key name is deliberately unchanged so existing user preferences survive.
+    ghostOpacity:            'hotswap_ghost_opacity',        // resting
+    hotswapHoverOpacity:     'hotswap_hover_opacity',        // hover
     ghostTargets:            'hotswap_ghost_targets',
 
     // Workspace Tabs
@@ -112,7 +128,15 @@ const DEFAULTS = {
         purge: true, launchpad: true, undo: true, redo: true,
     },
     [KEYS.quickActionSlots]: [],
+    [KEYS.hotswapTrayOrder]: [],
+    [KEYS.topShortcutsEnabled]: true,
+    [KEYS.topShortcutCount]: 3,
+    [KEYS.topShortcutOrder]: [],
+    [KEYS.quickActionsEnabled]: false,
+    [KEYS.quickActionCount]: 3,
+    [KEYS.quickActionOrder]: [],
     [KEYS.ghostOpacity]: 12,
+    [KEYS.hotswapHoverOpacity]: 100,
     [KEYS.ghostTargets]: { trigger: false, master: false, stream: false, solo: false },
     [KEYS.activeWorkspaceId]: 'live',
 };
@@ -139,7 +163,15 @@ const TYPES = {
     [KEYS.tripleLayout]:    'string',
     [KEYS.hotswapButtonVisibility]: 'json',
     [KEYS.quickActionSlots]:        'json',
+    [KEYS.hotswapTrayOrder]:        'json',
+    [KEYS.topShortcutsEnabled]:     'boolean_default_true',
+    [KEYS.topShortcutCount]:        'number',
+    [KEYS.topShortcutOrder]:        'json',
+    [KEYS.quickActionsEnabled]:     'boolean',
+    [KEYS.quickActionCount]:        'number',
+    [KEYS.quickActionOrder]:        'json',
     [KEYS.ghostOpacity]:            'number',
+    [KEYS.hotswapHoverOpacity]:     'number',
     [KEYS.ghostTargets]:            'json',
     [KEYS.activeWorkspaceId]:       'string',
 };

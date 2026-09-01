@@ -17,15 +17,29 @@
             if (depth >= 1) document.documentElement.classList.add('is-nested');
             if (depth === 1) document.documentElement.classList.add('layer-2');
 
-            // Ghost Mode — reads raw localStorage directly (the Store module
-            // isn't loaded yet at this point). Sets --ghost-opacity plus one
-            // class per target so each surface can opt in independently.
+            // Ghost Mode / Hotswap Chrome opacity — reads raw localStorage
+            // directly (the Store module isn't loaded yet at this point).
+            //
+            // BREADCRUMBS — WAS: one opacity value, with hover hardcoded to 1.
+            // IS: exactly TWO customer-facing values, RESTING and HOVER, shared
+            // by every Chrome surface.
+            // WHY: the top toolbar and the Quick Action runway are one control
+            // surface split across two edges, not two features. Giving each its
+            // own resting/hover pair would be four settings to keep in sync for
+            // a distinction the user never asked for. The resting key name is
+            // deliberately unchanged so existing preferences survive.
             try {
-                var opacityRaw = localStorage.getItem('hotswap_ghost_opacity');
-                var opacityPct = opacityRaw !== null ? parseFloat(opacityRaw) : 12;
-                if (isNaN(opacityPct)) opacityPct = 12;
-                opacityPct = Math.max(0, Math.min(100, opacityPct));
-                document.documentElement.style.setProperty('--ghost-opacity', opacityPct / 100);
+                var readPct = function (key, fallback) {
+                    var raw = localStorage.getItem(key);
+                    var pct = raw !== null ? parseFloat(raw) : fallback;
+                    if (isNaN(pct)) pct = fallback;
+                    return Math.max(0, Math.min(100, pct));
+                };
+                var restingPct = readPct('hotswap_ghost_opacity', 12);
+                var hoverPct = readPct('hotswap_hover_opacity', 100);
+                document.documentElement.style.setProperty('--ghost-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-resting-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-hover-opacity', hoverPct / 100);
 
                 var targetsRaw = localStorage.getItem('hotswap_ghost_targets');
                 var targets = targetsRaw ? JSON.parse(targetsRaw) : {};
@@ -194,16 +208,28 @@
         .save-session-item-meta, .save-session-item-saved { font-size: 11px; color: #777; margin-top: 2px; }
 
         /* Per-panel hotswap trigger */
-        .hotswap-trigger { position: absolute; top: 16px; right: 16px; background: rgba(0,0,0,0.75); border: 1px solid #555; border-radius: 12px; color: #ccc; font-size: 16px; font-weight: bold; letter-spacing: 2px; cursor: pointer; padding: 6px 14px; z-index: 10001; backdrop-filter: blur(6px); transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s; user-select: none; }
-        .hotswap-trigger::before { content: ''; position: absolute; top: -10px; left: -10px; right: -10px; bottom: -10px; }
-        html.ghost-trigger .hotswap-trigger { opacity: var(--ghost-opacity, 0.12); }
+        /* BREADCRUMBS — WAS: `position:absolute; top:16px; right:16px` plus
+           overlay-era padding, from when this button floated in the panel's
+           corner. Inside the flex rail that took it out of flow and pushed it
+           16px DOWN, which is what made it protrude below the toolbar.
+           IS: an ordinary compact flex child, vertically centred like its
+           neighbours.
+           WHY: every unnecessary toolbar pixel is website height taken away
+           while Chrome is open — the rail was not too short, the button was
+           carrying spacing for a layout that no longer exists. */
+        .hotswap-trigger {
+            position: static; padding: 0; margin: 0;
+            width: 26px; height: 22px;
+            background: rgba(0,0,0,0.72); border: 1px solid #4a4a4a; color: #ccc;
+            border-radius: 8px; font-size: 12px; font-weight: bold; letter-spacing: 1px;
+            line-height: 1; cursor: pointer; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
         html.ghost-trigger .hotswap-trigger:hover,
-        html.ghost-trigger .hotswap-trigger.open { opacity: 1; }
-        .hotswap-trigger:hover { background: rgba(0,0,0,0.95); color: #fff; border-color: #888; }
-        .hotswap-trigger.open  { background: rgba(0,95,200,0.85); border-color: #0095f6; color: #fff; }
 
         /* Per-panel overlay */
-        .hotswap-overlay { position: absolute; top: 16px; right: 90px; background: rgba(0,0,0,0.92); border: 1px solid #333; border-radius: 14px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; z-index: 10000; backdrop-filter: blur(10px); min-width: 190px; opacity: 0; pointer-events: none; transform: translateX(12px) scale(0.95); transform-origin: top right; transition: opacity 0.15s ease, transform 0.15s ease; }
+        .hotswap-overlay { position: absolute; top: var(--hotswap-toolbar-height); right: 8px; background: rgba(0,0,0,0.92); border: 1px solid #333; border-radius: 14px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; z-index: 10000; backdrop-filter: blur(10px); min-width: 190px; opacity: 0; pointer-events: none; transform: translateX(12px) scale(0.95); transform-origin: top right; transition: opacity 0.15s ease, transform 0.15s ease; }
         .hotswap-overlay.open { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
         .hotswap-icon-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 
@@ -214,17 +240,6 @@
            slot-label (which sits at top:8px) so they don't overlap it. The
            overlay pops out to the right instead of the left, since the
            trigger itself is now on the left. */
-        html.layer-2 .hotswap-trigger { right: auto; left: 16px; top: 40px; border-color: #f0c020; border-width: 2px; }
-        html.layer-2 .hotswap-trigger:hover { border-color: #ffd84a; }
-        html.layer-2 .hotswap-trigger.open { border-color: #f0c020; }
-        html.layer-2 .hotswap-overlay {
-            right: auto;
-            left: 90px;
-            top: 40px;
-            transform-origin: top left;
-            transform: translateX(-12px) scale(0.95);
-        }
-        html.layer-2 .hotswap-overlay.open { transform: translateX(0) scale(1); }
 
         /* Small square icon buttons */
         .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-kill,
@@ -261,8 +276,7 @@
         /* ↩ / ↪ Panel Undo & Redo — availability-driven, so :disabled matters */
         .btn-hotswap-undo, .btn-hotswap-redo { background: #1a1620; border: 1px solid #4a3a6a; color: #b39ae0; font-weight: bold; }
         .btn-hotswap-undo:hover:not(:disabled), .btn-hotswap-redo:hover:not(:disabled) { background: #262030; color: #fff; }
-        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled,
-        .hotswap-shortcut-btn:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
+        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
 
         /* 📁 Folder-assign button */
         .btn-hotswap-folder { background: #241a0a; border: 1px solid #6a4a1a; color: #d4a94a; }
@@ -274,43 +288,13 @@
         .btn-hotswap-launchpad:hover { background: #4a2810; }
 
         /* Quick Action shortcuts — always visible below the ··· trigger */
-        .hotswap-shortcut-row {
-            position: absolute;
-            top: 56px;
-            right: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            z-index: 10001;
-        }
-        .hotswap-shortcut-btn {
-            position: relative;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: rgba(0, 0, 0, 0.75);
-            border: 1px solid #555;
-            color: #ccc;
-            font-size: 15px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            backdrop-filter: blur(6px);
-            transition: background 0.15s, transform 0.15s, border-color 0.15s, opacity 0.15s;
-        }
-        .hotswap-shortcut-btn::before {
-            content: '';
-            position: absolute;
-            top: -8px; left: -8px; right: -8px; bottom: -8px;
-        }
-        html.ghost-trigger .hotswap-shortcut-btn { opacity: var(--ghost-opacity, 0.12); }
-        html.ghost-trigger .hotswap-shortcut-btn:hover { opacity: 1; }
-        .hotswap-shortcut-btn:hover { background: rgba(0, 0, 0, 0.95); border-color: #0095f6; transform: scale(1.1); }
-
-        html.layer-2 .hotswap-shortcut-row { right: auto; left: 16px; top: 80px; }
-        html.layer-2 .hotswap-shortcut-btn { border-color: #f0c020; }
-        html.layer-2 .hotswap-shortcut-btn:hover { border-color: #ffd84a; }
+        /* BREADCRUMBS — RETIRED: the Layer-2 "flip Chrome to the opposite
+           corner" rules lived here, together with the corner-anchored "..."
+           trigger and its shortcut column. Hotswap Chrome replaced all of it
+           with one toolbar plus one runway and an explicit, highlighted
+           [L2][L1] selector, so there is no longer anything to flip — scope is
+           stated instead of implied by placement. Noted so the absence reads as
+           a decision rather than an oversight. */
 
         /* Shuffle / Shuffle All / Delete pill buttons */
         .btn-hotswap-shuffle { background: #1a2a1a; border: 1px solid #3a6b3a; color: #4caf50; border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer; white-space: nowrap; flex: 1; transition: background 0.15s; }
@@ -358,6 +342,167 @@
         .hotswap-position-item.current:hover { background: #181818; color: #ccc; }
         .hotswap-position-note { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
         .hotswap-folder-count { color: #666; font-size: 11px; }
+
+
+        /* ── HOTSWAP CHROME ───────────────────────────────────────────────────
+           BREADCRUMBS — WAS: corner-anchored overlay chrome ("···" top-right,
+           tray beside it, shortcut column beneath, Layer 2 flipped to the
+           opposite corner).
+           IS: a retractable top toolbar that INSETS the content, plus a right
+           runway overlay that starts below a top-right safe zone.
+           WHY: an arbitrary website already owns its own corners. GS3 keeps the
+           panel border and the sliver immediately inside it; the site keeps
+           everything else whenever Chrome is not in use. */
+        .stream-panel {
+            display: flex;
+            flex-direction: column;
+            /* Sized to the controls it carries (22px) plus 4px breathing room
+               above and below — not to legacy overlay padding. This height is
+               website height borrowed for as long as Chrome is open. */
+            --hotswap-toolbar-height: 30px;
+            /* Clear of the resizer's own +/-4px grab zone, so a pixel is either
+               resize or activation and never both. */
+            --hotswap-activation-inset: 6px;
+            --hotswap-activation-height: 14px;
+            /* The top-right safe zone. Proportional to the toolbar rather than
+               an arbitrary pixel count, so it scales with the chrome. */
+            --shortcut-runway-top-offset: calc(var(--hotswap-toolbar-height) * 2.5);
+            --hotswap-resting-opacity: var(--chrome-resting-opacity, 0.12);
+            --hotswap-hover-opacity: var(--chrome-hover-opacity, 1);
+        }
+        .stream-panel > .post-iframe { flex: 1 1 0; min-height: 0; width: 100%; border: none; display: block; }
+
+        /* Retracted to zero height: the website gets the whole panel. Revealing
+           grows the toolbar and pushes the iframe down — a layout change on the
+           iframe's existing parent, so the document itself is never touched. */
+        .hotswap-toolbar {
+            flex: 0 0 auto; height: 0; overflow: hidden;
+            display: flex; align-items: center; gap: 8px;
+            padding: 0 10px; box-sizing: border-box;
+            background: rgba(10,10,10,0.94); border-bottom: 0 solid #2d2d2d;
+            backdrop-filter: blur(8px); position: relative; z-index: 10002;
+            opacity: 0; transition: height 0.16s ease, opacity 0.16s ease;
+        }
+        /* BREADCRUMBS — the rail is FULL opacity whenever revealed. Retraction
+           already solves its intrusion; fading a surface that only exists while
+           deliberately in use just makes it harder to read. Ghost opacity now
+           belongs to the runway alone. */
+        .stream-panel.chrome-revealed > .hotswap-toolbar {
+            height: var(--hotswap-toolbar-height);
+            border-bottom-width: 1px;
+            opacity: 1;
+        }
+
+        .hotswap-position-label { white-space: nowrap; }
+        /* ── Compact rail geometry ────────────────────────────────────────────
+           One row, every control the same height, everything vertically centred.
+           Nothing here may reintroduce vertical offsets: the rail's height is
+           website height borrowed for as long as Chrome is open. */
+        .hotswap-toolbar > * { flex-shrink: 0; }
+        .hotswap-top-shortcuts { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .hotswap-top-shortcuts > [hidden] { display: none; }
+
+        .hotswap-position-btn {
+            display: flex; align-items: center; gap: 4px;
+            height: 22px; padding: 0 8px; margin: 0; line-height: 1;
+            background: #181818; border: 1px solid #3a3a3a; border-radius: 7px;
+            color: #9a9a9a; font-size: 11px; letter-spacing: 0.04em; cursor: pointer;
+            white-space: nowrap; transition: background 0.12s, color 0.12s, border-color 0.12s;
+        }
+        .hotswap-position-btn:hover:not(:disabled) { background: #222; color: #ddd; border-color: #555; }
+        .hotswap-position-btn.open { background: #0a2a4a; border-color: #0095f6; color: #6db8ff; }
+        .hotswap-position-btn:disabled { cursor: default; }
+        .hotswap-caret { font-size: 8px; opacity: 0.7; }
+        /* The pop-under is a PANEL child, not a toolbar child: the rail is
+           `overflow: hidden` so it can animate from zero height, which would
+           otherwise clip this away entirely. */
+        .hotswap-position-menu {
+            position: absolute; top: var(--hotswap-toolbar-height); left: 8px; margin-top: 4px;
+            background: rgba(10,10,10,0.97); border: 1px solid #333; border-radius: 10px;
+            padding: 6px; min-width: 170px; max-height: calc(100% - var(--hotswap-toolbar-height) - 16px);
+            overflow-y: auto; z-index: 10004;
+            display: flex; flex-direction: column; gap: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+        }
+        .stream-panel:not(.chrome-revealed) > .hotswap-position-menu { display: none; }
+        .hotswap-position-menu[hidden] { display: none; }
+        .hotswap-position-group { display: flex; flex-direction: column; gap: 3px; }
+        .hotswap-position-group-title {
+            font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #666; padding: 2px 4px;
+        }
+        .hotswap-position-menu .hotswap-position-item {
+            width: 100%; text-align: left; font-family: inherit;
+        }
+        .hotswap-layer-btn, .hotswap-mirror-btn, .hotswap-trigger, .hotswap-position-btn {
+            vertical-align: middle;
+        }
+
+        .hotswap-toolbar-spacer { flex: 1 1 auto; }
+        .hotswap-toolbar-actions { display: flex; align-items: center; gap: 6px; }
+
+        /* The activation region — deliberately NOT the resize border. */
+        .hotswap-activation {
+            position: absolute; left: 0; right: 0;
+            top: var(--hotswap-activation-inset);
+            height: var(--hotswap-activation-height);
+            z-index: 10003; background: transparent;
+        }
+        .stream-panel.chrome-revealed > .hotswap-activation { pointer-events: none; }
+
+        /* Layer scope. The active layer must be unmistakable, not a subtle
+           text-colour difference. */
+        .hotswap-layer-selector { display: flex; gap: 3px; }
+        .hotswap-layer-selector[hidden] { display: none; }
+        .hotswap-layer-btn {
+            background: #181818; border: 1px solid #3a3a3a; color: #777;
+            border-radius: 7px; font-size: 10px; font-weight: bold; letter-spacing: 0.06em;
+            padding: 3px 7px; cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s;
+        }
+        .hotswap-layer-btn:hover { color: #ccc; border-color: #555; }
+        .hotswap-layer-btn.active {
+            background: #f0c020; border-color: #f0c020; color: #101010;
+            box-shadow: 0 0 0 1px rgba(240,192,32,0.35), 0 0 10px rgba(240,192,32,0.35);
+        }
+
+        /* Mirror buttons: same canonical action, another surface. */
+        .hotswap-mirror-btn {
+            background: rgba(0,0,0,0.72); border: 1px solid #4a4a4a; color: #ccc;
+            border-radius: 9px; cursor: pointer; display: flex; align-items: center;
+            justify-content: center; flex-shrink: 0; transition: background 0.15s, color 0.15s, opacity 0.15s;
+            /* A two-glyph icon (Shuffle All is two dice) must stay on ONE line.
+               Without this it wraps inside the fixed box and stacks vertically,
+               which reads as a broken icon and fights the compact rail. The
+               button widens instead — the rail height never changes. */
+            white-space: nowrap; line-height: 1; padding: 0 2px; overflow: hidden;
+        }
+        .hotswap-mirror-btn:hover:not(:disabled) { background: rgba(0,0,0,0.95); color: #fff; border-color: #888; }
+        .hotswap-mirror-btn:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
+        .hotswap-toolbar-btn { min-width: 22px; width: auto; height: 22px; font-size: 12px; }
+        .hotswap-runway-btn  { width: 30px; height: 30px; font-size: 14px; }
+
+        /* The right runway: an overlay, and only as long as it is configured to
+           be. Starts below the top-right safe zone so the site keeps its own
+           corner controls — including their clickability. */
+        .hotswap-runway {
+            position: absolute; right: 10px;
+            top: var(--shortcut-runway-top-offset);
+            display: flex; flex-direction: column; gap: 6px;
+            z-index: 10001;
+            opacity: var(--hotswap-resting-opacity);
+            transition: opacity 0.15s ease;
+            /* The runway can never grow past the panel. A short panel clips the
+               tail rather than spilling controls over the layout — the user's
+               configuration is still stored, and the "···" tray remains the
+               complete fallback path to every action. */
+            max-height: calc(100% - var(--shortcut-runway-top-offset) - 10px);
+            overflow: hidden;
+        }
+        .hotswap-runway:hover, .hotswap-runway:focus-within { opacity: var(--hotswap-hover-opacity); }
+
+        /* Small panels: the configuration is kept, the presentation adapts. */
+        @media (max-height: 260px) { .hotswap-runway { display: none; } }
+        @media (max-width: 220px) { .hotswap-position-label { display: none; } }
 
         /* Bookmark modal */
         #bookmark-modal { display:none; position:fixed; inset:0; z-index:2147483647; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
@@ -434,6 +579,10 @@
         <button class="master-btn layout-btn" id="btn-layout-4grid" data-layout="4grid" title="4 Screen Grid">
             <span class="layout-icon li-4grid"><i></i><i></i><i></i><i></i></span>
         </button>
+        <div class="hotswap-layer-selector" id="master-layer-selector" hidden>
+            <button class="hotswap-layer-btn" data-layer="L2">L2</button>
+            <button class="hotswap-layer-btn" data-layer="L1">L1</button>
+        </div>
         <button class="master-btn shuffle-btn"   id="btn-master-shuffle">🎲 Shuffle</button>
         <button class="master-btn shuffall-btn"  id="btn-master-shuffle-all">🎲🎲 Shuffle All</button>
         <button class="master-btn undo-btn" id="btn-master-undo" disabled title="Undo the last change to this session">↩ Undo</button>

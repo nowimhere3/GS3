@@ -333,6 +333,14 @@
         }
 
         .slot-count-row { display: flex; gap: 8px; }
+        /* Eight was chosen because it lays out as two clean rows of four and is
+           as much runway as a panel edge can carry without becoming a wall. */
+        .slot-count-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        #quick-actions-config.disabled, #top-shortcuts-config.disabled { opacity: 0.35; pointer-events: none; }
+        .hotswap-toggle-row[draggable="true"] { cursor: grab; }
+        .hotswap-toggle-row.dragging { opacity: 0.4; }
+        .hotswap-toggle-row.drop-target { outline: 1px dashed #0095f6; outline-offset: 2px; }
+        .drag-handle { color: #555; margin-right: 8px; cursor: grab; user-select: none; }
         .btn-slot-count {
             flex: 1;
             background: #222;
@@ -483,44 +491,95 @@
         <div class="section-header">
             <h3>🎛 Hotswap Overlay Controls</h3>
         </div>
-        <p class="subtitle">Choose which controls appear in each iframe's hotswap overlay (the "···" menu).</p>
-        <div class="hotswap-toggle-list" id="hotswap-toggle-list"></div>
+        <p class="subtitle">Three surfaces, one set of actions. Top Shortcuts ride the toolbar; the Quick Action Runway sits over the content; Deep Cuts ("···") is the deeper toolbox. The same action may appear on more than one.</p>
 
-        <div class="section-header" style="margin-top:24px;">
-            <h3>Quick Action Shortcuts</h3>
+        <div class="section-header" style="margin-top:20px;">
+            <h3>Top Shortcuts</h3>
+            <label class="switch" style="margin:0;">
+                <input type="checkbox" id="top-shortcuts-enabled">
+                <span class="slider"></span>
+            </label>
         </div>
-        <p class="subtitle">Pin up to 3 actions as always-visible shortcuts below the "···" button — no need to open the overlay first. A pinned action is automatically removed from the "···" tray. Applies to every iframe.</p>
-
-        <div class="input-group">
-            <label>Number of Shortcut Slots</label>
-            <div class="slot-count-row" id="slot-count-row">
-                <button class="btn-slot-count" data-count="0">0</button>
-                <button class="btn-slot-count" data-count="1">1</button>
-                <button class="btn-slot-count" data-count="2">2</button>
-                <button class="btn-slot-count" data-count="3">3</button>
+        <p class="subtitle">Shown in the toolbar whenever it is revealed. Narrow panels show fewer; widening restores them.</p>
+        <div id="top-shortcuts-config">
+            <div class="input-group">
+                <label>Number of Shortcuts</label>
+                <div class="slot-count-grid" id="top-count-row">
+                    <button class="btn-slot-count" data-count="1">1</button>
+                    <button class="btn-slot-count" data-count="2">2</button>
+                    <button class="btn-slot-count" data-count="3">3</button>
+                    <button class="btn-slot-count" data-count="4">4</button>
+                    <button class="btn-slot-count" data-count="5">5</button>
+                    <button class="btn-slot-count" data-count="6">6</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Shortcut Order</label>
+                <p class="subtitle" style="margin-top:0;">Drag to reorder. The first <span id="top-count-echo">3</span> appear, left to right.</p>
+                <div class="hotswap-toggle-list" id="top-order-list"></div>
             </div>
         </div>
 
-        <div class="quick-slot-pickers" id="quick-slot-pickers"></div>
+        <div class="section-header" style="margin-top:24px;">
+            <h3>Quick Action Shortcut Runway</h3>
+            <label class="switch" style="margin:0;">
+                <input type="checkbox" id="quick-actions-enabled">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <p class="subtitle">A vertical runway down the right edge of every panel, starting below the top-right corner so the website keeps its own controls.</p>
+
+        <div id="quick-actions-config">
+            <div class="input-group">
+                <label>Resting Opacity</label>
+                <div class="ghost-opacity-row">
+                    <input type="range" id="ghost-opacity-slider" min="0" max="100" step="1">
+                    <input type="number" id="ghost-opacity-input" min="0" max="100" step="1">
+                    <span class="ghost-opacity-pct">%</span>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Hover Opacity</label>
+                <div class="ghost-opacity-row">
+                    <input type="range" id="hover-opacity-slider" min="0" max="100" step="1">
+                    <input type="number" id="hover-opacity-input" min="0" max="100" step="1">
+                    <span class="ghost-opacity-pct">%</span>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Number of Shortcuts</label>
+                <div class="slot-count-grid" id="slot-count-row">
+                    <button class="btn-slot-count" data-count="1">1</button>
+                    <button class="btn-slot-count" data-count="2">2</button>
+                    <button class="btn-slot-count" data-count="3">3</button>
+                    <button class="btn-slot-count" data-count="4">4</button>
+                    <button class="btn-slot-count" data-count="5">5</button>
+                    <button class="btn-slot-count" data-count="6">6</button>
+                    <button class="btn-slot-count" data-count="7">7</button>
+                    <button class="btn-slot-count" data-count="8">8</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Shortcut Order</label>
+                <p class="subtitle" style="margin-top:0;">Drag to reorder. The first <span id="runway-count-echo">3</span> appear, top to bottom.</p>
+                <div class="hotswap-toggle-list" id="runway-order-list"></div>
+            </div>
+        </div>
+
+        <div class="section-header" style="margin-top:24px;">
+            <h3>··· Deep Cuts</h3>
+        </div>
+        <p class="subtitle">Everything available in the "···" tray. Toggle what appears, and drag to set the order.</p>
+        <div class="hotswap-toggle-list" id="hotswap-toggle-list"></div>
     </div>
 
-    <!-- Ghost Mode -->
+    <!-- Ghost Mode (other overlays) -->
     <div class="config-card ghost-panel">
         <div class="section-header">
             <h3>👻 Ghost Mode</h3>
         </div>
-        <p class="subtitle">Fade specific overlay controls to a faint "ghost" opacity until you hover directly over them — keeps the screen clean while streams play, and reveals instantly on hover with no delay (pure CSS, no JavaScript tracking).</p>
-
-        <div class="input-group">
-            <label>Ghost Opacity</label>
-            <div class="ghost-opacity-row">
-                <input type="range" id="ghost-opacity-slider" min="0" max="100" step="1">
-                <input type="number" id="ghost-opacity-input" min="0" max="100" step="1">
-                <span class="ghost-opacity-pct">%</span>
-            </div>
-        </div>
-
-        <div class="hotswap-toggle-list" id="ghost-toggle-list" style="margin-top:16px;"></div>
+        <p class="subtitle">Fade these overlays to the Runway's Resting Opacity until you hover them. The Hotswap toolbar is not listed: it retracts completely when unused, so it has nothing to fade.</p>
+        <div class="hotswap-toggle-list" id="ghost-toggle-list" style="margin-top:8px;"></div>
     </div>
 
 </div>

@@ -135,6 +135,26 @@ so browsing cannot leak across a deliberate content replacement.
 
 ---
 
+# Hotswap Chrome
+
+A Panel's control surface.
+
+Two parts: a retractable TOP TOOLBAR that insets content,
+and a SHORTCUT RUNWAY overlaying the right edge.
+
+---
+
+# Layer Scope
+
+Which runtime object a control acts on.
+
+Two scopes only: L1 and L2.
+
+Stated explicitly by a highlighted selector,
+never implied by where a control sits.
+
+---
+
 # Content
 
 Information describing what a Panel contains.
