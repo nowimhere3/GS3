@@ -5,8 +5,11 @@
  */
 
 import { Store } from './storage.js';
-import { fetchDatabaseWithUI, fetchDatabaseSilently } from './sync.js';
-import { renderFolderManager } from './folders.js';
+import { fetchDatabaseWithUI, fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
+import { renderFolderManager, updateDirectoryDropdown } from './folders.js';
+import { getDatabaseStructure, setDatabaseStructure } from './state.js';
+import { initDropzone } from './parser.js';
+import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
 import { HOTSWAP_ACTIONS } from './launch.js';
 import {
     getHotswapTrayOrder, setHotswapTrayOrder, getQuickActionOrder, setQuickActionOrder,
@@ -22,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function bootSettings() {
+    _initCollapsibleSections();
 
     // ── Restore persisted git credentials ─────────────────────────────────────
     const gitTokenEl = document.getElementById('git-token');
@@ -37,9 +41,10 @@ async function bootSettings() {
             const repo  = gitRepoEl?.value.trim()  || '';
             Store.set('gitToken', token);
             Store.set('gitRepo',  repo);
-            const success = await fetchDatabaseWithUI(_refreshFolderManager);
+            const success = await fetchDatabaseWithUI(_refreshSettingsData);
             if (success) {
-                _refreshFolderManager();
+                _refreshSettingsData();
+                _initIngest();
             }
         };
     }
@@ -50,18 +55,76 @@ async function bootSettings() {
     // ── Hotswap Overlay Controls ───────────────────────────────────────────────
     _initHotswapControls();
     _initGhostMode();
+    initBlacklist();
+    initBlacklistUI();
+    renderBlacklistDisplay();
 
     // ── Auto-fetch database if credentials are saved ──────────────────────────
     if (Store.get('gitToken') && Store.get('gitRepo')) {
-        await fetchDatabaseSilently(_refreshFolderManager);
+        await fetchDatabaseSilently(_refreshSettingsData);
     }
 
     // Initial folder manager render
-    _refreshFolderManager();
+    _refreshSettingsData();
+    _initIngest();
 }
 
-function _refreshFolderManager() {
-    renderFolderManager(null, _refreshFolderManager);
+function _refreshSettingsData() {
+    updateDirectoryDropdown(null);
+    renderFolderManager(null, _refreshSettingsData);
+}
+
+let _ingestInitialized = false;
+function _initIngest() {
+    if (_ingestInitialized || !getDatabaseStructure()) return;
+    _ingestInitialized = true;
+    initDropzone(document.getElementById('file-dropzone'), document.getElementById('manual-file-pick'), {
+        getDatabaseStructure,
+        setDatabaseStructure,
+        pushDatabaseToRemote,
+        updateDirectoryDropdown: _refreshSettingsData,
+        dirDropdown: null,
+    });
+}
+
+function _initCollapsibleSections() {
+    const screen = document.getElementById('settings-screen');
+    const order = ['github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
+    const state = { ...(Store.get('settingsSectionState') || {}) };
+    const cards = new Map([...screen.querySelectorAll(':scope > .config-card[data-section]')]
+        .map((card) => [card.dataset.section, card]));
+    order.forEach((id) => { const card = cards.get(id); if (card) screen.appendChild(card); });
+
+    cards.forEach((card, id) => {
+        const originalHeader = card.querySelector(':scope > .section-header');
+        const title = originalHeader?.textContent.trim() || id;
+        const body = document.createElement('div');
+        body.className = 'section-body';
+        body.id = `sec-${id}`;
+        [...card.children].forEach((child) => { if (child !== originalHeader) body.appendChild(child); });
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'section-toggle';
+        toggle.setAttribute('aria-controls', body.id);
+        toggle.innerHTML = `<span class="section-title"></span><span class="section-caret" aria-hidden="true">▼</span>`;
+        toggle.querySelector('.section-title').textContent = title;
+        originalHeader?.remove();
+        card.prepend(toggle);
+        card.appendChild(body);
+        const apply = () => {
+            const collapsed = state[id] === true;
+            card.dataset.collapsed = String(collapsed);
+            toggle.setAttribute('aria-expanded', String(!collapsed));
+        };
+        toggle.onclick = () => {
+            state[id] = !(state[id] === true);
+            if (!state[id]) delete state[id];
+            Store.set('settingsSectionState', state);
+            apply();
+            if (id === 'hotswap' && !state[id]) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+        };
+        apply();
+    });
 }
 
 function _initFrameHeightSettings() {
@@ -193,8 +256,8 @@ function _makeReorderable(listEl, onReorder) {
  * canonical actions, so an action can appear in both without being duplicated.
  */
 function _initHotswapControls() {
-    const toggleListEl = document.getElementById('hotswap-toggle-list');
-    if (!toggleListEl) return;
+    const topListEl = document.getElementById('top-order-list');
+    if (!topListEl) return;
 
     const visibility = { ...Store.get('hotswapButtonVisibility') };
     const byKey = new Map(HOTSWAP_ACTIONS.map((action) => [action.key, action]));
@@ -238,7 +301,7 @@ function _initHotswapControls() {
      * inventing its own grammar. They remain INDEPENDENT collections: the same
      * canonical action may legitimately appear on both.
      */
-    function _wireCollection({ enabledId, configId, countRowId, listId, echoId,
+    function _wireCollection({ enabledId, configId, countRowId, listId, echoId, withToggle = false,
                                isEnabled, setEnabled, getCount, setCount, getOrder, setOrder }) {
         const enabledEl = document.getElementById(enabledId);
         const configEl = document.getElementById(configId);
@@ -253,6 +316,14 @@ function _initHotswapControls() {
                 btn.classList.toggle('active', parseInt(btn.dataset.count, 10) === count);
             });
             if (echoEl) echoEl.textContent = String(count);
+            [...listEl.querySelectorAll('.hotswap-toggle-row')].forEach((row, index) => {
+                const active = index < count;
+                row.classList.toggle('outside-cutoff', !active);
+                row.dataset.destination = active ? 'toolbar' : (listId === 'top-order-list' ? 'deep-cuts' : 'not-selected');
+                row.setAttribute('aria-description', active
+                    ? (listId === 'top-order-list' ? 'On the Top Toolbar' : 'Selected for the Runway')
+                    : (listId === 'top-order-list' ? 'Currently in Deep Cuts; remains reorderable' : 'Outside the Runway count; remains reorderable'));
+            });
         };
         const renderEnabled = () => {
             const on = isEnabled();
@@ -266,7 +337,7 @@ function _initHotswapControls() {
         countRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
             btn.onclick = () => { setCount(parseInt(btn.dataset.count, 10)); renderCount(); };
         });
-        _renderList(listEl, getOrder(), false, setOrder);
+        _renderList(listEl, getOrder(), withToggle, (order) => { setOrder(order); renderCount(); });
         renderCount();
         renderEnabled();
     }
@@ -277,6 +348,7 @@ function _initHotswapControls() {
         isEnabled: isTopShortcutsEnabled, setEnabled: setTopShortcutsEnabled,
         getCount: getTopShortcutCount, setCount: setTopShortcutCount,
         getOrder: getTopShortcutOrder, setOrder: setTopShortcutOrder,
+        withToggle: true,
     });
     _wireCollection({
         enabledId: 'quick-actions-enabled', configId: 'quick-actions-config',
@@ -286,8 +358,6 @@ function _initHotswapControls() {
         getOrder: getQuickActionOrder, setOrder: setQuickActionOrder,
     });
 
-    // Deep Cuts owns visibility as well as order.
-    _renderList(toggleListEl, getHotswapTrayOrder(), true, setHotswapTrayOrder);
 }
 
 

@@ -2,6 +2,50 @@
 
 The per-panel control surface.
 
+## Part 1-4 canonical utility dock breadcrumb
+
+WAS: Edit URL and Assign Folder placement depended on invocation surface: Top opened below, while Runway and Deep Cuts opened leftward. Runway Shuffle All used the same horizontal glyph arrangement as Top.
+
+IS: both picker actions always open at the same compact inset from the current website area's top-right (measured 8px top / 12px right in the bordered panel), independent of the invoking surface and without revealing Top. Completion, Escape, observable outside pointerdown, or iframe focus closes through the canonical picker lifecycle. The canonical Shuffle All action remains horizontal in Top and stacks its two dice only in the vertical Runway presentation.
+
+WHY: one predictable top-right utility location is cleaner than surface-dependent editors; opening an editor must never force completion; and icon orientation should follow its surface without forking action behavior.
+
+WAS: click-away within observable GS3 UI was available, but returning focus to iframe content did not explicitly dismiss an open utility.
+
+IS: iframe focus is used as a non-intercepting dismissal signal. No transparent website overlay or sacrificial first click is introduced.
+
+WHY: the website continues to own its pixels and receives the intended interaction normally, including across the browser's cross-origin event boundary.
+
+## Part 1-3 human UX polish breadcrumb
+
+WAS: Runway pickers opened leftward but could lose their stored invocation anchor and clamp toward panel top; Top controls were visually grouped from the left.
+
+IS: Runway pickers preserve immediate horizontal and centered vertical attachment to the clicked shortcut, clamping only by the required boundary delta. Position remains isolated left while layer scope, configurable actions, Undo, Redo, and Deep Cuts form a right-side cluster.
+
+WHY: the customer should immediately understand which shortcut owns a picker, and the toolbar should share a coherent right-side command language with the Runway.
+
+WAS: Hotswap switches aligned globally but sat against the content edge, and major Settings collapse indicators preceded their titles.
+
+IS: the shared switch axis has one 12px trailing inset. Major section titles remain left while their indicators sit far right; the entire heading button remains clickable and keyboard accessible.
+
+WHY: precise alignment should not look clipped, and a clean title/caret split should not sacrifice the generous interaction target.
+
+## Part 1-2 stable geometry breadcrumb
+
+WAS: Runway was 1.75 toolbar heights from panel top. Focus anywhere in the Chrome family could reveal Top, and the 850ms timer could end an active picker interaction.
+
+IS: Runway is 1.75 toolbar heights from the current website top. Family focus keeps Chrome alive, but only rail-owned focus reveals Top. An active picker owns its interaction until commit, Escape, outside pointerdown, or same-control toggle.
+
+WHY: when Top pushes the website down, Runway must preserve its safe relationship to website UI, and Runway actions must not move underneath the customer while being used.
+
+## Part 1 intelligence and picker geometry breadcrumb
+
+WAS: Top Toolbar and Deep Cuts were independently ordered; responsive pressure hid trailing toolbar buttons; picker shortcuts opened the tray.
+
+IS: one persisted 10-action order is filtered for intentional visibility before the configured Top cutoff. Deep Cuts is the visible remainder, including temporary actual-width responsive overflow, and its structural gateway remains enabled with an empty state. Runway order/count remain independent. Edit URL and Assign Folder use one canonical implementation with a panel-level picker anchored below a Top control or left of a Runway/Deep control, then flipped/clamped inside the panel. Comparable Settings switches share one global right-edge grid axis. The Runway safe zone is 1.75 toolbar heights.
+
+WHY: customers should not count or duplicate-manage membership, shrinking a panel must not make actions unreachable, and pickers should appear at the control that was clicked without colliding with the Runway.
+
 ---
 
 # BREADCRUMBS — WAS
@@ -239,6 +283,74 @@ Position swaps remain atomic, surgical and zero-reload.
 
 ---
 
+# One canonical action registry
+
+## BREADCRUMBS — WAS
+
+A single `shortcutable` boolean decided whether an action
+could appear on a shortcut surface.
+
+It was hand-maintained, and it drifted.
+
+Edit URL and Assign Folder were reachable in Deep Cuts
+but silently absent from Toolbar Shortcuts and the Runway,
+because `shortcutable: false` had been set back when a shortcut
+was a tiny corner button with nowhere to draw a picker.
+
+## BREADCRUMBS — IS
+
+Each action declares CAPABILITY and STRUCTURAL OWNERSHIP.
+
+Surface eligibility is DERIVED from those, in one place.
+
+    opensPicker   reveals a row inside Deep Cuts rather than
+                  firing immediately
+
+    structural    already presented as fixed, non-removable UI
+                    'positionButton' — surfaced by [Position N]
+                    'toolbarRail'    — a fixed control on the rail
+
+## BREADCRUMBS — WHY
+
+Three hand-curated vocabularies over one set of behaviors
+is drift waiting to happen, and it already happened.
+
+Deriving eligibility means adding an action makes it appear
+everywhere it is legal, automatically.
+
+## Three different questions
+
+    the action EXISTS
+    this SURFACE may present it
+    it is STRUCTURALLY OWNED elsewhere
+
+Collapsing these into one boolean is what lost two actions.
+
+Exclusions are presentation decisions.
+
+Every implementation stays reachable, and is never duplicated.
+
+## Eligibility rules
+
+    positionButton-owned  excluded from ALL configurable surfaces
+    toolbarRail-owned     excluded from Toolbar Shortcuts only
+                          (the rail already shows them; the Runway
+                           and Deep Cuts do not)
+
+## Picker actions on a shortcut surface
+
+Edit URL and Assign Folder reveal a row inside the Deep Cuts tray.
+
+Invoked from another surface the tray is closed,
+so the row would open where nobody can see it.
+
+The mirror opens the tray first.
+
+That is what makes them genuinely usable as shortcuts,
+rather than excluded for lack of somewhere to draw.
+
+---
+
 # Three action surfaces
 
 ## BREADCRUMBS — WAS
@@ -270,6 +382,17 @@ All three invoke the same canonical actions.
 Top Shortcuts and the Runway are INDEPENDENT collections:
 deliberately exposing the same action on both is
 presentation duplication, which is allowed.
+
+## Toolbar capacity: 1-10
+
+BREADCRUMBS — WAS 6, chosen when Undo and Redo were competing
+for the same configurable slots.
+
+IS 10.
+
+WHY: Position, Undo, Redo and "···" are structural and no longer
+consume configurable capacity, so a wide enough panel can expose
+essentially the whole ordinary action vocabulary directly.
 
 ## Responsive capacity
 
@@ -387,8 +510,16 @@ Height changes are comparatively cheap.
 
 # Top-right safe zone
 
-The runway begins approximately 2.5 toolbar heights
+The runway begins 1.75 toolbar heights
 below the top of the panel.
+
+BREADCRUMBS — WAS 2.5 toolbar heights.
+
+IS 1.75.
+
+WHY: a website's own corner controls sit within roughly one
+control-row of the top edge. 2.5 surrendered well past them
+and cost usable runway height for nothing.
 
 Almost every website puts account, settings or notification
 controls in its top-right corner.
@@ -398,7 +529,7 @@ would silently steal clicks.
 
 The offset is authored proportionally:
 
-    --shortcut-runway-top-offset: calc(var(--hotswap-toolbar-height) * 2.5)
+    --shortcut-runway-top-offset: calc(var(--hotswap-toolbar-height) * 1.75)
 
 so it scales with the chrome rather than being a magic pixel count.
 
@@ -406,6 +537,50 @@ The runway is exactly as long as its configured count.
 
 A full-height strip would be an invisible wall
 down the side of every website.
+
+---
+
+# Settings hierarchy
+
+## BREADCRUMBS — WAS
+
+"Top Shortcuts", "Quick Action Shortcut Runway" and "Deep Cuts"
+read as three peers, which hid the real structure.
+
+## BREADCRUMBS — IS
+
+Two major SURFACES:
+
+    Top Toolbar
+      ├── fixed: Position, [L2][L1], Undo, Redo, ···
+      ├── Toolbar Shortcuts   (configurable middle)
+      └── ··· Deep Cuts       (fallback child)
+
+    Quick Action Shortcut Runway
+
+## BREADCRUMBS — WHY
+
+Deep Cuts is the toolbar's fallback gateway,
+not a third place to put controls.
+
+Presenting it as a peer invited the reading that
+the toolbar and the tray were unrelated surfaces.
+
+## Switch alignment
+
+Every Hotswap ON/OFF switch shares ONE grammar:
+the heading row is a flex row whose switch is pushed
+to the far right by `margin-left: auto`.
+
+A vertical ruler laid against the card's right edge
+touches every comparable switch, at any nesting depth,
+because they inherit the same card padding.
+
+No per-section pixel offsets.
+
+The switches previously carried an inline `style="margin:0"`
+which silently outranked the stylesheet — that is why they sat
+at differing left positions determined by heading text width.
 
 ---
 
@@ -574,3 +749,68 @@ and the storage key prefix.
 The architecture is documented as Hotswap Chrome.
 
 No customer-facing rename has been made.
+
+
+---
+
+# The crossed-out artifact near ···
+
+## BREADCRUMBS — WAS
+
+A human saw a crossed-out, unavailable-looking artifact
+when moving the pointer toward the "···" gateway,
+with a flicker as the pointer crossed it.
+
+It reproduced on two independent panels.
+
+A screenshot captured the toolbar
+but did NOT contain the artifact at all.
+
+## BREADCRUMBS — IS
+
+The "···" gateway was never the problem.
+
+Measured, it is `disabled: false`, `cursor: pointer`, `opacity: 1`.
+
+Undo and Redo sit immediately to its LEFT and are disabled
+whenever a panel has no history yet — which is every fresh session.
+
+They carried `cursor: not-allowed` plus `filter: grayscale(1)`,
+occupying a roughly 50px band directly on the approach path:
+
+    dx = -50 .. -10   not-allowed
+    dx =   0 .. +20   pointer
+
+Crossing that band changed the cursor three times
+in about 60px of travel.
+
+Disabled controls now use the ordinary cursor and dimming alone.
+
+`user-select: none` was also restored across the rail —
+the corner-era "···" had it, and the rewrite into a flex rail
+dropped it, leaving the controls able to begin a text selection
+or a native text drag.
+
+## BREADCRUMBS — WHY the screenshot was empty
+
+A CSS cursor is drawn by the compositor.
+
+It is not part of the page bitmap,
+so no ordinary screenshot can ever contain it.
+
+The greyed-out neighbours WERE in the capture,
+but read as normal dimming rather than as the artifact.
+
+This is worth recording precisely because the evidence
+looked contradictory: visible to the eye, absent from the file.
+That combination is a strong signal for a cursor
+or another compositor-drawn surface — not for a DOM bug.
+
+## BREADCRUMBS — WHY the change
+
+Dimming already communicates "unavailable".
+
+`not-allowed` added alarm rather than information,
+and aimed it at the wrong control — the one control
+that must stay trustworthy, because it is the fallback gateway
+to every action on a narrow panel.

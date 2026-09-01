@@ -804,7 +804,8 @@ async function freshChrome(seed = {}) {
     Object.entries(seed).forEach(([key, value]) => localStorage.setItem(key, value));
     const chrome = await import('../js/hotswap-chrome.js');
     const { Store } = await import('../js/storage.js');
-    ['hotswapTrayOrder', 'quickActionSlots', 'quickActionsEnabled', 'quickActionCount',
+    ['hotswapTrayOrder', 'hotswapActionOrder', 'hotswapTopCount', 'topShortcutOrder',
+        'topShortcutCount', 'quickActionSlots', 'quickActionsEnabled', 'quickActionCount',
         'quickActionOrder', 'ghostOpacity', 'hotswapHoverOpacity'].forEach((key) => Store.invalidate(key));
     return chrome;
 }
@@ -814,20 +815,48 @@ test('tray order reconciles against the canonical registry, never forking it', a
     const { HOTSWAP_ACTIONS } = await import('../js/launch.js');
     // Position-owned actions are presented by the [Position N] button, so the
     // tray — and its Settings list — deliberately do not offer them.
-    const everyKey = HOTSWAP_ACTIONS.filter((a) => !a.positionOwned).map((action) => action.key);
-    assert.ok(HOTSWAP_ACTIONS.some((a) => a.positionOwned), 'the registry still defines them');
+    const everyKey = HOTSWAP_ACTIONS
+        .filter((a) => !a.structural).map((action) => action.key);
+    assert.ok(HOTSWAP_ACTIONS.some((a) => a.structural === 'positionButton'),
+        'the registry still defines them');
     assert.ok(!everyKey.includes('position') && !everyKey.includes('copyPosition'));
 
     assert.deepEqual(chrome.getHotswapTrayOrder(), everyKey, 'an unset order is registry order');
 
     // A stored order that is stale in both directions: it names an action that
     // no longer exists and omits ones that were added since.
-    chrome.setHotswapTrayOrder(['redo', 'ghost-action-that-was-removed', 'undo']);
+    chrome.setHotswapTrayOrder(['purge', 'ghost-action-that-was-removed', 'reload']);
     const order = chrome.getHotswapTrayOrder();
-    assert.deepEqual(order.slice(0, 2), ['redo', 'undo'], 'the stored preference is honoured');
+    assert.deepEqual(order.slice(0, 2), ['purge', 'reload'], 'the stored preference is honoured');
     assert.equal(order.length, everyKey.length, 'and every real action still appears exactly once');
     assert.deepEqual([...new Set(order)].sort(), [...everyKey].sort());
     assert.deepEqual(chrome.getOrderedHotswapActions().map((action) => action.key), order);
+});
+
+test('legacy Top and Deep preferences migrate deterministically once', async () => {
+    const seed = {
+        hotswap_top_shortcut_order: JSON.stringify(['reload', 'toggle', 'purge', 'shuffle']),
+        hotswap_top_shortcut_count: '3',
+        hotswap_tray_order: JSON.stringify(['folder', 'star', 'purge', 'reload']),
+    };
+    const chrome = await freshChrome(seed);
+    assert.deepEqual(chrome.getHotswapActionOrder().slice(0, 5),
+        ['reload', 'toggle', 'purge', 'folder', 'star']);
+    assert.equal(chrome.getTopShortcutCount(), 3);
+    assert.equal(localStorage.getItem('hotswap_top_shortcut_count'), '3', 'legacy count remains readable');
+    assert.ok(localStorage.getItem('hotswap_tray_order'), 'legacy tray order remains intact');
+    const migrated = localStorage.getItem('hotswap_action_order');
+    localStorage.setItem('hotswap_tray_order', JSON.stringify(['launchpad']));
+    assert.equal(JSON.stringify(chrome.getHotswapActionOrder()), migrated,
+        'later legacy writes cannot overwrite migrated state');
+});
+
+test('visibility filters before the unified Top cutoff', async () => {
+    const chrome = await freshChrome();
+    chrome.setTopShortcutOrder(['reload', 'toggle', 'purge', 'shuffle', 'folder', 'star', 'delete']);
+    chrome.setTopShortcutCount(6);
+    assert.deepEqual(chrome.getActiveTopShortcuts({ purge: false }),
+        ['reload', 'toggle', 'shuffle', 'folder', 'star', 'delete']);
 });
 
 test('the runway on/off is independent of its count', async () => {
@@ -917,7 +946,8 @@ test('Layer 2 is recognised only for our own runtime pages, same-origin', async 
 test('Top Shortcuts are their own collection, independent of the runway', async () => {
     const chrome = await freshChrome();
     assert.equal(chrome.isTopShortcutsEnabled(), true, 'on by default — the rail is already summoned');
-    assert.equal(chrome.MAX_TOP_SHORTCUTS, 6, 'a lower ceiling than the runway: it shares the rail');
+    assert.equal(chrome.MAX_TOP_SHORTCUTS, 10,
+        'structural controls no longer consume configurable capacity');
 
     chrome.setTopShortcutOrder(['star', 'shuffle', 'reload']);
     chrome.setTopShortcutCount(2);
@@ -931,18 +961,18 @@ test('Top Shortcuts are their own collection, independent of the runway', async 
 
     // Deliberately exposing the same action on both is presentation
     // duplication, which is allowed — behavior is still one implementation.
-    chrome.setTopShortcutOrder(['undo', 'star']);
-    assert.deepEqual(chrome.getActiveTopShortcuts(), ['undo', 'star']);
+    chrome.setTopShortcutOrder(['reload', 'star']);
+    assert.deepEqual(chrome.getActiveTopShortcuts(), ['reload', 'star']);
     assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo']);
 
     chrome.setTopShortcutsEnabled(false);
     assert.deepEqual(chrome.getActiveTopShortcuts(), []);
     assert.deepEqual(chrome.getActiveQuickActions(), ['undo', 'redo'], 'the runway is unaffected');
     chrome.setTopShortcutsEnabled(true);
-    assert.deepEqual(chrome.getActiveTopShortcuts(), ['undo', 'star'], 'configuration survived');
+    assert.deepEqual(chrome.getActiveTopShortcuts(), ['reload', 'star'], 'configuration survived');
 
     chrome.setTopShortcutCount(99);
-    assert.equal(chrome.getTopShortcutCount(), 6);
+    assert.equal(chrome.getTopShortcutCount(), 10);
     chrome.setTopShortcutCount(0);
     assert.equal(chrome.getTopShortcutCount(), 1, 'zero is not a way to express "off" here either');
 });

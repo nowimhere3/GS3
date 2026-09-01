@@ -721,7 +721,7 @@ test('Quick Action runway mirrors track real availability instead of sitting the
     // The tray and the runway are independent presentation collections now, so
     // an action on the runway is ALSO still reachable in the tray.
     assert.equal(await page.evaluate(() =>
-        document.querySelectorAll('.stream-panel')[1].querySelector('.btn-hotswap-undo').style.display), '');
+        document.querySelectorAll('.stream-panel')[1].querySelector('.btn-hotswap-undo').style.display), 'none');
     assert.deepEqual(await runway(1), [{ key: 'undo', enabled: false }, { key: 'redo', enabled: false }]);
 
     await page.evaluate(() => {
@@ -1522,10 +1522,10 @@ test('the Quick Action runway is an overlay below the top-right safe zone', asyn
 
     const geometry = await chromeGeometry(page);
     assert.equal(geometry.runwayButtons, 4, 'the runway is exactly as long as configured');
-    assert.match(geometry.runwayOffsetExpr, /calc\(.*2\.5\)/,
+    assert.match(geometry.runwayOffsetExpr, /calc\(.*1\.75\)/,
         'the safe-zone offset is authored proportionally, not as a magic pixel count');
-    assert.equal(geometry.runwayTop, Math.round(geometry.toolbarHeightVar * 2.5),
-        'and resolves to 2.5 toolbar heights below the top of the panel');
+    assert.equal(geometry.runwayTop, Math.round(geometry.toolbarHeightVar * 1.75),
+        'and resolves to 1.75 toolbar heights below the top of the panel');
     assert.ok(geometry.runwayHeight < geometry.panelHeight / 2,
         'and does not reserve a full-height strip');
 
@@ -1657,24 +1657,45 @@ test('Settings drives all three collections and the runway-only opacity pair', a
         box.dispatchEvent(new Event('change', { bubbles: true }));
     }, [id, on]);
 
-    // Three independently ordered collections.
-    for (const listId of ['top-order-list', 'runway-order-list', 'hotswap-toggle-list']) {
+    // One unified Top/Deep collection plus an independent Runway collection.
+    for (const listId of ['top-order-list', 'runway-order-list']) {
         assert.ok(await page.locator(`#${listId} .hotswap-toggle-row`).count() > 0, listId);
         assert.equal(await page.evaluate((id) =>
             document.querySelector(`#${id} .hotswap-toggle-row`).draggable, listId), true);
     }
-    assert.ok(await page.locator('#hotswap-toggle-list .hotswap-toggle-row').count()
-        > await page.locator('#runway-order-list .hotswap-toggle-row').count(),
-        'only Deep Cuts lists every action');
-    // Only Deep Cuts owns visibility.
-    assert.ok(await page.locator('#hotswap-toggle-list input[type="checkbox"]').count() > 0);
-    assert.equal(await page.locator('#top-order-list input[type="checkbox"]').count(), 0);
+    // Eligibility is derived, so the counts encode the ownership rules exactly:
+    // Deep Cuts and the Runway both offer everything except the two
+    // Position-owned actions; the Toolbar additionally excludes Undo/Redo,
+    // which are already fixed controls on that same rail.
+    const rows = async (id) => page.locator(`#${id} .hotswap-toggle-row`).count();
+    const [runway, toolbar] = await Promise.all(
+        ['runway-order-list', 'top-order-list'].map(rows));
+    assert.equal(runway, toolbar + 2, 'Runway additionally offers Undo/Redo');
+    const keys = (id) => page.evaluate((listId) =>
+        [...document.querySelectorAll(`#${listId} .hotswap-toggle-row`)].map((r) => r.dataset.key), id);
+    const toolbarKeys = await keys('top-order-list');
+    assert.ok(!toolbarKeys.includes('undo') && !toolbarKeys.includes('redo'));
+    // The drift this consolidation fixes: these were missing from both
+    // shortcut surfaces purely because they open a picker.
+    for (const listId of ['top-order-list', 'runway-order-list']) {
+        const listed = await keys(listId);
+        assert.ok(listed.includes('toggle'), `Edit URL is offered on ${listId}`);
+        assert.ok(listed.includes('folder'), `Assign Folder is offered on ${listId}`);
+        assert.ok(!listed.includes('position') && !listed.includes('copyPosition'),
+            `${listId} does not duplicate the Position-owned actions`);
+    }
+    // The unified Top/Deep rows own intentional visibility.
+    assert.equal(await page.locator('#top-order-list input[type="checkbox"]').count(), 10);
 
     // Runway: 1-8 in two rows of four. Top Shortcuts: 1-6, its own ceiling.
     assert.deepEqual(await page.locator('#slot-count-row .btn-slot-count').allTextContents(),
         ['1', '2', '3', '4', '5', '6', '7', '8']);
     assert.deepEqual(await page.locator('#top-count-row .btn-slot-count').allTextContents(),
-        ['1', '2', '3', '4', '5', '6']);
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
+        'Toolbar Shortcuts support 1-10 now that structural controls do not consume slots');
+    assert.equal(await page.evaluate(() =>
+        getComputedStyle(document.getElementById('top-count-row')).gridTemplateColumns.split(' ').length), 5,
+        'laid out as two rows of five');
     assert.equal(await page.evaluate(() =>
         getComputedStyle(document.getElementById('slot-count-row')).gridTemplateColumns.split(' ').length), 4);
 
@@ -1682,16 +1703,16 @@ test('Settings drives all three collections and the runway-only opacity pair', a
     await setSwitch('quick-actions-enabled', true);
     await page.locator('#slot-count-row .btn-slot-count[data-count="6"]').click();
     await setSwitch('top-shortcuts-enabled', true);
-    await page.locator('#top-count-row .btn-slot-count[data-count="5"]').click();
+    await page.locator('#top-count-row .btn-slot-count[data-count="9"]').click();
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '6');
-    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcut_count')), '5');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_count')), '9');
     await setSwitch('quick-actions-enabled', false);
     await setSwitch('top-shortcuts-enabled', false);
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_actions_enabled')), 'false');
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcuts_enabled')), 'false');
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_quick_action_count')), '6',
         'switching a surface off keeps its configuration');
-    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_shortcut_count')), '5');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_count')), '9');
 
     // Exactly two opacity values, and they live in the RUNWAY card.
     await page.locator('#ghost-opacity-input').fill('0');
@@ -1718,7 +1739,7 @@ test('reordering in Settings changes what the runtime renders, not what actions 
             localStorage.setItem('hotswap_quick_actions_enabled', 'true');
             localStorage.setItem('hotswap_quick_action_count', '3');
             localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['reload', 'star', 'undo']));
-            localStorage.setItem('hotswap_tray_order', JSON.stringify(['undo', 'redo', 'folder']));
+            localStorage.setItem('hotswap_action_order', JSON.stringify(['reload', 'star', 'folder', 'undo', 'redo']));
             localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/canary.html?id=A']));
         }
     });
@@ -1736,12 +1757,12 @@ test('reordering in Settings changes what the runtime renders, not what actions 
         [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-icon-row button')]
             .filter((button) => button.style.display !== 'none')
             .map((button) => button.className.replace('btn-hotswap-', '').replace('btn-', '')));
-    assert.deepEqual(trayOrder.slice(0, 3), ['undo', 'redo', 'folder'],
-        'the tray renders in its own, independent configured order');
+    assert.ok(trayOrder.length > 0 && !trayOrder.includes('folder'),
+        'Deep Cuts renders the unified remainder after the Top cutoff');
 
     // An action can appear in BOTH collections — they are presentation, not behavior.
     assert.equal(await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
-        .querySelector('.btn-hotswap-undo').style.display), '');
+        .querySelector('.btn-hotswap-undo').style.display), 'none');
     await page.close();
 });
 
@@ -2024,8 +2045,10 @@ test('Top Shortcuts render in order, reuse canonical actions, and adapt to width
         if (window === window.top) {
             localStorage.setItem('hotswap_top_shortcuts_enabled', 'true');
             localStorage.setItem('hotswap_top_shortcut_count', '6');
+            // Undo/Redo are FIXED rail controls now, so they are not eligible
+            // as configurable Toolbar Shortcuts — these are all ordinary ones.
             localStorage.setItem('hotswap_top_shortcut_order', JSON.stringify(
-                ['star', 'shuffle', 'reload', 'shuffleAll', 'undo', 'redo']));
+                ['star', 'shuffle', 'reload', 'shuffleAll', 'toggle', 'folder']));
             localStorage.setItem('triple_screen_layout', '3col');
             localStorage.setItem('loop_matrix_urls', JSON.stringify([
                 '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
@@ -2043,7 +2066,7 @@ test('Top Shortcuts render in order, reuse canonical actions, and adapt to width
             .filter((button) => !button.hidden).map((button) => button.dataset.actionKey));
 
     const wide = await visibleShortcuts();
-    assert.deepEqual(wide, ['star', 'shuffle', 'reload', 'shuffleAll', 'undo', 'redo'],
+    assert.deepEqual(wide, ['star', 'shuffle', 'reload', 'shuffleAll', 'toggle', 'folder'],
         'all six fit at this width, in the configured order');
 
     // Narrow the PANEL. (A merely narrow viewport is not enough: index3.html
@@ -2061,8 +2084,7 @@ test('Top Shortcuts render in order, reuse canonical actions, and adapt to width
             const box = el.getBoundingClientRect();
             return box.width > 0 && box.right <= rail.right + 1;
         };
-        // Scoped to the permanent history group: 'undo' is also configured as a
-        // Top Shortcut in this test, and that copy is expected to drop.
+        // Scoped to the permanent history group — the structural controls.
         return { position: fits('.hotswap-position-btn'), trigger: fits('.hotswap-trigger'),
                  undo: fits('.hotswap-toolbar-actions .hotswap-mirror-btn[data-action-key="undo"]'),
                  redo: fits('.hotswap-toolbar-actions .hotswap-mirror-btn[data-action-key="redo"]') };
@@ -2230,21 +2252,16 @@ test('Deep Cuts no longer presents the Position-owned actions', async () => {
     assert.ok(!tray.some((name) => name.includes('btn-hotswap-copy-position')),
         'Copy To Position is gone from the tray');
 
-    // Nothing else was lost with them.
-    ['btn-hotswap-folder', 'btn-hotswap-star', 'btn-hotswap-reload', 'btn-hotswap-shuffle',
-        'btn-hotswap-kill', 'btn-purge', 'btn-hotswap-launchpad', 'btn-hotswap-undo', 'btn-hotswap-redo']
-        .forEach((name) => {
-            assert.ok(tray.some((candidate) => candidate.includes(name)), `${name} is still in Deep Cuts`);
-        });
+    assert.ok(tray.length > 0, 'the configured remainder is still in Deep Cuts');
 
     // And Settings no longer offers them either.
     const settings = await browser.newPage();
     await settings.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
     await settings.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
     const listed = await settings.evaluate(() =>
-        [...document.querySelectorAll('#hotswap-toggle-list .hotswap-toggle-row')].map((row) => row.dataset.key));
+        [...document.querySelectorAll('#top-order-list .hotswap-toggle-row')].map((row) => row.dataset.key));
     assert.ok(!listed.includes('position') && !listed.includes('copyPosition'));
-    assert.ok(listed.includes('folder') && listed.includes('undo'));
+    assert.ok(listed.includes('folder') && !listed.includes('undo'));
     await settings.close();
 
     // But both remain reachable — through the button that owns them.
@@ -2256,7 +2273,7 @@ test('Deep Cuts no longer presents the Position-owned actions', async () => {
     await page.close();
 });
 
-test('Shuffle All renders its two dice on one line inside the compact rail', async () => {
+test('Shuffle All stays horizontal in Top and stacks vertically in the same Runway action', async () => {
     const page = await browser.newPage();
     page.setDefaultTimeout(5000);
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
@@ -2265,6 +2282,9 @@ test('Shuffle All renders its two dice on one line inside the compact rail', asy
             localStorage.setItem('hotswap_top_shortcuts_enabled', 'true');
             localStorage.setItem('hotswap_top_shortcut_count', '2');
             localStorage.setItem('hotswap_top_shortcut_order', JSON.stringify(['shuffleAll', 'star']));
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '1');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['shuffleAll']));
             localStorage.setItem('loop_matrix_urls', JSON.stringify([
                 '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
                 '/test/fixtures/canary.html?id=C',
@@ -2298,6 +2318,15 @@ test('Shuffle All renders its two dice on one line inside the compact rail', asy
     assert.equal(icon.insideRail, true, 'and still fits the rail');
     assert.equal(icon.railHeight, 30, 'the rail was not enlarged to accommodate it');
 
+    const runwayIcon = await page.evaluate(() => {
+        const button = document.querySelector('.hotswap-runway-btn[data-action-key="shuffleAll"]');
+        const box = button.getBoundingClientRect();
+        const dice = [...button.children].map((die) => die.getBoundingClientRect());
+        return { width: Math.round(box.width), height: Math.round(box.height), dice: dice.length,
+            stacked: dice[1].top > dice[0].top, sameColumn: Math.abs(dice[1].left - dice[0].left) <= 1 };
+    });
+    assert.deepEqual(runwayIcon, { width: 30, height: 30, dice: 2, stacked: true, sameColumn: true });
+
     // Behavior is untouched: the icon is a mirror, and clicking it dispatches
     // to the ONE canonical Shuffle All button rather than reimplementing it.
     const reachedCanonical = await page.evaluate(() => {
@@ -2306,8 +2335,609 @@ test('Shuffle All renders its two dice on one line inside the compact rail', asy
         let hits = 0;
         canonical.addEventListener('click', () => { hits += 1; });
         panel.querySelector('.hotswap-top-shortcut[data-action-key="shuffleAll"]').click();
+        panel.querySelector('.hotswap-runway-btn[data-action-key="shuffleAll"]').click();
         return hits;
     });
-    assert.equal(reachedCanonical, 1, 'the top shortcut invoked the canonical action exactly once');
+    assert.equal(reachedCanonical, 2, 'both surface presentations invoke the same canonical action');
     await page.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The ··· Deep Cuts gateway. A human saw a crossed-out artifact near it that
+// never appeared in screenshots; the cause was the DISABLED cursor on its
+// neighbours, which the compositor draws and no capture contains.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('no control on the approach to ··· paints a crossed-out cursor', async () => {
+    const page = await bootCanaryGrid();
+    await revealChrome(page);
+    await page.waitForTimeout(250);
+
+    // Undo/Redo are genuinely disabled here — a fresh panel has no history —
+    // and they sit directly between the pointer and the ··· gateway.
+    const rail = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        return [...panel.querySelectorAll('.hotswap-toolbar button')]
+            .filter((b) => b.getBoundingClientRect().width > 0)
+            .map((b) => ({
+                key: b.dataset.actionKey || b.dataset.layer || b.className.split(' ').pop(),
+                disabled: b.disabled, cursor: getComputedStyle(b).cursor,
+            }));
+    });
+    assert.ok(rail.some((c) => c.key === 'undo' && c.disabled), 'Undo is disabled on a fresh panel');
+    assert.ok(rail.every((c) => !['not-allowed', 'no-drop'].includes(c.cursor)),
+        `no rail control uses an alarm cursor: ${JSON.stringify(rail)}`);
+
+    // The gateway itself must never look unavailable.
+    const trigger = rail.find((c) => c.key === 'hotswap-trigger');
+    assert.deepEqual(trigger, { key: 'hotswap-trigger', disabled: false, cursor: 'pointer' });
+
+    // Sweep the actual approach path the pointer travels.
+    const cursors = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const railBox = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const trig = panel.querySelector('.hotswap-trigger').getBoundingClientRect();
+        const seen = new Set();
+        for (let dx = -70; dx <= 24; dx += 6) {
+            const el = document.elementFromPoint(trig.left + dx + 2, railBox.top + railBox.height / 2);
+            if (el) seen.add(getComputedStyle(el).cursor);
+        }
+        return [...seen];
+    });
+    assert.ok(!cursors.includes('not-allowed') && !cursors.includes('no-drop'),
+        `approach path cursors: ${JSON.stringify(cursors)}`);
+
+    // Dragging across the rail must not start a text selection or native drag —
+    // a no-drop cursor is equally invisible to screenshots.
+    const selectable = await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        return ['.hotswap-toolbar', '.hotswap-trigger', '.hotswap-position-btn', '.hotswap-mirror-btn']
+            .map((sel) => getComputedStyle(panel.querySelector(sel)).userSelect);
+    });
+    assert.ok(selectable.every((value) => value === 'none'), `user-select: ${JSON.stringify(selectable)}`);
+    await page.close();
+});
+
+test('··· opens Deep Cuts cleanly, without flicker, and stays panel-local', async () => {
+    const page = await bootCanaryGrid();
+    const before = await readCanaries(page, ['A', 'B', 'C']);
+    await armContinuityProbe(page);
+
+    const state = () => page.evaluate(() => [...document.querySelectorAll('.stream-panel')].slice(0, 3)
+        .map((panel) => ({
+            revealed: panel.classList.contains('chrome-revealed'),
+            tray: panel.querySelector('.hotswap-overlay').classList.contains('open'),
+        })));
+    const openTray = (index) => page.evaluate((i) => {
+        const panel = document.querySelectorAll('.stream-panel')[i];
+        panel.querySelector('.hotswap-activation')
+            .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+        panel.querySelector('.hotswap-trigger').click();
+    }, index);
+
+    // Panel A, then panel B. Neither may disturb the other, nor panel C.
+    await openTray(0);
+    assert.deepEqual(await state(), [
+        { revealed: true, tray: true }, { revealed: false, tray: false }, { revealed: false, tray: false },
+    ]);
+    await openTray(1);
+    assert.deepEqual(await state(), [
+        { revealed: true, tray: true }, { revealed: true, tray: true }, { revealed: false, tray: false },
+    ], 'both panels hold their own Deep Cuts state');
+
+    // Closing B leaves A alone.
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[1]
+        .querySelector('.hotswap-trigger').click());
+    assert.deepEqual((await state())[0], { revealed: true, tray: true }, 'panel A is untouched');
+
+    // Pointer moving from ··· into the tray must hold Chrome open, not flicker.
+    const flips = await page.evaluate(async () => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        let count = 0;
+        const observer = new MutationObserver(() => { count += 1; });
+        observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+        const trigger = panel.querySelector('.hotswap-trigger');
+        const overlay = panel.querySelector('.hotswap-overlay');
+        for (let i = 0; i < 8; i += 1) {
+            trigger.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false, relatedTarget: overlay }));
+            overlay.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        observer.disconnect();
+        return count;
+    });
+    assert.equal(flips, 0, 'moving between ··· and its tray causes no open/close oscillation');
+    assert.equal((await state())[0].tray, true, 'and the tray is still open');
+
+    // The gateway is fixed structural UI: responsive pressure never removes it.
+    await page.setViewportSize({ width: 330, height: 700 });
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => {
+        const button = document.querySelectorAll('.stream-panel')[0].querySelector('.hotswap-trigger');
+        return button.getBoundingClientRect().width > 0 && !button.disabled;
+    }), true, '··· survives a narrow panel');
+
+    const probe = await readContinuityProbe(page);
+    const after = await readCanaries(page, ['A', 'B', 'C']);
+    assert.deepEqual(probe.loads, { A: 0, B: 0, C: 0 }, 'opening/closing Deep Cuts reloads nothing');
+    assert.ok(probe.sameNodes && probe.sameParents, 'no iframe rebuilt or reparented');
+    assert.ok(['A', 'B', 'C'].every((id) => after[id].startedAt === before[id].startedAt));
+    await page.close();
+});
+
+test('one canonical registry feeds every configurable surface', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_top_shortcuts_enabled', 'true');
+            localStorage.setItem('hotswap_top_shortcut_count', '2');
+            localStorage.setItem('hotswap_top_shortcut_order', JSON.stringify(['toggle', 'folder']));
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '2');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['folder', 'toggle']));
+            localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/canary.html?id=A']));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await revealChrome(page);
+    await page.waitForTimeout(250);
+
+    // The exact drift this consolidation removes: Edit URL and Assign Folder
+    // were absent from both shortcut surfaces purely because they open a picker.
+    assert.deepEqual(await page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-top-shortcut')]
+            .map((b) => b.dataset.actionKey)), ['toggle', 'folder']);
+    assert.deepEqual(await page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-runway-btn')]
+            .map((b) => b.dataset.actionKey)), ['folder', 'toggle']);
+
+    // A picker action invoked from another surface stays anchored there.
+    await page.evaluate(() => document.querySelectorAll('.stream-panel')[0]
+        .querySelector('.hotswap-top-shortcut[data-action-key="toggle"]').click());
+    await page.waitForTimeout(150);
+    assert.deepEqual(await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        return {
+            tray: panel.querySelector('.hotswap-overlay').classList.contains('open'),
+            urlRow: panel.querySelector('.hotswap-url-row').classList.contains('open'),
+        };
+    }), { tray: false, urlRow: true }, 'the picker is visible without opening Deep Cuts');
+
+    // Structural ownership still excludes the Position-owned pair everywhere.
+    const eligibility = await page.evaluate(async () => {
+        const { getEligibleActions, SURFACES } = await import('./js/hotswap-chrome.js');
+        const keys = (surface) => getEligibleActions(surface).map((a) => a.key);
+        return { toolbar: keys(SURFACES.TOOLBAR), runway: keys(SURFACES.RUNWAY), deep: keys(SURFACES.DEEP_CUTS) };
+    });
+    ['toolbar', 'runway', 'deep'].forEach((surface) => {
+        assert.ok(!eligibility[surface].includes('position'), `${surface} excludes Move to Position`);
+        assert.ok(!eligibility[surface].includes('copyPosition'), `${surface} excludes Copy to Position`);
+        assert.ok(eligibility[surface].includes('toggle') && eligibility[surface].includes('folder'));
+    });
+    assert.ok(!eligibility.toolbar.includes('undo'), 'the rail does not offer its own fixed Undo');
+    assert.ok(eligibility.runway.includes('undo'), 'but the runway may — it does not already show it');
+    assert.ok(!eligibility.deep.includes('undo'), 'Deep Cuts shares the configurable 10-action vocabulary');
+    await page.close();
+});
+
+test('Settings presents two surfaces, with Deep Cuts subordinate to the Toolbar', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+
+    // Two major surfaces at the top level; Deep Cuts is NOT a third peer.
+    const surfaces = await page.evaluate(() =>
+        [...document.querySelectorAll('.hotswap-surface > .hotswap-surface-header h3')].map((h) => h.textContent));
+    assert.deepEqual(surfaces, ['Top Toolbar', 'Quick Action Shortcut Runway']);
+
+    const toolbarChildren = await page.evaluate(() =>
+        [...document.querySelectorAll('.hotswap-surface')][0]
+            .querySelectorAll('.hotswap-subsection .hotswap-sub-header h4'));
+    assert.equal(toolbarChildren.length ?? await page.evaluate(() =>
+        [...document.querySelectorAll('.hotswap-surface')][0]
+            .querySelectorAll('.hotswap-subsection .hotswap-sub-header h4').length), 2);
+    assert.deepEqual(await page.evaluate(() =>
+        [...[...document.querySelectorAll('.hotswap-surface')][0]
+            .querySelectorAll('.hotswap-subsection .hotswap-sub-header h4')].map((h) => h.textContent)),
+        ['Toolbar Shortcuts', '··· Deep Cuts'], 'both are children of Top Toolbar');
+
+    // Deep Cuts and Toolbar Shortcuts live INSIDE the Top Toolbar surface.
+    assert.equal(await page.evaluate(() =>
+        document.getElementById('top-order-list').closest('.hotswap-surface')
+            === document.querySelectorAll('.hotswap-surface')[0]), true);
+    assert.equal(await page.evaluate(() =>
+        document.getElementById('runway-order-list').closest('.hotswap-surface')
+            === document.querySelectorAll('.hotswap-surface')[1]), true);
+
+    // The structural controls are described as fixed, not offered as options.
+    const toolbarCopy = await page.evaluate(() =>
+        document.querySelectorAll('.hotswap-surface')[0].querySelector('.subtitle').textContent);
+    ['Position', 'Undo', 'Redo', '···'].forEach((name) =>
+        assert.ok(toolbarCopy.includes(name), `the fixed ${name} control is described`));
+    assert.ok(/cannot be removed or reordered/.test(toolbarCopy));
+
+    // ── Right-edge alignment grammar ─────────────────────────────────────────
+    // Every Hotswap ON/OFF switch lands on ONE vertical axis, whatever its
+    // nesting depth — achieved by shared layout, not per-section offsets.
+    const switches = await page.evaluate(() =>
+        [...document.querySelectorAll('.hotswap-panel .switch')]
+            .map((el) => ({ right: Math.round(el.getBoundingClientRect().right) })));
+    assert.ok(switches.length >= 2, `found ${switches.length} Hotswap switches`);
+    const axis = switches[0].right;
+    switches.forEach((entry, index) => {
+        assert.ok(Math.abs(entry.right - axis) <= 1,
+            `switch ${index} right edge ${entry.right} is off the shared axis ${axis}`);
+    });
+    assert.deepEqual(errors, []);
+    await page.close();
+});
+
+test('responsive pressure never rewrites the saved Toolbar configuration', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('hotswap_top_shortcuts_enabled', 'true');
+            localStorage.setItem('hotswap_top_count', '6');
+            localStorage.setItem('hotswap_action_order', JSON.stringify([
+                'toggle', 'folder', 'star', 'reload', 'shuffle', 'shuffleAll',
+                'delete', 'kill', 'purge', 'launchpad',
+            ]));
+            localStorage.setItem('triple_screen_layout', '3col');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([
+                '/test/fixtures/canary.html?id=A', '/test/fixtures/canary.html?id=B',
+                '/test/fixtures/canary.html?id=C',
+            ]));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+    await revealChrome(page);
+    await page.waitForTimeout(300);
+
+    const savedOrder = await page.evaluate(() => localStorage.getItem('hotswap_action_order'));
+    const configured = await page.evaluate(() =>
+        document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-top-shortcut').length);
+    assert.equal(configured, 6, 'all six configured actions are rendered into the rail');
+
+    const visible = () => page.evaluate(() =>
+        [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-top-shortcut')]
+            .filter((b) => !b.hidden).length);
+    const wide = await visible();
+
+    await page.setViewportSize({ width: 330, height: 900 });
+    await page.waitForTimeout(400);
+    const narrow = await visible();
+    assert.ok(narrow < wide, `narrow shows fewer (${narrow} < ${wide})`);
+
+    // Structural controls outrank configurable ones under pressure.
+    assert.deepEqual(await page.evaluate(() => {
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        const rail = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const fits = (sel) => {
+            const el = panel.querySelector(sel);
+            const box = el.getBoundingClientRect();
+            return box.width > 0 && box.right <= rail.right + 1;
+        };
+        return {
+            position: fits('.hotswap-position-btn'),
+            undo: fits('.hotswap-toolbar-actions .hotswap-mirror-btn[data-action-key="undo"]'),
+            redo: fits('.hotswap-toolbar-actions .hotswap-mirror-btn[data-action-key="redo"]'),
+            deepCuts: fits('.hotswap-trigger'),
+        };
+    }), { position: true, undo: true, redo: true, deepCuts: true });
+
+    // Nothing was written back.
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_top_count')), '6');
+    assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_action_order')), savedOrder);
+
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForTimeout(400);
+    assert.equal(await visible(), wide, 'widening restores them');
+    await page.close();
+});
+
+test('Part 1-2 Runway tracks website top and active Runway pickers own stable geometry', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    const longUrl = `/test/fixtures/canary.html?id=${'tail-'.repeat(35)}END`;
+    await page.addInitScript((url) => {
+        if (window === window.top) {
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([url]));
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '2');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['toggle', 'folder']));
+        }
+    }, longUrl);
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelector('.hotswap-runway-btn[data-action-key="toggle"]'));
+    const initial = await chromeGeometry(page);
+    const continuity = await page.evaluate(() => {
+        const iframe = document.querySelector('.stream-panel iframe');
+        window.__p12 = { iframe, parent: iframe.parentNode, src: iframe.getAttribute('src'), loads: 0 };
+        iframe.addEventListener('load', () => { window.__p12.loads += 1; });
+        return { width: iframe.getBoundingClientRect().width };
+    });
+    assert.equal(initial.runwayTop, Math.round(initial.toolbarHeightVar * 1.75));
+
+    await revealChrome(page);
+    await page.waitForTimeout(220);
+    const revealed = await chromeGeometry(page);
+    assert.equal(revealed.runwayTop, Math.round(revealed.toolbarHeightVar * 2.75));
+    assert.equal(revealed.runwayTop - initial.runwayTop, revealed.toolbarHeightVar);
+    assert.equal(await page.evaluate(() => document.querySelector('.stream-panel iframe').getBoundingClientRect().width), continuity.width,
+        'Runway movement remains overlay-only');
+    await retractChrome(page);
+    await page.waitForTimeout(1100);
+    assert.equal((await chromeGeometry(page)).runwayTop, initial.runwayTop, 'retract restores Runway geometry');
+
+    const panel = page.locator('.stream-panel').first();
+    const anchorBefore = await panel.locator('.hotswap-runway-btn[data-action-key="toggle"]').boundingBox();
+    await panel.locator('.hotswap-runway-btn[data-action-key="toggle"]').click();
+    await page.waitForTimeout(100);
+    const edit = await page.evaluate(() => {
+        const panel = document.querySelector('.stream-panel');
+        const picker = panel.querySelector('.hotswap-url-row');
+        const input = picker.querySelector('.hotswap-input');
+        const p = picker.getBoundingClientRect();
+        const box = panel.getBoundingClientRect();
+        const websiteInset = parseFloat(getComputedStyle(panel).getPropertyValue('--hotswap-website-inset')) || 0;
+        return { revealed: panel.classList.contains('chrome-revealed'), open: picker.classList.contains('open'),
+            focused: document.activeElement === input, start: input.selectionStart, end: input.selectionEnd,
+            length: input.value.length, scrollLeft: input.scrollLeft, width: p.width,
+            inside: p.left >= box.left && p.right <= box.right + 1,
+            websiteTopOffset: Math.round(p.top - box.top - websiteInset),
+            rightInset: Math.round(box.right - p.right) };
+    });
+    assert.deepEqual({ revealed: edit.revealed, open: edit.open, focused: edit.focused },
+        { revealed: false, open: true, focused: true });
+    assert.equal(edit.start, edit.length); assert.equal(edit.end, edit.length);
+    assert.ok(edit.scrollLeft > 0 && edit.width >= 280 && edit.inside);
+    assert.deepEqual({ top: edit.websiteTopOffset, right: edit.rightInset }, { top: 8, right: 8 },
+        'Runway Edit URL uses the canonical website-top-right utility dock');
+    const anchorAfter = await panel.locator('.hotswap-runway-btn[data-action-key="toggle"]').boundingBox();
+    assert.equal(Math.round(anchorAfter.y), Math.round(anchorBefore.y), 'invoking its picker does not move the Runway anchor');
+
+    await page.evaluate(() => document.querySelector('.stream-panel').dispatchEvent(
+        new PointerEvent('pointerleave', { bubbles: true })));
+    await page.waitForTimeout(1200);
+    assert.equal(await panel.locator('.hotswap-url-row').evaluate((row) => row.classList.contains('open')), true,
+        '850ms autonomous retract yields to the active picker');
+    await panel.locator('.hotswap-input').fill(`${longUrl}-typed`);
+    await page.waitForTimeout(1000);
+    assert.equal(await panel.locator('.hotswap-url-row').evaluate((row) => row.classList.contains('open')), true,
+        'typing and pausing do not dismiss');
+    await page.keyboard.press('Escape');
+    assert.equal(await panel.locator('.hotswap-url-row').evaluate((row) => row.classList.contains('open')), false);
+
+    await page.evaluate(async () => {
+        const { setDatabaseStructure } = await import('./js/state.js');
+        setDatabaseStructure(Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`Folder ${i + 1}`, [`https://folder-${i}.test`]])));
+    });
+    await panel.locator('.hotswap-runway-btn[data-action-key="folder"]').click();
+    assert.deepEqual(await page.evaluate(() => ({
+        revealed: document.querySelector('.stream-panel').classList.contains('chrome-revealed'),
+        open: document.querySelector('.hotswap-folder-row').classList.contains('open'),
+    })), { revealed: false, open: true });
+    const folderGeometry = await page.evaluate(() => {
+        const panel = document.querySelector('.stream-panel');
+        const picker = panel.querySelector('.hotswap-folder-row').getBoundingClientRect();
+        const box = panel.getBoundingClientRect();
+        const websiteInset = parseFloat(getComputedStyle(panel).getPropertyValue('--hotswap-website-inset')) || 0;
+        return { websiteTopOffset: Math.round(picker.top - box.top - websiteInset), rightInset: Math.round(box.right - picker.right),
+            inside: picker.top >= box.top + 5 && picker.bottom <= box.bottom - 5 };
+    });
+    assert.deepEqual(folderGeometry, { websiteTopOffset: 8, rightInset: 8, inside: true },
+        'Runway Assign Folder uses the same website-top-right utility dock');
+    await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    assert.equal(await panel.locator('.hotswap-folder-row').evaluate((row) => row.classList.contains('open')), false);
+    assert.deepEqual(await page.evaluate(() => ({ same: window.__p12.iframe === document.querySelector('.stream-panel iframe'),
+        parent: window.__p12.parent === document.querySelector('.stream-panel iframe').parentNode,
+        src: window.__p12.src === document.querySelector('.stream-panel iframe').getAttribute('src'), loads: window.__p12.loads })),
+        { same: true, parent: true, src: true, loads: 0 });
+    await page.close();
+});
+
+test('Part 1-4 picker actions share one website-top-right dock and canonical click-away', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+    await page.addInitScript(() => {
+        if (window === window.top) {
+            localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/canary.html?id=utility']));
+            localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+            localStorage.setItem('hotswap_quick_action_count', '2');
+            localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['toggle', 'folder']));
+        }
+    });
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelector('.hotswap-runway-btn[data-action-key="toggle"]'));
+    await page.evaluate(async () => {
+        const { setDatabaseStructure } = await import('./js/state.js');
+        setDatabaseStructure({ Alpha: ['/test/fixtures/canary.html?id=folder'] });
+        const iframe = document.querySelector('.stream-panel iframe');
+        window.__p14 = { iframe, parent: iframe.parentNode, src: iframe.getAttribute('src'), loads: 0 };
+        iframe.addEventListener('load', () => { window.__p14.loads += 1; });
+    });
+    const panel = page.locator('.stream-panel').first();
+    const geometry = (rowSelector) => page.evaluate((selector) => {
+        const panel = document.querySelector('.stream-panel');
+        const row = panel.querySelector(selector);
+        const p = row.getBoundingClientRect();
+        const box = panel.getBoundingClientRect();
+        const websiteTop = parseFloat(getComputedStyle(panel).getPropertyValue('--hotswap-website-inset')) || 0;
+        return { top: Math.round(p.top - box.top - websiteTop), right: Math.round(box.right - p.right),
+            revealed: panel.classList.contains('chrome-revealed') };
+    }, rowSelector);
+    const dismissOutside = async () => page.evaluate(() => document.body.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true })));
+
+    await revealChrome(page);
+    await panel.locator('.hotswap-top-shortcut[data-action-key="toggle"]').click();
+    await page.waitForTimeout(50);
+    const topEdit = await geometry('.hotswap-url-row');
+    await page.keyboard.press('Escape');
+    await panel.locator('iframe').hover({ position: { x: 20, y: 80 } });
+    await page.waitForFunction(() => !document.querySelector('.stream-panel').classList.contains('chrome-revealed'));
+    await panel.locator('.hotswap-runway-btn[data-action-key="toggle"]').click();
+    await page.waitForTimeout(50);
+    const runwayEdit = await geometry('.hotswap-url-row');
+    assert.equal(runwayEdit.revealed, false, 'Runway invocation leaves Top closed');
+    await page.keyboard.press('Escape');
+    await revealChrome(page);
+    await page.evaluate(() => document.querySelector('.stream-panel .btn-hotswap-toggle').click());
+    await page.waitForTimeout(50);
+    const deepEdit = await geometry('.hotswap-url-row');
+    assert.deepEqual([topEdit, runwayEdit, deepEdit].map(({ top, right }) => ({ top, right })),
+        [{ top: 8, right: 12 }, { top: 8, right: 12 }, { top: 8, right: 12 }]);
+    await dismissOutside();
+    assert.equal(await panel.locator('.hotswap-url-row').evaluate((row) => row.classList.contains('open')), false,
+        'ordinary GS3 click-away closes Edit URL');
+
+    await panel.locator('iframe').hover({ position: { x: 20, y: 80 } });
+    await page.waitForFunction(() => !document.querySelector('.stream-panel').classList.contains('chrome-revealed'));
+    await panel.locator('.hotswap-runway-btn[data-action-key="folder"]').click();
+    await page.waitForTimeout(50);
+    const runwayFolder = await geometry('.hotswap-folder-row');
+    await dismissOutside();
+    await revealChrome(page);
+    await page.evaluate(() => document.querySelector('.stream-panel .btn-hotswap-folder').click());
+    await page.waitForTimeout(50);
+    const deepFolder = await geometry('.hotswap-folder-row');
+    await dismissOutside();
+    await panel.locator('.hotswap-top-shortcut[data-action-key="folder"]').click();
+    await page.waitForTimeout(50);
+    const topFolder = await geometry('.hotswap-folder-row');
+    assert.deepEqual([topFolder, runwayFolder, deepFolder].map(({ top, right }) => ({ top, right })),
+        [{ top: 8, right: 12 }, { top: 8, right: 12 }, { top: 8, right: 12 }]);
+
+    await page.evaluate(() => document.querySelector('.stream-panel iframe').focus());
+    assert.equal(await panel.locator('.hotswap-folder-row').evaluate((row) => row.classList.contains('open')), false,
+        'observable iframe focus closes through the picker pathway without an overlay');
+    assert.equal(await panel.locator(':scope > .hotswap-click-catcher').count(), 0);
+    assert.deepEqual(await page.evaluate(() => ({
+        same: window.__p14.iframe === document.querySelector('.stream-panel iframe'),
+        parent: window.__p14.parent === document.querySelector('.stream-panel iframe').parentNode,
+        src: window.__p14.src === document.querySelector('.stream-panel iframe').getAttribute('src'),
+        loads: window.__p14.loads,
+    })), { same: true, parent: true, src: true, loads: 0 });
+    await page.close();
+});
+
+test('Part 1-2 Settings major cards collapse persistently and administrative UI moved once', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64');
+    await page.addInitScript(() => {
+        localStorage.setItem('git_sync_token', 'test-token');
+        localStorage.setItem('git_sync_repo', 'owner/repo');
+    });
+    await page.route('https://api.github.com/**', async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (route.request().method() === 'PUT') return route.fulfill({ json: { content: { sha: 'new-sha' } } });
+        if (path.endsWith('/contents/links-index.json')) return route.fulfill({ status: 404, body: '{}' });
+        if (path.endsWith('/contents/links.json')) return route.fulfill({ json: { sha: 'sha', content: encode({ Alpha: ['https://a.test'] }) } });
+        return route.fulfill({ status: 404, body: '{}' });
+    });
+    await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+    const expected = ['github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
+    assert.deepEqual(await page.locator('#settings-screen > .config-card').evaluateAll((cards) => cards.map((c) => c.dataset.section)), expected);
+    assert.equal(await page.locator('.config-card .section-toggle').count(), 7);
+    assert.equal(await page.locator('.hotswap-surface .section-toggle, .hotswap-subsection .section-toggle').count(), 0);
+    assert.ok((await page.locator('#ingest-folder-select option').allTextContents()).some((text) => text.includes('Alpha')));
+    assert.equal(await page.locator('#file-dropzone').count(), 1);
+    assert.equal(await page.locator('#blacklist-display').count(), 1);
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.locator('#target-folder-input').fill('Imported');
+    await page.locator('#manual-file-pick').setInputFiles({ name: 'links.txt', mimeType: 'text/plain', buffer: Buffer.from('https://imported.test/path') });
+    await page.waitForFunction(async () => {
+        const { getDatabaseStructure } = await import('./js/state.js');
+        return getDatabaseStructure()?.Imported?.includes('https://imported.test/path');
+    });
+    await page.locator('#git-repo').fill('kept/value');
+    await page.locator('[data-section="github"] .section-toggle').click();
+    await page.locator('[data-section="hotswap"] .section-toggle').click();
+    assert.equal(await page.locator('[data-section="github"] .section-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('[data-section="hotswap"] .section-body').isVisible(), false);
+    await page.locator('[data-section="github"] .section-toggle').press('Enter');
+    assert.equal(await page.locator('#git-repo').inputValue(), 'kept/value', 'form values survive collapse/expand');
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.equal(await page.locator('[data-section="hotswap"] .section-toggle').getAttribute('aria-expanded'), 'false');
+    assert.deepEqual(JSON.parse(await page.evaluate(() => localStorage.getItem('settings_section_state'))), { hotswap: true });
+    await page.locator('[data-section="hotswap"] .section-toggle').click();
+    const rights = await page.locator('.hotswap-panel .switch').evaluateAll((switches) => switches.map((el) => el.getBoundingClientRect().right));
+    rights.forEach((right) => assert.ok(Math.abs(right - rights[0]) <= 1));
+    await page.locator('#blacklist-manual-input').fill('blocked.test');
+    await page.locator('#btn-bl-add').click();
+    assert.match(await page.locator('#blacklist-display').textContent(), /blocked\.test/);
+    await page.locator('.bl-remove-btn').click();
+    assert.doesNotMatch(await page.locator('#blacklist-display').textContent(), /blocked\.test/);
+    await page.locator('#blacklist-manual-input').fill('clear-me.test');
+    await page.locator('#btn-bl-add').click();
+    await page.locator('#btn-bl-clear').click();
+    assert.match(await page.locator('#blacklist-display').textContent(), /No domains blacklisted/);
+    assert.equal(await page.request.get(`${ORIGIN}/index.html`).then((r) => r.text()).then((html) => html.includes('id="file-dropzone"') || html.includes('id="blacklist-display"')), false);
+    await page.close();
+});
+
+test('Part 1-3 right-side toolbar cluster and Settings trailing grammar stay structural', async () => {
+    const runtime = await bootCanaryGrid();
+    await revealChrome(runtime);
+    await runtime.waitForTimeout(220);
+    const toolbar = await runtime.evaluate(() => {
+        const panel = document.querySelector('.stream-panel');
+        const rail = panel.querySelector('.hotswap-toolbar').getBoundingClientRect();
+        const position = panel.querySelector('.hotswap-position-btn').getBoundingClientRect();
+        const firstAction = panel.querySelector('.hotswap-top-shortcut:not([hidden])').getBoundingClientRect();
+        const undo = panel.querySelector('.hotswap-toolbar-actions [data-action-key="undo"]').getBoundingClientRect();
+        const redo = panel.querySelector('.hotswap-toolbar-actions [data-action-key="redo"]').getBoundingClientRect();
+        const deep = panel.querySelector('.hotswap-trigger').getBoundingClientRect();
+        return { positionLeft: Math.round(position.left - rail.left), positionRight: position.right,
+            actionLeft: firstAction.left, deepRightInset: Math.round(rail.right - deep.right),
+            structuralOrder: undo.left < redo.left && redo.left < deep.left };
+    });
+    assert.ok(toolbar.positionLeft <= 12, 'Position remains isolated at the left edge');
+    assert.ok(toolbar.actionLeft - toolbar.positionRight > 40, 'configurable actions join the right-side cluster');
+    assert.ok(toolbar.deepRightInset <= 12 && toolbar.structuralOrder, 'Undo/Redo/··· remain fixed at the right');
+    await runtime.close();
+
+    const settings = await browser.newPage();
+    await settings.goto(`${ORIGIN}/settings.html`, { waitUntil: 'load' });
+    const switchGrammar = await settings.evaluate(() => {
+        const switches = [...document.querySelectorAll('.hotswap-panel .switch')];
+        return switches.map((control) => ({ right: control.getBoundingClientRect().right,
+            parentRight: control.parentElement.getBoundingClientRect().right,
+            clipped: control.getBoundingClientRect().right > control.parentElement.getBoundingClientRect().right }));
+    });
+    assert.ok(switchGrammar.length > 2);
+    switchGrammar.forEach((entry) => {
+        assert.ok(Math.abs(entry.right - switchGrammar[0].right) <= 1, 'all switches retain one global axis');
+        assert.ok(entry.parentRight - entry.right >= 11 && entry.parentRight - entry.right <= 13, 'shared 12px trailing inset');
+        assert.equal(entry.clipped, false);
+    });
+    const heading = await settings.evaluate(() => {
+        const button = document.querySelector('[data-section="hotswap"] .section-toggle');
+        const title = button.querySelector('.section-title').getBoundingClientRect();
+        const caret = button.querySelector('.section-caret').getBoundingClientRect();
+        const box = button.getBoundingClientRect();
+        return { titleInset: Math.round(title.left - box.left), caretInset: Math.round(box.right - caret.right),
+            width: box.width, expanded: button.getAttribute('aria-expanded') };
+    });
+    assert.ok(heading.titleInset <= 1 && heading.caretInset <= 1 && heading.width > 400);
+    const toggle = settings.locator('[data-section="hotswap"] .section-toggle');
+    await toggle.click({ position: { x: 200, y: 10 } });
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'the whole heading row remains clickable');
+    await toggle.press('Enter');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'keyboard activation remains intact');
+    assert.equal(await settings.locator('.hotswap-surface .section-toggle, .hotswap-subsection .section-toggle').count(), 0);
+    await settings.close();
 });

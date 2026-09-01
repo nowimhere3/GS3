@@ -276,7 +276,7 @@
         /* ↩ / ↪ Panel Undo & Redo — availability-driven, so :disabled matters */
         .btn-hotswap-undo, .btn-hotswap-redo { background: #1a1620; border: 1px solid #4a3a6a; color: #b39ae0; font-weight: bold; }
         .btn-hotswap-undo:hover:not(:disabled), .btn-hotswap-redo:hover:not(:disabled) { background: #262030; color: #fff; }
-        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
+        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled { opacity: 0.32; cursor: default; }
 
         /* 📁 Folder-assign button */
         .btn-hotswap-folder { background: #241a0a; border: 1px solid #6a4a1a; color: #d4a94a; }
@@ -365,8 +365,13 @@
             --hotswap-activation-inset: 6px;
             --hotswap-activation-height: 14px;
             /* The top-right safe zone. Proportional to the toolbar rather than
-               an arbitrary pixel count, so it scales with the chrome. */
-            --shortcut-runway-top-offset: calc(var(--hotswap-toolbar-height) * 2.5);
+               an arbitrary pixel count, so it scales with the chrome.
+               BREADCRUMBS — WAS 1.5 toolbar heights. IS 1.75. WHY: the site's
+               own corner controls sit within roughly one control-row of the
+               top edge; 2.5 surrendered well past them and cost usable runway
+               height for nothing. 1.5 still clears that territory. */
+            --hotswap-website-inset: 0px;
+            --shortcut-runway-top-offset: calc(var(--hotswap-website-inset) + var(--hotswap-toolbar-height) * 1.75);
             --hotswap-resting-opacity: var(--chrome-resting-opacity, 0.12);
             --hotswap-hover-opacity: var(--chrome-hover-opacity, 1);
         }
@@ -392,6 +397,7 @@
             border-bottom-width: 1px;
             opacity: 1;
         }
+        .stream-panel.chrome-revealed { --hotswap-website-inset: var(--hotswap-toolbar-height); }
 
         .hotswap-position-label { white-space: nowrap; }
         /* ── Compact rail geometry ────────────────────────────────────────────
@@ -399,6 +405,15 @@
            Nothing here may reintroduce vertical offsets: the rail's height is
            website height borrowed for as long as Chrome is open. */
         .hotswap-toolbar > * { flex-shrink: 0; }
+        /* BREADCRUMBS — the old corner "···" carried `user-select: none`; the
+           rewrite into a flex rail dropped it. Restored across the whole rail
+           so dragging over the controls can never begin a text selection or a
+           native text drag (whose no-drop cursor is likewise invisible to
+           screenshots). */
+        .hotswap-toolbar, .hotswap-toolbar button, .hotswap-position-menu,
+        .hotswap-runway, .hotswap-runway button {
+            user-select: none; -webkit-user-select: none;
+        }
         .hotswap-top-shortcuts { display: flex; align-items: center; gap: 6px; min-width: 0; }
         .hotswap-top-shortcuts > [hidden] { display: none; }
 
@@ -477,9 +492,23 @@
             white-space: nowrap; line-height: 1; padding: 0 2px; overflow: hidden;
         }
         .hotswap-mirror-btn:hover:not(:disabled) { background: rgba(0,0,0,0.95); color: #fff; border-color: #888; }
-        .hotswap-mirror-btn:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
+        /* BREADCRUMBS — WAS: `cursor: not-allowed` plus grayscale.
+           IS: the ordinary cursor, and dimming alone.
+           WHY: Undo/Redo sit immediately left of the fixed "···" gateway and
+           are disabled whenever a panel has no history yet — which is every
+           fresh session. Crossing them to reach "···" painted a crossed-out
+           circle across a ~50px band of the approach path, and the cursor
+           changed three times in ~60px of travel, which reads as the "···"
+           itself being broken and flickering. A CSS cursor is drawn by the
+           compositor and never lands in a screenshot, which is exactly why the
+           artifact was visible on screen and absent from captures. Dimming
+           already communicates "unavailable"; `not-allowed` added alarm, not
+           information, and aimed it at the wrong control. */
+        .hotswap-mirror-btn:disabled { opacity: 0.32; cursor: default; }
         .hotswap-toolbar-btn { min-width: 22px; width: auto; height: 22px; font-size: 12px; }
         .hotswap-runway-btn  { width: 30px; height: 30px; font-size: 14px; }
+        .hotswap-runway-shuffle-all { flex-direction:column; gap:0; line-height:0.72; }
+        .hotswap-runway-shuffle-all > span { display:block; }
 
         /* The right runway: an overlay, and only as long as it is configured to
            be. Starts below the top-right safe zone so the site keeps its own
@@ -490,7 +519,7 @@
             display: flex; flex-direction: column; gap: 6px;
             z-index: 10001;
             opacity: var(--hotswap-resting-opacity);
-            transition: opacity 0.15s ease;
+            transition: opacity 0.15s ease, top 0.16s ease;
             /* The runway can never grow past the panel. A short panel clips the
                tail rather than spilling controls over the layout — the user's
                configuration is still stored, and the "···" tray remains the
@@ -501,6 +530,11 @@
         .hotswap-runway:hover, .hotswap-runway:focus-within { opacity: var(--hotswap-hover-opacity); }
 
         /* Small panels: the configuration is kept, the presentation adapts. */
+        .hotswap-picker { position:absolute; z-index:10005; min-width:190px; max-width:calc(100% - 12px); padding:8px; border:1px solid #333; border-radius:10px; background:rgba(10,10,10,0.97); box-shadow:0 8px 24px rgba(0,0,0,0.7); }
+        .hotswap-picker.hotswap-url-row.open { display:flex; }
+        .hotswap-picker.hotswap-url-row { width:clamp(280px, 60%, 560px); }
+        .hotswap-url-row .hotswap-input { flex:1 1 auto; min-width:0; }
+        .hotswap-empty-state { color:#777; font-size:11px; padding:8px 4px; text-align:center; }
         @media (max-height: 260px) { .hotswap-runway { display: none; } }
         @media (max-width: 220px) { .hotswap-position-label { display: none; } }
 

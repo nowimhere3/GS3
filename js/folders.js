@@ -43,9 +43,9 @@ import { pushDatabaseToRemote } from './sync.js';
  */
 export function updateDirectoryDropdown(dirDropdownEl, onAfterUpdate, folderManagerOpen) {
     const db = getDatabaseStructure();
-    if (!db || !dirDropdownEl) return;
+    if (!db) return;
 
-    dirDropdownEl.innerHTML = '';
+    if (dirDropdownEl) dirDropdownEl.innerHTML = '';
     const ingestSelect = document.getElementById('ingest-folder-select');
     if (ingestSelect) ingestSelect.innerHTML = '<option value="">— select existing folder —</option>';
 
@@ -56,7 +56,7 @@ export function updateDirectoryDropdown(dirDropdownEl, onAfterUpdate, folderMana
         const opt = document.createElement('option');
         opt.value = folderName;
         opt.textContent = label;
-        dirDropdownEl.appendChild(opt);
+        if (dirDropdownEl) dirDropdownEl.appendChild(opt);
 
         if (ingestSelect) {
             const opt2 = document.createElement('option');

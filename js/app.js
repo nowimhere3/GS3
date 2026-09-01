@@ -10,7 +10,7 @@ import {
     setTargetUrls, setUrlFolderMap, setRowLockState,
     getDatabaseStructure, setDatabaseStructure, setDatabaseSha,
 } from './state.js';
-import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
+import { initBlacklist } from './blacklist.js';
 import {
     updateDirectoryDropdown,
     populateBookmarkFolderSelect,
@@ -19,7 +19,6 @@ import {
 import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { getPresets, getPresetSummary, loadPresetsSilently } from './presets.js';
 import { getActiveWorkspaceId, switchWorkspace, isLiveBuilder } from './workspace.js';
-import { initDropzone } from './parser.js';
 import { initGrid, renderInputRows, saveInputsToState } from './grid.js';
 import { initScrollEngine, stopScrolling } from './scroll.js';
 import { launchMatrix } from './launch.js';
@@ -57,10 +56,8 @@ async function boot() {
     const portraitToggle   = document.getElementById('portrait-mode-toggle');
     const dirDropdownEl    = document.getElementById('directory-dropdown');
     const statusEl         = document.getElementById('status');
-    const dropzoneEl       = document.getElementById('file-dropzone');
-    const fileInputEl      = document.getElementById('manual-file-pick');
     const bookmarkModalEl  = document.getElementById('bookmark-modal');
-    console.log('[app] boot: checkpoint 1 — grabbed DOM refs', { setupScreenEl, loopScreenEl, feedContainerEl, containerEl, portraitToggle, dirDropdownEl, statusEl, dropzoneEl, fileInputEl, bookmarkModalEl });
+    console.log('[app] boot: checkpoint 1 — grabbed DOM refs', { setupScreenEl, loopScreenEl, feedContainerEl, containerEl, portraitToggle, dirDropdownEl, statusEl, bookmarkModalEl });
 
     // ── Restore persisted state ───────────────────────────────────────────────
     const cachedUrls = Store.get('matrixUrls');
@@ -76,8 +73,6 @@ async function boot() {
 
     // ── Init modules ──────────────────────────────────────────────────────────
     initBlacklist();
-    initBlacklistUI();
-    renderBlacklistDisplay();
     initScrollEngine({ loopScreenEl });
     console.log('[app] boot: checkpoint 3 — init modules done');
 
@@ -180,14 +175,6 @@ async function boot() {
 
     // ── Folder manager ───────────────────────────────────────────────────────
     // ── Parser / dropzone ─────────────────────────────────────────────────────
-    initDropzone(dropzoneEl, fileInputEl, {
-        getDatabaseStructure,
-        setDatabaseStructure,
-        pushDatabaseToRemote,
-        updateDirectoryDropdown: _refreshDropdowns,
-        dirDropdown: dirDropdownEl,
-    });
-    console.log('[app] boot: checkpoint 6 — dropzone init');
     initGrid({
         containerEl:    containerEl,
         dirDropdown:    dirDropdownEl,
@@ -304,6 +291,4 @@ function _initLaunchpad() {
     // Git token/repo inputs, and Frame Height settings, now live only on
     // settings.html — nothing to restore into this page's DOM for them.
     renderInputRows();
-    renderBlacklistDisplay();
-    initBlacklistUI();
 }

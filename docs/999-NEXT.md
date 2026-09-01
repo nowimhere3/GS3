@@ -49,8 +49,16 @@ Items are grouped by architectural phase rather than priority.
 
 ## Collections
 
-- [ ] Move Blacklist into Settings
-- [ ] Move "Ingest Extracted Directories" into Settings
+- [x] Move Blacklist into Settings
+- [x] Move "Ingest Extracted Directories" into Settings
+
+## Part 1-2 Settings breadcrumb
+
+WAS: all major Settings sections were always expanded, while Ingest Extracted Directories and Domain Blacklist occupied primary-page UI.
+
+IS: each top-level Settings card collapses independently and remembers collapsed state in Store; children have no separate collapse state. Ingest is the second Settings card and Domain Blacklist is the final card, with their canonical behavior moved rather than copied.
+
+WHY: Settings exposes complexity on demand and remembers how the customer left it; administrative functions no longer consume primary workflow real estate.
 - [ ] Paste-from-clipboard ingest mode
 - [ ] Skip selected collections during Shuffle
 - [ ] Less-played shuffle mode

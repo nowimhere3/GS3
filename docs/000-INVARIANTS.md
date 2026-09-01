@@ -1,5 +1,11 @@
 # Runtime Invariants
 
+## Hotswap projection invariant
+
+Hotswap Top and Deep Cuts are two projections of one ordered configurable action list. Intentional visibility filters before the Top cutoff; physical overflow changes only the projection and never preferences. Picker opening is presentation-only and may not reload, rebuild, reparent, re-src, or checkpoint an iframe.
+
+Runway top is derived from the website's current top plus 1.75 toolbar heights. An active picker suppresses autonomous Chrome geometry changes and closes only through explicit picker dismissal; toolbar retract is not a picker-dismissal operation.
+
 These are architectural rules.
 
 They are expected to remain true unless intentionally redesigned.
@@ -278,6 +284,21 @@ and never creates an Undo checkpoint.
 Chrome surfaces are ordered VIEWS over one canonical action registry.
 
 Ordering and membership never fork behavior.
+
+Surface eligibility is DERIVED from the registry.
+
+No surface keeps its own list of which actions it may present.
+
+Three questions stay distinct:
+the action exists, this surface may present it,
+and it is structurally owned elsewhere.
+
+Structural controls — Position, the Layer selector,
+Undo, Redo and the Deep Cuts gateway — are fixed.
+
+They are never removable, reorderable,
+or sacrificed to responsive pressure,
+and they never consume configurable capacity.
 
 See docs/011-HOTSWAP-CHROME.md.
 

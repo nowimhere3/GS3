@@ -1,5 +1,13 @@
 # TESTING.md — Verification Guide for Stream Loop Launchpad
 
+Part 1 Hotswap verification proves one Top/Deep order with visibility-before-cutoff, actual-width responsive demotion and widening restoration without preference writes; independent Runway cutoff visualization; anchored picker geometry; one global Hotswap switch right edge within 1px; the structural empty Deep Cuts state; and a 1.75× toolbar-height Runway safe zone. Presentation-only resize, menu, and picker operations retain the same iframe nodes, parents, documents, and `src` values with zero loads.
+
+Part 1-2 additionally measures Runway at website-top + 1.75H in both rail states, proves Runway picker focus cannot reveal Top, waits beyond 850ms to prove picker ownership, checks URL focus/caret/tail scrolling, and verifies persistent major-card collapse plus the single Settings-owned Ingest and Blacklist implementations.
+
+Part 1-3 established Runway-attached picker geometry. It also proves Position-left/actions-right toolbar grouping without preference writes, a common Hotswap switch axis with one 12px trailing inset, and title-left/caret-right major headings whose full row and keyboard behavior remain active.
+
+Part 1-4 supersedes only the picker-location portion of Part 1-3: Top, Runway, and Deep Cuts now resolve Edit URL and Assign Folder to one compact website-top-right dock (measured 8px top / 12px right in the bordered panel). Tests normalize against `--hotswap-website-inset`, prove Runway invocation leaves Top closed, exercise document click-away and non-intercepting iframe-focus dismissal, retain timer/focus/caret/continuity checks, and prove the same Shuffle All handler renders horizontal dice in Top but vertical dice inside the unchanged 30×30 Runway button.
+
 **Audience:** an AI coding agent (Claude Code, Codex, Antigravity, etc.) with shell access to this repo.
 
 **Prime directive:** *Prove it, don't eyeball it.* Do not ask the human to manually verify
@@ -70,7 +78,7 @@ touched:
 | `triple-mode.js` / `grid-session.js` | `positions.js` | `getLayoutSlotOrder`, `getPositionAreas`, `listPositions`, `resolvePositionOfSlot`, `resolveSlotAtPosition`, `IDENTITY_ARRANGEMENT`, `LAYOUT_POSITION_ORDER` |
 | `launch.js` | `triple-mode.js`'s `ctx` object | `ctx.onPanelContentChanged(index, url, folder)`, `ctx.onPanelRemoved(index)`, `ctx.pushUndoCheckpoint()`, `ctx.getPositionOptions(index)`, `ctx.moveToPosition(index, position)`, `ctx.copyUrlToPosition(index, position)`, `ctx.getPanelHistory(index)`, `ctx.undoPanel(index)`, `ctx.redoPanel(index)`. Each group is optional — a host page that omits it gets those buttons hidden |
 | `triple-mode.js` | `launch.js` | `buildStreamPanel`, `updateRenderedPanel`, `updatePanelHistoryButtons`, `navigatePanelTo`, `HOTSWAP_ACTIONS` |
-| `launch.js` / `settings.js` | `hotswap-chrome.js` | `getHotswapTrayOrder`, `setHotswapTrayOrder`, `getOrderedHotswapActions`, `getActiveQuickActions`, `getQuickActionOrder`, `setQuickActionOrder`, `getQuickActionCount`, `setQuickActionCount`, `isQuickActionRunwayEnabled`, `setQuickActionRunwayEnabled`, `getChromeOpacity`, `setChromeOpacity`, `isLayerTwoUrl`, `LAYER_1`, `LAYER_2`, `MAX_QUICK_ACTIONS` |
+| `launch.js` / `settings.js` | `hotswap-chrome.js` | `SURFACES`, `isEligibleFor`, `getEligibleActions`, `MAX_TOP_SHORTCUTS`, `getHotswapTrayOrder`, `setHotswapTrayOrder`, `getOrderedHotswapActions`, `getActiveQuickActions`, `getQuickActionOrder`, `setQuickActionOrder`, `getQuickActionCount`, `setQuickActionCount`, `isQuickActionRunwayEnabled`, `setQuickActionRunwayEnabled`, `getChromeOpacity`, `setChromeOpacity`, `isLayerTwoUrl`, `LAYER_1`, `LAYER_2`, `MAX_QUICK_ACTIONS` |
 | `triple-mode.js` | `launch.js` (Chrome) | `updatePanelToolbar`, `refreshPanelLayerScope`, `LAYER_MESSAGE_SOURCE`, `LAYER_SCOPED_ACTIONS` |
 | `launch.js` / `triple-mode.js` | `panel-navigation.js` | `beginPanelContent`, `notePanelLoad`, `canNavigateBack`, `canNavigateForward`, `navigateBack`, `navigateForward`, `resetPanelNavigation`, `getPanelNavigationState` |
 | `grid-session.js` / `workspace.js` | `presets.js` | `getPresetById`, `getPresetPanels`, `saveWorkspaceToPreset`, `getPresets`, `getPresetSummary` |
@@ -533,7 +541,7 @@ The retractable toolbar, the right runway, and layer scope. Assert:
 - **Separate hit targets** — `elementFromPoint` at the border resolves to the resizer, inside
   the panel to the activation strip, and in the content to the iframe. The activation strip
   starts clear of the resizer's ±4px grab zone, so no pixel is ambiguous.
-- **Safe zone** — the runway's top offset is authored as `calc(toolbar * 2.5)` and resolves to
+- **Safe zone** — the runway's top offset is authored as `calc(toolbar * 1.75)` and resolves to
   it; `elementFromPoint` at the panel's top-right returns the **iframe**, not a GS3 hitbox; the
   iframe's width is unchanged (the runway overlays — insetting sideways is what reflows sites).
 - **Runway length** — the interactive area matches the configured count; OFF renders no runway
@@ -605,6 +613,43 @@ the Master-Shuffle partial-undo test — `loads.C2` read 0 instead of 1 roughly 
 below a breakpoint, which makes each panel wider; drive the panel narrow instead. And an action
 configured as a Top Shortcut also matches `.hotswap-mirror-btn[data-action-key=…]`, so scope
 survival checks to `.hotswap-toolbar-actions`.
+
+### 4.20 ★ One canonical action registry
+Surface eligibility is DERIVED from the registry, never hand-listed per surface. Assert the
+counts encode the ownership rules exactly: Deep Cuts and the Runway share an eligible set;
+Toolbar Shortcuts additionally exclude Undo/Redo (already fixed on that same rail); all three
+exclude the Position-owned pair. **Guard the specific drift this replaced** — `toggle`
+(Edit URL) and `folder` (Assign Folder) must appear on every configurable surface; they were
+absent from two of them because one `shortcutable` boolean conflated "opens a picker" with
+"may not be a shortcut". A picker action invoked from a shortcut opens the tray first, so its
+row is visible rather than opening where nobody can see it.
+
+### 4.21 ★ The ··· gateway and compositor-drawn artifacts
+A human reported a crossed-out artifact near `···` that **did not appear in screenshots**.
+The gateway was innocent: `disabled: false`, `cursor: pointer`. Undo/Redo sit immediately to
+its left, are disabled on any fresh panel, and carried `cursor: not-allowed` across a ~50px
+band of the approach path.
+
+**Assert no rail control uses `not-allowed` or `no-drop`**, sweeping the actual approach path
+with `elementFromPoint`, and that `user-select` is `none` across the rail (a native text drag
+produces an equally invisible no-drop cursor). Also assert: two panels hold independent Deep
+Cuts state, moving between `···` and its tray causes **zero** class flips (no open/close
+oscillation), `···` survives a narrow panel, and open/close reloads nothing.
+
+**Diagnostic principle worth keeping:** visible to the eye but absent from a capture is a
+strong signal for a CSS cursor or another compositor-drawn surface — screenshots contain the
+page bitmap, never the cursor. Do not go looking for a DOM bug first.
+
+### 4.22 ★ Settings hierarchy and switch alignment
+Two top-level surfaces (`Top Toolbar`, `Quick Action Shortcut Runway`); `Toolbar Shortcuts`
+and `··· Deep Cuts` are subsections of the first, verified by `closest('.hotswap-surface')`.
+The Top Toolbar copy must name Position/Undo/Redo/`···` as fixed. Toolbar count is 1–10 in a
+5-column grid; responsive pressure changes what renders but must leave `hotswap_top_shortcut_count`
+and `_order` byte-identical, and structural controls always fit.
+
+**Alignment:** every Hotswap `.switch` right edge lands on one axis (±1px). This caught a real
+110px misalignment — the switches carried an inline `style="margin:0"` that outranked the
+stylesheet's `margin-left: auto`, so they sat wherever the heading text ended.
 
 ---
 

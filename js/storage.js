@@ -75,6 +75,8 @@ export const KEYS = Object.freeze({
     // Hotswap Chrome customization
     hotswapButtonVisibility: 'hotswap_button_visibility',
     hotswapTrayOrder:        'hotswap_tray_order',
+    hotswapActionOrder:      'hotswap_action_order',
+    hotswapTopCount:         'hotswap_top_count',
     quickActionSlots:        'hotswap_quick_action_slots',   // legacy — migration source only
     topShortcutsEnabled:     'hotswap_top_shortcuts_enabled',
     topShortcutCount:        'hotswap_top_shortcut_count',
@@ -96,6 +98,7 @@ export const KEYS = Object.freeze({
 
     // Workspace Tabs
     activeWorkspaceId:       'workspace_active_id',
+    settingsSectionState:    'settings_section_state',
 });
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -129,6 +132,8 @@ const DEFAULTS = {
     },
     [KEYS.quickActionSlots]: [],
     [KEYS.hotswapTrayOrder]: [],
+    [KEYS.hotswapActionOrder]: [],
+    [KEYS.hotswapTopCount]: 3,
     [KEYS.topShortcutsEnabled]: true,
     [KEYS.topShortcutCount]: 3,
     [KEYS.topShortcutOrder]: [],
@@ -139,6 +144,7 @@ const DEFAULTS = {
     [KEYS.hotswapHoverOpacity]: 100,
     [KEYS.ghostTargets]: { trigger: false, master: false, stream: false, solo: false },
     [KEYS.activeWorkspaceId]: 'live',
+    [KEYS.settingsSectionState]: {},
 };
 
 // ── Type map ─────────────────────────────────────────────────────────────────
@@ -164,6 +170,8 @@ const TYPES = {
     [KEYS.hotswapButtonVisibility]: 'json',
     [KEYS.quickActionSlots]:        'json',
     [KEYS.hotswapTrayOrder]:        'json',
+    [KEYS.hotswapActionOrder]:      'json',
+    [KEYS.hotswapTopCount]:         'number',
     [KEYS.topShortcutsEnabled]:     'boolean_default_true',
     [KEYS.topShortcutCount]:        'number',
     [KEYS.topShortcutOrder]:        'json',
@@ -174,6 +182,7 @@ const TYPES = {
     [KEYS.hotswapHoverOpacity]:     'number',
     [KEYS.ghostTargets]:            'json',
     [KEYS.activeWorkspaceId]:       'string',
+    [KEYS.settingsSectionState]:    'json',
 };
 
 // ── In-memory cache ──────────────────────────────────────────────────────────

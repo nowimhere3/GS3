@@ -46,9 +46,17 @@ import { HOTSWAP_ACTIONS } from './launch.js';
  *  and is as many controls as a panel edge can carry without becoming a wall. */
 export const MAX_QUICK_ACTIONS = 8;
 
-/** Top Shortcuts share the rail with the Position button, the layer selector
- *  and the history controls, so their ceiling is lower than the runway's. */
-export const MAX_TOP_SHORTCUTS = 6;
+/**
+ * BREADCRUMBS — WAS: 6, chosen when Undo/Redo were competing for the same
+ * configurable slots.
+ * IS: 10. Position, Undo, Redo and "···" are structural and no longer consume
+ * configurable capacity, so a wide enough panel can expose essentially the
+ * whole ordinary action vocabulary directly.
+ * WHY: direct access beats a trip through Deep Cuts whenever the space exists.
+ * Responsive pressure still hides shortcuts from the end — it never rewrites
+ * the saved count or order.
+ */
+export const MAX_TOP_SHORTCUTS = 10;
 
 /** How long Chrome waits, after pointer AND focus have left the whole
  *  interaction family, before retracting itself.
@@ -67,15 +75,50 @@ export const CHROME_RETRACT_DELAY_MS = 850;
 /** Every action the Deep Cuts tray presents. Position-owned actions are
  *  excluded: they are reached through the [Position N] button instead, so
  *  listing them here would offer a duplicate the tray no longer renders. */
-const _actionKeys = () => HOTSWAP_ACTIONS
-    .filter((action) => !action.positionOwned)
-    .map((action) => action.key);
+/**
+ * The three configurable Chrome surfaces. Eligibility for each is DERIVED from
+ * the canonical registry — no surface keeps a hand-maintained list.
+ */
+export const SURFACES = Object.freeze({
+    TOOLBAR: 'toolbarShortcuts',
+    RUNWAY: 'runway',
+    DEEP_CUTS: 'deepCuts',
+});
 
 /**
- * Reconcile a stored order against the canonical registry: unknown keys are
- * dropped (an action was removed), missing keys are appended in registry order
- * (an action was added). A stored order can therefore never desynchronize from
- * the registry, and no action definition is ever duplicated to express order.
+ * May this surface present this action?
+ *
+ * BREADCRUMBS — WHY three questions, not one: "the action exists", "this
+ * surface may show it" and "it is structurally owned elsewhere" are genuinely
+ * different. Collapsing them into one boolean is what let Edit URL and Assign
+ * Folder go missing from two surfaces while staying in a third. Exclusions here
+ * are deliberate presentation decisions; every implementation stays reachable.
+ */
+export function isEligibleFor(surface, action) {
+    if (!action) return false;
+    // Owned by [Position N]: never a configurable shortcut anywhere.
+    if (action.structural === 'positionButton') return false;
+    // Already fixed on the rail, so the rail does not also offer it as a
+    // configurable shortcut. Other surfaces still may — they do not show it.
+    if (action.structural === 'toolbarRail' && surface !== SURFACES.RUNWAY) return false;
+    return true;
+}
+
+/** Registry entries this surface may present, in registry order. */
+export function getEligibleActions(surface) {
+    return HOTSWAP_ACTIONS.filter((action) => isEligibleFor(surface, action));
+}
+
+function _eligibleKeys(surface) {
+    return getEligibleActions(surface).map((action) => action.key);
+}
+
+/**
+ * Reconcile a stored order against a surface's eligible set: unknown keys are
+ * dropped (the action was removed, or is no longer eligible here), missing keys
+ * are appended in registry order (an action was added). A stored order can
+ * therefore never desynchronize from the registry, and no action definition is
+ * ever duplicated to express order.
  */
 function _reconcileOrder(stored, universe) {
     const known = new Set(universe);
@@ -94,13 +137,31 @@ function _reconcileOrder(stored, universe) {
 // behavior. Forking the action definitions to express order would create two
 // sources of truth for what an action does.
 
-export function getHotswapTrayOrder() {
-    return _reconcileOrder(Store.get('hotswapTrayOrder'), _actionKeys());
+function _migrateUnifiedOrderOnce() {
+    if (Store.has('hotswapActionOrder')) return;
+    const eligible = _eligibleKeys(SURFACES.TOOLBAR);
+    const legacyTop = _reconcileOrder(Store.get('topShortcutOrder'), eligible);
+    const raw = Number(Store.get('topShortcutCount'));
+    const count = Math.max(1, Math.min(MAX_TOP_SHORTCUTS,
+        Number.isFinite(raw) ? Math.round(raw) : 3));
+    const chosenTop = legacyTop.slice(0, count);
+    const legacyTray = _reconcileOrder(Store.get('hotswapTrayOrder'), eligible);
+    Store.set('hotswapActionOrder', _reconcileOrder([...chosenTop, ...legacyTray], eligible));
+    Store.set('hotswapTopCount', count);
 }
 
-export function setHotswapTrayOrder(order) {
-    Store.set('hotswapTrayOrder', _reconcileOrder(order, _actionKeys()));
+export function getHotswapActionOrder() {
+    _migrateUnifiedOrderOnce();
+    return _reconcileOrder(Store.get('hotswapActionOrder'), _eligibleKeys(SURFACES.TOOLBAR));
 }
+
+export function setHotswapActionOrder(order) {
+    _migrateUnifiedOrderOnce();
+    Store.set('hotswapActionOrder', _reconcileOrder(order, _eligibleKeys(SURFACES.TOOLBAR)));
+}
+
+export const getHotswapTrayOrder = getHotswapActionOrder;
+export const setHotswapTrayOrder = setHotswapActionOrder;
 
 /** Registry entries in the user's configured tray order. */
 export function getOrderedHotswapActions() {
@@ -118,14 +179,10 @@ export function getOrderedHotswapActions() {
 // long is it". Legacy slots migrate on first read; the old key is left in place
 // rather than deleted, so downgrading cannot lose data.
 
-function _shortcutableKeys() {
-    return HOTSWAP_ACTIONS.filter((action) => action.shortcutable).map((action) => action.key);
-}
-
 function _migrateLegacySlotsOnce() {
     if (Store.has('quickActionsEnabled')) return;
     const legacy = (Store.get('quickActionSlots') || []).filter(Boolean);
-    const usable = legacy.filter((key) => _shortcutableKeys().includes(key));
+    const usable = legacy.filter((key) => _eligibleKeys(SURFACES.RUNWAY).includes(key));
     Store.set('quickActionsEnabled', usable.length > 0);
     if (usable.length > 0) {
         Store.set('quickActionCount', Math.min(usable.length, MAX_QUICK_ACTIONS));
@@ -155,15 +212,15 @@ export function setQuickActionCount(count) {
     Store.set('quickActionCount', Math.max(1, Math.min(MAX_QUICK_ACTIONS, Math.round(count) || 1)));
 }
 
-/** Every shortcutable action, in the user's configured runway order. */
+/** Every runway-eligible action, in the user's configured order. */
 export function getQuickActionOrder() {
     _migrateLegacySlotsOnce();
-    return _reconcileOrder(Store.get('quickActionOrder'), _shortcutableKeys());
+    return _reconcileOrder(Store.get('quickActionOrder'), _eligibleKeys(SURFACES.RUNWAY));
 }
 
 export function setQuickActionOrder(order) {
     _migrateLegacySlotsOnce();
-    Store.set('quickActionOrder', _reconcileOrder(order, _shortcutableKeys()));
+    Store.set('quickActionOrder', _reconcileOrder(order, _eligibleKeys(SURFACES.RUNWAY)));
 }
 
 /**
@@ -193,27 +250,33 @@ export function setTopShortcutsEnabled(enabled) {
 }
 
 export function getTopShortcutCount() {
-    const raw = Number(Store.get('topShortcutCount'));
+    _migrateUnifiedOrderOnce();
+    const raw = Number(Store.get('hotswapTopCount'));
     if (!Number.isFinite(raw)) return 1;
     return Math.max(1, Math.min(MAX_TOP_SHORTCUTS, Math.round(raw)));
 }
 
 export function setTopShortcutCount(count) {
-    Store.set('topShortcutCount', Math.max(1, Math.min(MAX_TOP_SHORTCUTS, Math.round(count) || 1)));
+    _migrateUnifiedOrderOnce();
+    Store.set('hotswapTopCount', Math.max(1, Math.min(MAX_TOP_SHORTCUTS, Math.round(count) || 1)));
 }
 
 export function getTopShortcutOrder() {
-    return _reconcileOrder(Store.get('topShortcutOrder'), _shortcutableKeys());
+    return getHotswapActionOrder();
 }
 
 export function setTopShortcutOrder(order) {
-    Store.set('topShortcutOrder', _reconcileOrder(order, _shortcutableKeys()));
+    setHotswapActionOrder(order);
 }
 
 /** The actions the toolbar renders, before responsive capacity is applied. */
-export function getActiveTopShortcuts() {
+export function getVisibleTopDeepActions(visibility = {}) {
+    return getHotswapActionOrder().filter((key) => visibility[key] !== false);
+}
+
+export function getActiveTopShortcuts(visibility = {}) {
     if (!isTopShortcutsEnabled()) return [];
-    return getTopShortcutOrder().slice(0, getTopShortcutCount());
+    return getVisibleTopDeepActions(visibility).slice(0, getTopShortcutCount());
 }
 
 // ── Opacity ──────────────────────────────────────────────────────────────────

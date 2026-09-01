@@ -43,7 +43,9 @@ import { pushDatabaseToRemote } from './sync.js';
 import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
 import {
     getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
+    getVisibleTopDeepActions, getTopShortcutCount, isTopShortcutsEnabled,
     isLayerTwoUrl, LAYER_1, LAYER_2, CHROME_RETRACT_DELAY_MS,
+    isEligibleFor, SURFACES,
 } from './hotswap-chrome.js';
 
 /**
@@ -98,41 +100,63 @@ export function navigatePanelTo(panel, url) {
     return true;
 }
 
-// Canonical list of every hotswap-overlay action. Drives both the tray
-// (Overlay Button Visibility in Settings) and the Quick Action shortcut slots.
-// `shortcutable: false` means the action opens its own picker/dropdown rather
-// than firing immediately — those stay tray-only, since a tiny always-visible
-// shortcut button isn't a good home for a full picker UI.
+/**
+ * THE canonical Hotswap action registry — the single source of truth for every
+ * action any Chrome surface can present.
+ *
+ * BREADCRUMBS — WAS: a single `shortcutable` boolean decided whether an action
+ * could appear on a shortcut surface. It was hand-maintained and drifted:
+ * "Edit URL" and "Assign Folder" were reachable in Deep Cuts but silently
+ * absent from Toolbar Shortcuts and the Runway, because `shortcutable: false`
+ * had been set back when a shortcut was a tiny corner button with nowhere to
+ * show a picker.
+ * IS: each action declares CAPABILITY (`opensPicker`) and STRUCTURAL OWNERSHIP
+ * (`structural`). Surface eligibility is DERIVED from those in one place
+ * (hotswap-chrome.js), so no surface keeps its own list to fall out of date.
+ * WHY: three hand-curated vocabularies over one set of behaviors is drift
+ * waiting to happen — and it already happened. Deriving eligibility means
+ * adding an action makes it appear everywhere it is legal, automatically.
+ *
+ * Fields:
+ *   opensPicker  the action reveals a row inside the Deep Cuts tray rather
+ *                than firing immediately. Mirrors on other surfaces open the
+ *                tray first so the picker is actually visible.
+ *   structural   this action is ALREADY presented as fixed, non-removable UI:
+ *                  'positionButton' — surfaced by [Position N]
+ *                  'toolbarRail'    — a fixed control on the toolbar itself
+ *                A surface never offers what it already shows structurally.
+ *                The implementation is untouched either way — this governs
+ *                presentation only.
+ */
 export const HOTSWAP_ACTIONS = [
-    // BREADCRUMBS — WAS: these were generic Deep Cuts entries, while
-    // [Position N] sat in the toolbar as an inert label.
-    // IS: `positionOwned` marks them as presented by the Position button, and
-    // they no longer render in the Deep Cuts tray or its Settings list.
-    // WHY: actions about a physical Position belong behind the control that
-    // NAMES that Position. Leaving duplicates in the tray would be clutter and
-    // would hide the relationship between Position identity and Position
-    // actions. The canonical implementations are untouched — only their
-    // redundant tray presentation is retired.
-    { key: 'position',   emoji: '📍',  title: 'Move to Position',                                     className: 'btn-hotswap-position',    shortcutable: false, positionOwned: true },
-    { key: 'copyPosition', emoji: '📋', title: "Copy this panel's URL to another Position",            className: 'btn-hotswap-copy-position', shortcutable: false, positionOwned: true },
-    { key: 'folder',     emoji: '📁',  title: 'Assign a folder for this panel',                       className: 'btn-hotswap-folder',      shortcutable: false },
-    { key: 'star',       emoji: '⭐',  title: 'Save to Playlist',                                     className: 'btn-hotswap-star',        shortcutable: true },
-    { key: 'toggle',     emoji: '🌐',  title: 'Edit URL',                                             className: 'btn-hotswap-toggle',      shortcutable: false },
-    { key: 'reload',     emoji: '⟳',  title: 'Reload this panel',                                    className: 'btn-hotswap-reload',      shortcutable: true },
-    { key: 'shuffle',    emoji: '🎲',  title: "Shuffle from this panel's assigned folder",            className: 'btn-hotswap-shuffle',     shortcutable: true },
-    { key: 'shuffleAll', emoji: '🎲🎲', title: 'Shuffle All — random URL from any folder',             className: 'btn-hotswap-shuffle-all', shortcutable: true },
-    { key: 'delete',     emoji: '❌',  title: "Delete this URL from its folder and load a replacement", className: 'btn-hotswap-delete',      shortcutable: true },
-    { key: 'kill',       emoji: '☠',  title: 'Remove this panel for this session',                   className: 'btn-hotswap-kill',        shortcutable: true },
-    { key: 'purge',      emoji: '🗑️', title: 'Purge — blacklist domain and remove from all folders',  className: 'btn-purge',               shortcutable: true },
-    { key: 'launchpad',  emoji: '🚀',  title: 'Load the Stream Loop Launchpad inside this panel',      className: 'btn-hotswap-launchpad',   shortcutable: true },
-    // Undo/Redo are panel-scoped and, unlike every other action here, have an
-    // AVAILABILITY state. They stay shortcutable — a one-click action is
-    // exactly what a Quick Action slot is for — but both the tray button and
-    // any Quick Action mirror of it are kept `disabled` in lockstep with the
-    // panel's real history, so neither can ever be a control that silently
-    // does nothing. See _syncHistoryButtons() below.
-    { key: 'undo',       emoji: '↩',  title: 'Undo the last change to this panel',                    className: 'btn-hotswap-undo',        shortcutable: true },
-    { key: 'redo',       emoji: '↪',  title: 'Redo the last change undone on this panel',             className: 'btn-hotswap-redo',        shortcutable: true },
+    // Position-owned: reachable through [Position N], never as a configurable
+    // shortcut. Keeping them in the ordinary collections would duplicate the
+    // control and hide the relationship between Position identity and Position
+    // actions.
+    { key: 'position',     emoji: '📍',  title: 'Move to Position',                                      className: 'btn-hotswap-position',      structural: 'positionButton' },
+    { key: 'copyPosition', emoji: '📋',  title: "Copy this panel's URL to another Position",             className: 'btn-hotswap-copy-position', structural: 'positionButton' },
+
+    // Ordinary configurable actions. These two open a picker row — previously
+    // that alone excluded them from every shortcut surface.
+    { key: 'toggle',       emoji: '🌐',  title: 'Edit URL',                                              className: 'btn-hotswap-toggle',        opensPicker: true },
+    { key: 'folder',       emoji: '📁',  title: 'Assign a folder for this panel',                        className: 'btn-hotswap-folder',        opensPicker: true },
+    { key: 'star',         emoji: '⭐',  title: 'Save to Playlist',                                      className: 'btn-hotswap-star' },
+    { key: 'reload',       emoji: '⟳',  title: 'Reload this panel',                                     className: 'btn-hotswap-reload' },
+    { key: 'shuffle',      emoji: '🎲',  title: "Shuffle from this panel's assigned folder",             className: 'btn-hotswap-shuffle' },
+    { key: 'shuffleAll',   emoji: '🎲🎲', title: 'Shuffle All — random URL from any folder',              className: 'btn-hotswap-shuffle-all' },
+    { key: 'delete',       emoji: '❌',  title: "Delete this URL from its folder and load a replacement", className: 'btn-hotswap-delete' },
+    { key: 'kill',         emoji: '☠',  title: 'Remove this panel for this session',                    className: 'btn-hotswap-kill' },
+    { key: 'purge',        emoji: '🗑️', title: 'Purge — blacklist domain and remove from all folders',   className: 'btn-purge' },
+    { key: 'launchpad',    emoji: '🚀',  title: 'Load the Stream Loop Launchpad inside this panel',       className: 'btn-hotswap-launchpad' },
+
+    // Fixed on the toolbar rail, so they never consume a configurable Toolbar
+    // Shortcut position. They remain eligible for the Runway and Deep Cuts —
+    // those are different surfaces, where they are not already present.
+    // Unlike every other action these carry an AVAILABILITY state; every
+    // rendering of them is kept disabled in lockstep with the panel's real
+    // history, so none can be a control that silently does nothing.
+    { key: 'undo',         emoji: '↩',  title: 'Undo the last change to this panel',                    className: 'btn-hotswap-undo',          structural: 'toolbarRail' },
+    { key: 'redo',         emoji: '↪',  title: 'Redo the last change undone on this panel',             className: 'btn-hotswap-redo',          structural: 'toolbarRail' },
 ];
 
 /**
@@ -328,6 +352,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
             <button class="btn-hotswap-undo" title="Undo the last change to this panel">↩</button>
             <button class="btn-hotswap-redo" title="Redo the last change undone on this panel">↪</button>
         </div>
+        <div class="hotswap-empty-state" hidden>All actions are on the toolbar.</div>
         <div class="hotswap-position-row"></div>
         <div class="hotswap-copy-row"></div>
         <div class="hotswap-folder-row"></div>
@@ -357,6 +382,12 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const folderBtn      = overlay.querySelector('.btn-hotswap-folder');
     const folderRow      = overlay.querySelector('.hotswap-folder-row');
     const launchpadBtn   = overlay.querySelector('.btn-hotswap-launchpad');
+    const pickerRows = [folderRow, urlRow];
+    const hasOpenPicker = () => pickerRows.some((row) => row.classList.contains('open'));
+    const closePicker = () => {
+        pickerRows.forEach((row) => row.classList.remove('open'));
+        [folderBtn, toggleBtn].forEach((button) => button.classList.remove('active'));
+    };
 
     // ── Retractable top toolbar ──────────────────────────────────────────────
     // BREADCRUMBS — WAS: an always-visible "···" trigger pinned to the panel's
@@ -375,12 +406,12 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     toolbar.className = 'hotswap-toolbar';
     toolbar.innerHTML = `
         <button class="hotswap-position-btn" type="button"><span class="hotswap-position-label"></span> <span class="hotswap-caret">\u25be</span></button>
+        <span class="hotswap-toolbar-spacer"></span>
         <div class="hotswap-layer-selector" hidden>
             <button class="hotswap-layer-btn" data-layer="L2">L2</button>
             <button class="hotswap-layer-btn" data-layer="L1">L1</button>
         </div>
         <div class="hotswap-top-shortcuts"></div>
-        <span class="hotswap-toolbar-spacer"></span>
         <div class="hotswap-toolbar-actions"></div>
     `;
     const positionBtnEl = toolbar.querySelector('.hotswap-position-btn');
@@ -415,6 +446,10 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // leave, a short countdown retracts it — see CHROME_RETRACT_DELAY_MS.
     const inChromeFamily = (node) => node instanceof Node
         && (toolbar.contains(node) || overlay.contains(node)
+            || activationEl.contains(node) || positionMenuEl.contains(node)
+            || pickerRows.some((row) => row.contains(node)));
+    const inRailFamily = (node) => node instanceof Node
+        && (toolbar.contains(node) || overlay.contains(node)
             || activationEl.contains(node) || positionMenuEl.contains(node));
 
     let retractTimer = null;
@@ -422,12 +457,13 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
 
     /** Close the deepest open child, or report that there was none. */
     const closeDeepestChild = () => {
-        const openChild = overlay.querySelector('.hotswap-position-row.open, .hotswap-copy-row.open, .hotswap-folder-row.open, .hotswap-url-row.open');
+        const openChild = panel.querySelector('.hotswap-position-row.open, .hotswap-copy-row.open');
         if (openChild) {
             openChild.classList.remove('open');
             overlay.querySelectorAll('.hotswap-icon-row .active').forEach((b) => b.classList.remove('active'));
             return true;
         }
+        if (hasOpenPicker()) { closePicker(); return true; }
         if (!positionMenuEl.hidden) { closePositionMenu(); return true; }
         if (overlay.classList.contains('open')) { closeDeepCuts(); return true; }
         return false;
@@ -444,6 +480,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         cancelRetract();
         retractTimer = setTimeout(() => {
             retractTimer = null;
+            if (hasOpenPicker()) return;
             // Deliberately unconditional: an open tray must not be able to hold
             // the website's height hostage once the user has walked away. While
             // they are still IN the family every leave is cancelled above, so
@@ -462,7 +499,11 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         });
     });
     // Keyboard users are part of the family too — focus keeps Chrome alive.
-    panel.addEventListener('focusin', (e) => { if (inChromeFamily(e.target)) revealToolbar(); });
+    panel.addEventListener('focusin', (e) => {
+        if (!inChromeFamily(e.target)) return;
+        cancelRetract();
+        if (inRailFamily(e.target)) revealToolbar();
+    });
     panel.addEventListener('focusout', (e) => {
         if (inChromeFamily(e.target) && !inChromeFamily(e.relatedTarget)) scheduleRetract();
     });
@@ -476,6 +517,11 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // iframe swallows its own pointer events, so this is the last observable
     // moment before the pointer disappears into content GS3 cannot watch.
     iframe.addEventListener('pointerenter', scheduleRetract);
+    // Iframe focus remains observable across origins. It dismisses the utility
+    // without intercepting or preventing the website interaction that caused it.
+    iframe.addEventListener('focus', () => {
+        if (hasOpenPicker()) closePicker();
+    });
 
     /**
      * Fit the Top Shortcuts to the rail.
@@ -488,9 +534,9 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
      * every one of them. Nothing is written back to preferences: a narrow panel
      * renders fewer, and widening restores them automatically.
      */
+    let lastPhysicalFitCutoff = null;
     function layoutTopShortcuts() {
         const shortcuts = [...topShortcutsEl.children];
-        if (shortcuts.length === 0) return;
         const railWidth = toolbar.clientWidth;
         if (railWidth === 0) return; // retracted; measured again on reveal
         shortcuts.forEach((button) => { button.hidden = false; });
@@ -498,9 +544,19 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
             + (layerSelectorEl.hidden ? 0 : layerSelectorEl.offsetWidth)
             + toolbarActionsEl.offsetWidth
             + 40; // rail padding, gaps, and a little breathing room
-        const each = shortcuts[0].offsetWidth + 6;
-        const fits = Math.max(0, Math.floor((railWidth - reserved) / each));
+        const budget = Math.max(0, railWidth - reserved);
+        let used = 0;
+        let fits = 0;
+        for (const button of shortcuts) {
+            const width = button.getBoundingClientRect().width + (fits > 0 ? 6 : 0);
+            if (used + width > budget) break;
+            used += width;
+            fits += 1;
+        }
+        if (fits === lastPhysicalFitCutoff) return;
+        lastPhysicalFitCutoff = fits;
         shortcuts.forEach((button, i) => { button.hidden = i >= fits; });
+        projectDeepCuts(fits);
     }
 
     // ── Deep Cuts ────────────────────────────────────────────────────────────
@@ -517,6 +573,26 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         overlay.querySelectorAll('.hotswap-icon-row .active').forEach((b) => b.classList.remove('active'));
         triggerBtn.classList.remove('open');
         triggerBtn.textContent = '\u00b7\u00b7\u00b7';
+    }
+
+    // Edit URL and Assign Folder share one website-relative utility dock.
+    // Invocation selects the canonical action; it never selects geometry.
+    function placePicker(row) {
+        requestAnimationFrame(() => {
+            if (!row.classList.contains('open')) return;
+            const panelBox = panel.getBoundingClientRect();
+            const pickerBox = row.getBoundingClientRect();
+            const inset = 8;
+            const websiteInset = parseFloat(getComputedStyle(panel)
+                .getPropertyValue('--hotswap-website-inset')) || 0;
+            const top = Math.max(inset, Math.min(
+                websiteInset + inset,
+                panelBox.height - pickerBox.height - inset,
+            ));
+            row.style.left = 'auto';
+            row.style.right = `${inset}px`;
+            row.style.top = `${top}px`;
+        });
     }
 
     triggerBtn.onclick = (e) => {
@@ -603,8 +679,9 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // Observable outside clicks dismiss too. This is a supplement, never the
     // primary mechanism: a click inside a cross-origin iframe does not reach us.
     document.addEventListener('pointerdown', (e) => {
-        if (!overlay.classList.contains('open') && positionMenuEl.hidden) return;
+        if (!overlay.classList.contains('open') && positionMenuEl.hidden && !hasOpenPicker()) return;
         if (inChromeFamily(e.target)) return;
+        closePicker();
         closeDeepCuts();
         closePositionMenu();
     });
@@ -717,9 +794,11 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // (and the master overlay's own-folder Shuffle) will use it too.
     folderBtn.onclick = (e) => {
         e.stopPropagation();
-        const isOpen = folderRow.classList.toggle('open');
-        folderBtn.classList.toggle('active', isOpen);
-        if (!isOpen) return;
+        if (folderRow.classList.contains('open')) { closePicker(); return; }
+        closePicker();
+        folderRow.classList.add('open');
+        folderBtn.classList.add('active');
+        placePicker(folderRow);
 
         folderRow.innerHTML = '';
         const currentDb = getDatabaseStructure();
@@ -742,8 +821,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
                 // a separate, session-unaware setUrlFolderMap() call.
                 if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
                 setIframeUrl(newUrl || currentUrl, folderName);
-                folderRow.classList.remove('open');
-                folderBtn.classList.remove('active');
+                closePicker();
             };
             folderRow.appendChild(item);
         });
@@ -752,12 +830,18 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // 🌐 URL edit toggle
     toggleBtn.onclick = (e) => {
         e.stopPropagation();
-        const isOpen = urlRow.classList.toggle('open');
-        toggleBtn.classList.toggle('active', isOpen);
-        if (isOpen) {
-            inputField.value = iframe.getAttribute('data-last-src') || iframe.src;
-            inputField.focus();
-        }
+        if (urlRow.classList.contains('open')) { closePicker(); return; }
+        closePicker();
+        urlRow.classList.add('open');
+        toggleBtn.classList.add('active');
+        placePicker(urlRow);
+        inputField.value = iframe.getAttribute('data-last-src') || iframe.src;
+        requestAnimationFrame(() => {
+            inputField.focus({ preventScroll: true });
+            const end = inputField.value.length;
+            inputField.setSelectionRange(end, end);
+            inputField.scrollLeft = inputField.scrollWidth;
+        });
     };
 
     const processHotswap = () => {
@@ -765,8 +849,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         if (newUrl.length > 0) {
             if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
             setIframeUrl(newUrl);
-            urlRow.classList.remove('open');
-            toggleBtn.classList.remove('active');
+            closePicker();
         }
     };
     submitBtn.onclick  = (e) => { e.stopPropagation(); processHotswap(); };
@@ -970,6 +1053,9 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // behavior — there is exactly one implementation of each action, and a
     // surface can be reordered or removed without touching it.
     const visibility = Store.get('hotswapButtonVisibility') || {};
+    const visibleTopDeepKeys = getVisibleTopDeepActions(visibility);
+    const configuredTopKeys = isTopShortcutsEnabled()
+        ? visibleTopDeepKeys.slice(0, getTopShortcutCount()) : [];
 
     // Actions this host page cannot perform at all already hid their own button
     // above. They stay hidden regardless of Settings, and are never offered on
@@ -977,9 +1063,6 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const unsupported = new Set();
     if (!positionsSupported) { unsupported.add('position'); unsupported.add('copyPosition'); }
     if (!historySupported)   { unsupported.add('undo'); unsupported.add('redo'); }
-    // Position-owned actions are reachable through [Position N] only.
-    HOTSWAP_ACTIONS.forEach((action) => { if (action.positionOwned) unsupported.add(action.key); });
-
     // Render the tray in the user's configured order without re-creating any
     // button: the nodes (and their handlers) are simply re-appended in place.
     const iconRow = overlay.querySelector('.hotswap-icon-row');
@@ -998,7 +1081,16 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         mirror.className = className;
         mirror.dataset.actionKey = key;
         mirror.title = action.title;
-        mirror.textContent = action.emoji;
+        if (key === 'shuffleAll' && className.includes('hotswap-runway-btn')) {
+            mirror.classList.add('hotswap-runway-shuffle-all');
+            for (let i = 0; i < 2; i += 1) {
+                const die = document.createElement('span');
+                die.textContent = '🎲';
+                mirror.appendChild(die);
+            }
+        } else {
+            mirror.textContent = action.emoji;
+        }
         mirror.onclick = (e) => {
             e.stopPropagation();
             if (mirror.disabled) return;
@@ -1007,15 +1099,28 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         return mirror;
     };
 
-    HOTSWAP_ACTIONS.forEach(({ key, className, positionOwned }) => {
+    HOTSWAP_ACTIONS.forEach(({ key, className, structural }) => {
         const btn = overlay.querySelector(`.${className}`);
         if (!btn) return;
         // Position-owned actions are retired from the tray's PRESENTATION —
         // their implementations stay, reached through [Position N] instead.
-        if (positionOwned) { btn.style.display = 'none'; return; }
+        if (structural === 'positionButton') { btn.style.display = 'none'; return; }
+        if (structural === 'toolbarRail') { btn.style.display = 'none'; return; }
         if (unsupported.has(key)) return; // already hid itself: this page can't do it
         btn.style.display = visibility[key] === false ? 'none' : '';
     });
+
+    const emptyStateEl = overlay.querySelector('.hotswap-empty-state');
+    function projectDeepCuts(physicalFit = configuredTopKeys.length) {
+        const effective = Math.min(configuredTopKeys.length, physicalFit);
+        const deepKeys = new Set(visibleTopDeepKeys.slice(effective));
+        visibleTopDeepKeys.forEach((key) => {
+            const action = HOTSWAP_ACTIONS.find((candidate) => candidate.key === key);
+            const button = action && overlay.querySelector(`.${action.className}`);
+            if (button && !unsupported.has(key)) button.style.display = deepKeys.has(key) ? '' : 'none';
+        });
+        if (emptyStateEl) emptyStateEl.hidden = deepKeys.size !== 0;
+    }
 
     // Layer scope is enforced ONCE, on the canonical tray button, so it applies
     // no matter which surface invoked the action. Enforcing it on the mirrors
@@ -1040,7 +1145,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // (the deeper toolbox) — all invoking the SAME canonical actions.
     // WHY: different ergonomics deserve different surfaces; they do not deserve
     // different implementations.
-    getActiveTopShortcuts().forEach((key) => {
+    getActiveTopShortcuts(visibility).forEach((key) => {
         const mirror = buildMirror(key, 'hotswap-mirror-btn hotswap-toolbar-btn hotswap-top-shortcut');
         if (mirror) topShortcutsEl.appendChild(mirror);
     });
@@ -1095,6 +1200,10 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     panel.appendChild(iframe);
     if (runwayEl) panel.appendChild(runwayEl);
     panel.appendChild(overlay);
+    pickerRows.forEach((row) => {
+        row.classList.add('hotswap-picker');
+        panel.appendChild(row);
+    });
 
     layoutTopShortcuts();
     if (typeof ResizeObserver === 'function') {
