@@ -528,8 +528,19 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // iframe swallows its own pointer events, so this is the last observable
     // moment before the pointer disappears into content GS3 cannot watch.
     iframe.addEventListener('pointerenter', scheduleRetract);
-    // Iframe focus remains observable across origins. It dismisses the utility
-    // without intercepting or preventing the website interaction that caused it.
+    // Chromium does not dispatch `focus` on the iframe element when a click
+    // moves focus into its browsing context. It does blur the parent window,
+    // with the iframe exposed as document.activeElement. Check that honest
+    // cross-origin-safe signal on the next frame: nothing is placed over the
+    // website and the interaction that caused the transition continues intact.
+    window.addEventListener('blur', () => {
+        if (!hasOpenPicker()) return;
+        requestAnimationFrame(() => {
+            if (hasOpenPicker() && document.activeElement === iframe) closePicker();
+        });
+    });
+    // Retain direct iframe focus as a fallback for programmatic/browser paths
+    // that do focus the element itself.
     iframe.addEventListener('focus', () => {
         if (hasOpenPicker()) closePicker();
     });

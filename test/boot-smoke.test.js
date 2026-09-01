@@ -3168,6 +3168,66 @@ test('Assign Folder owns its own focus, so Escape closes it deterministically', 
     await page.close();
 });
 
+test('Part 1-6C real cross-origin website clicks dismiss both utilities without swallowing the click', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    await page.addInitScript((crossOrigin) => {
+        localStorage.setItem('loop_matrix_urls', JSON.stringify([`${crossOrigin}/test/fixtures/canary.html?id=click-away`]));
+        localStorage.setItem('hotswap_quick_actions_enabled', 'true');
+        localStorage.setItem('hotswap_quick_action_count', '2');
+        localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['toggle', 'folder']));
+    }, CROSS_ORIGIN);
+    await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelector('.hotswap-runway-btn[data-action-key="folder"]'));
+    await page.evaluate(async () => {
+        const { setDatabaseStructure } = await import('./js/state.js');
+        setDatabaseStructure({ Alpha: ['/test/fixtures/canary.html?id=folder'] });
+    });
+    const panel = page.locator('.stream-panel').first();
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    assert.ok(frame, 'cross-origin website frame loaded');
+    await frame.evaluate(() => {
+        window.__websitePointerdowns = 0;
+        window.__websiteDefaultPrevented = null;
+        document.addEventListener('pointerdown', (event) => {
+            window.__websitePointerdowns += 1;
+            window.__websiteDefaultPrevented = event.defaultPrevented;
+        });
+    });
+    const openFromRunway = async (actionKey, rowSelector) => {
+        await page.evaluate((key) => document.querySelector(`.hotswap-runway-btn[data-action-key="${key}"]`).click(), actionKey);
+        await page.waitForFunction((selector) => document.querySelector(selector).classList.contains('open'), rowSelector);
+        await page.waitForTimeout(50); // utility focus requestAnimationFrame
+    };
+    const clickWebsite = async () => {
+        const box = await panel.locator('iframe').boundingBox();
+        assert.ok(box, 'website iframe has clickable geometry');
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    };
+
+    await openFromRunway('folder', '.hotswap-folder-row');
+    await clickWebsite();
+    await page.waitForFunction(() => !document.querySelector('.hotswap-folder-row').classList.contains('open'));
+    assert.deepEqual(await frame.evaluate(() => ({
+        pointerdowns: window.__websitePointerdowns,
+        defaultPrevented: window.__websiteDefaultPrevented,
+    })), { pointerdowns: 1, defaultPrevented: false },
+        'Assign Folder closes while the same cross-origin website click proceeds normally');
+
+    await openFromRunway('toggle', '.hotswap-url-row');
+    assert.equal(await panel.evaluate((el) => el.classList.contains('chrome-revealed')), false,
+        'Runway invocation does not reveal Top Toolbar');
+    await clickWebsite();
+    await page.waitForFunction(() => !document.querySelector('.hotswap-url-row').classList.contains('open'));
+    assert.deepEqual(await frame.evaluate(() => ({
+        pointerdowns: window.__websitePointerdowns,
+        defaultPrevented: window.__websiteDefaultPrevented,
+    })), { pointerdowns: 2, defaultPrevented: false },
+        'Edit URL closes while the same cross-origin website click proceeds normally');
+
+    await page.close();
+});
+
 test('Part 1-2 Settings major cards collapse persistently and administrative UI moved once', async () => {
     const page = await browser.newPage();
     page.setDefaultTimeout(5000);

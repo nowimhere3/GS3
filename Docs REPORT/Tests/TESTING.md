@@ -699,9 +699,12 @@ completion, Escape, or a click outside — never only by completing the action.
   worked when a click happened to land on a focusable child by accident. Taking focus must not
   auto-select a folder, scroll the page, or reveal the Top Toolbar.
 - **Cross-origin residual case, documented not faked** — the honest boundary is iframe `focus`,
-  which fires on the transition into the frame and reliably closes an open utility. If the
-  iframe already holds focus when a utility opens, a subsequent click inside that website
-  produces no parent-visible event at all, and the utility remains open until Escape, an outside
+  exposed through parent `window.blur` plus `document.activeElement === iframe`; Chromium does
+  not fire the iframe element's own `focus` event for an actual click into its browsing context.
+  The Part 1-6C Playwright regression performs real clicks inside a genuinely cross-origin frame
+  for both utilities and proves the same child-frame `pointerdown` arrives uncancelled. If the
+  iframe already holds focus when a utility opens, a subsequent click inside that website still
+  produces no parent-visible transition, and the utility remains open until Escape, an outside
   click, or an action. This is a real browser limitation — no transparent overlay is introduced
   to paper over it, since that would intercept the customer's own first click into their site.
 

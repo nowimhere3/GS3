@@ -2,6 +2,14 @@
 
 The per-panel control surface.
 
+## Part 1-6C website click-away breadcrumb
+
+WAS: Utility dismissal correctly handled Escape and parent-document click-away, but website-area dismissal relied on an iframe element `focus` event that real Chromium does not dispatch when a click moves focus into the iframe browsing context.
+
+IS: While a utility is open, GS3 observes parent `window.blur` and checks on the next animation frame whether that panel iframe is `document.activeElement`. That cross-origin-safe transition closes through the same canonical `closePicker()`; direct iframe `focus` remains a fallback. No overlay, event cancellation, iframe mutation, or toolbar reveal is involved.
+
+WHY: Click-away should match normal user expectations wherever the browser provides an honest parent-visible signal, without stealing or delaying the customer's website click or pretending GS3 can observe arbitrary cross-origin DOM events. A later click inside an already-focused cross-origin frame remains unobservable to the parent.
+
 ## Part 1-6 utility dismissal + Toolbar Shortcuts toggle breadcrumb
 
 WAS: outside-click dismissal used the whole Hotswap Chrome family (`inChromeFamily`) as its
