@@ -226,7 +226,10 @@
             display: flex; align-items: center; justify-content: center;
             transition: background 0.15s, color 0.15s, border-color 0.15s;
         }
-        html.ghost-trigger .hotswap-trigger:hover,
+        /* BREADCRUMBS — the Ghost hover rule must end here. A trailing comma
+           groups the trigger with `.hotswap-overlay`, lending the button the
+           tray's absolute geometry and making the whole toolbar jump. */
+        html.ghost-trigger .hotswap-trigger:hover { opacity: var(--chrome-hover-opacity, 1); }
 
         /* Per-panel overlay */
         .hotswap-overlay { position: absolute; top: var(--hotswap-toolbar-height); right: 8px; background: rgba(0,0,0,0.92); border: 1px solid #333; border-radius: 14px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; z-index: 10000; backdrop-filter: blur(10px); min-width: 190px; opacity: 0; pointer-events: none; transform: translateX(12px) scale(0.95); transform-origin: top right; transition: opacity 0.15s ease, transform 0.15s ease; }

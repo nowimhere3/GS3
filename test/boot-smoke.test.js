@@ -2475,6 +2475,72 @@ test('the toolbar is full opacity while the runway ghosts', async () => {
     await page.close();
 });
 
+test('Deep Cuts trigger hover never inherits overlay geometry in either CSS copy', async () => {
+    for (const pageName of ['index.html', 'index3.html']) {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(5000);
+        await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
+        await page.addInitScript(() => {
+            localStorage.setItem('hotswap_ghost_targets', JSON.stringify({ trigger: true }));
+            localStorage.setItem('hotswap_hover_opacity', '43');
+            localStorage.setItem('loop_matrix_urls', JSON.stringify([
+                '/test/fixtures/canary.html?id=A',
+                '/test/fixtures/canary.html?id=B',
+                '/test/fixtures/canary.html?id=C',
+            ]));
+        });
+        await page.goto(`${ORIGIN}/${pageName}`, { waitUntil: 'load' });
+        if (pageName === 'index.html') {
+            await page.locator('.url-grid-field').first().fill('/test/fixtures/canary.html?id=A');
+            await page.locator('#launch-btn').click();
+        }
+        await page.waitForSelector('.stream-panel .hotswap-trigger');
+        // Hold the retractable rail open so this test isolates the trigger's
+        // own real :hover geometry rather than racing the activation strip.
+        await page.locator('.stream-panel').first().evaluate((panel) => panel.classList.add('chrome-revealed'));
+        await page.locator('.stream-panel .hotswap-trigger').first().scrollIntoViewIfNeeded();
+        await page.waitForTimeout(220);
+
+        const geometry = () => page.evaluate(() => {
+            const panel = document.querySelector('.stream-panel');
+            const read = (selector) => {
+                const box = panel.querySelector(selector).getBoundingClientRect();
+                return { x: box.x, y: box.y, width: box.width, height: box.height };
+            };
+            const trigger = panel.querySelector('.hotswap-trigger');
+            const undoSelector = '.hotswap-toolbar-actions [data-action-key="undo"]';
+            const redoSelector = '.hotswap-toolbar-actions [data-action-key="redo"]';
+            const undo = panel.querySelector(undoSelector);
+            const redo = panel.querySelector(redoSelector);
+            return {
+                trigger: read('.hotswap-trigger'),
+                undo: undo && read(undoSelector),
+                redo: redo && read(redoSelector),
+                opacity: getComputedStyle(trigger).opacity,
+                visible: trigger.getClientRects().length > 0 && getComputedStyle(trigger).visibility === 'visible',
+                historyDisabled: undo && redo ? [undo.disabled, redo.disabled] : null,
+            };
+        });
+        const before = await geometry();
+        await page.locator('.stream-panel .hotswap-trigger').first().hover();
+        await page.waitForTimeout(180);
+        const hovered = await geometry();
+
+        assert.deepEqual(hovered.trigger, before.trigger, `${pageName}: trigger box stays fixed on hover`);
+        assert.deepEqual(hovered.undo, before.undo, `${pageName}: Undo does not move`);
+        assert.deepEqual(hovered.redo, before.redo, `${pageName}: Redo does not move`);
+        assert.equal(hovered.visible, true, `${pageName}: trigger remains visible`);
+        assert.equal(hovered.opacity, '0.43', `${pageName}: configured Ghost hover opacity applies`);
+        assert.deepEqual(hovered.historyDisabled, before.historyDisabled, `${pageName}: history state is untouched`);
+
+        await page.locator('.stream-panel .hotswap-trigger').first().click();
+        assert.equal(await page.locator('.stream-panel .hotswap-overlay').first().evaluate((tray) =>
+            tray.classList.contains('open') && getComputedStyle(tray).pointerEvents === 'auto'), true,
+        `${pageName}: Deep Cuts still opens normally`);
+        await page.close();
+    }
+});
+
 const openPositionMenu = (page, slotIndex = 0) => page.evaluate((index) => {
     const panel = document.querySelectorAll('.stream-panel')[index];
     panel.classList.add('chrome-revealed');

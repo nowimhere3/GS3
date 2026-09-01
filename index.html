@@ -1175,7 +1175,10 @@
         .hotswap-trigger::before { content: none; }
         .hotswap-trigger:hover { background: rgba(0,0,0,0.95); color: #fff; border-color: #888; }
         .hotswap-trigger.open  { background: rgba(0,95,200,0.85); border-color: #0095f6; color: #fff; }
-        html.ghost-trigger .hotswap-trigger:hover,
+        /* BREADCRUMBS — the Ghost hover rule must end here. A trailing comma
+           groups the trigger with `.hotswap-overlay`, lending the button the
+           tray's absolute geometry and making the whole toolbar jump. */
+        html.ghost-trigger .hotswap-trigger:hover { opacity: var(--chrome-hover-opacity, 1); }
 
         .hotswap-overlay {
             position: absolute;
