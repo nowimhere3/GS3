@@ -107,9 +107,9 @@ const DEFAULTS = {
     [KEYS.singleModeAutoplay]: false,
     [KEYS.tripleLayout]:    'lefttall',
     [KEYS.hotswapButtonVisibility]: {
-        position: true, folder: true, star: true, toggle: true, reload: true,
-        shuffle: true, shuffleAll: true, delete: true, kill: true, purge: true,
-        launchpad: true,
+        position: true, copyPosition: true, folder: true, star: true, toggle: true,
+        reload: true, shuffle: true, shuffleAll: true, delete: true, kill: true,
+        purge: true, launchpad: true, undo: true, redo: true,
     },
     [KEYS.quickActionSlots]: [],
     [KEYS.ghostOpacity]: 12,

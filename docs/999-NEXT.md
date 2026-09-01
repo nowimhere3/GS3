@@ -22,7 +22,11 @@ Items are grouped by architectural phase rather than priority.
 
 ## User Experience
 
-- [ ] 🖥 Quick Action shortcut
+- [ ] Duplicate/Copy control on the pre-launch Builder, beside Lock/X.
+      Deliberately deferred: the Builder's control layout is expected to be
+      reorganized, and the runtime "Copy to Position" behavior should be
+      settled first so the Builder can reuse it rather than grow a second
+      implementation.
 - [ ] Quick Favourite
 - [ ] Favourite Panel collection
 - [ ] Runtime zoom in/out

@@ -1248,7 +1248,9 @@
         }
 
         .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-kill,
-        .btn-purge, .btn-hotswap-position, .btn-hotswap-folder, .btn-hotswap-launchpad {
+        .btn-purge, .btn-hotswap-position, .btn-hotswap-copy-position,
+        .btn-hotswap-folder, .btn-hotswap-launchpad,
+        .btn-hotswap-undo, .btn-hotswap-redo {
             border-radius: var(--radius-sm);
             width: 30px;
             height: 30px;
@@ -1480,14 +1482,24 @@
         .hotswap-submit-btn:hover { background: var(--accent-hover); }
         .hotswap-submit-btn:active { transform: scale(0.94); }
 
-        .hotswap-folder-row, .hotswap-position-row {
+        .hotswap-folder-row, .hotswap-position-row, .hotswap-copy-row {
             display: none;
             flex-direction: column;
             gap: 4px;
             max-height: 160px;
             overflow-y: auto;
         }
-        .hotswap-folder-row.open, .hotswap-position-row.open { display: flex; }
+        .hotswap-folder-row.open, .hotswap-position-row.open, .hotswap-copy-row.open { display: flex; }
+
+        /* The panel's OWN Position is listed but disabled, so the numbering the
+           user sees is always the layout's complete, fixed numbering. */
+        .hotswap-position-item.current { opacity: 0.45; cursor: default; }
+        .hotswap-position-item.current:hover { background: var(--bg); border-color: var(--border); color: var(--text-secondary); }
+        .hotswap-position-note { color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* ↩ / ↪ Panel Undo & Redo are availability-driven, so :disabled matters. */
+        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled,
+        .hotswap-shortcut-btn:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
 
         .hotswap-folder-item, .hotswap-position-item {
             background: var(--bg);

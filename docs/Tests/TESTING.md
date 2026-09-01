@@ -66,8 +66,11 @@ touched:
 
 | Consumer | Provider | Contract |
 |---|---|---|
-| `triple-mode.js` | `grid-session.js` | `initGridSession(defaultLayout)` returns `{urls, folderMap, layout}`; `undoGridSession()` returns `{urls, folderMap, arrangement}`; `getSessionArrangement`/`setSessionArrangement`/`setSessionLayout`/`pushGridSessionCheckpoint`/`updateGridSession`/`setGridSessionSilently` all exist |
-| `launch.js` | `triple-mode.js`'s `ctx` object | `ctx.onPanelContentChanged(index, url, folder)`, `ctx.onPanelRemoved(index)`, `ctx.pushUndoCheckpoint()`, `ctx.getPositionOrder()`, `ctx.swapWithSlot(a, b)` |
+| `triple-mode.js` | `grid-session.js` | `initGridSession(defaultLayout)` returns `{urls, folderMap, layout}`; `undoGridSession()` / `undoPanelHistory(n)` / `redoPanelHistory(n)` all return the same `{urls, folderMap, arrangement, changedUrlIndices, changedFolderIndices, arrangementChanged}` descriptor, or `null`; `canUndoGridSession`/`canUndoPanelHistory`/`canRedoPanelHistory`/`beginGridAction`/`getSessionArrangement`/`setSessionArrangement`/`setSessionLayout`/`pushGridSessionCheckpoint`/`updateGridSession`/`setGridSessionSilently`/`getGridHistory` all exist |
+| `triple-mode.js` / `grid-session.js` | `positions.js` | `getLayoutSlotOrder`, `getPositionAreas`, `listPositions`, `resolvePositionOfSlot`, `resolveSlotAtPosition`, `IDENTITY_ARRANGEMENT`, `LAYOUT_POSITION_ORDER` |
+| `launch.js` | `triple-mode.js`'s `ctx` object | `ctx.onPanelContentChanged(index, url, folder)`, `ctx.onPanelRemoved(index)`, `ctx.pushUndoCheckpoint()`, `ctx.getPositionOptions(index)`, `ctx.moveToPosition(index, position)`, `ctx.copyUrlToPosition(index, position)`, `ctx.getPanelHistory(index)`, `ctx.undoPanel(index)`, `ctx.redoPanel(index)`. Each group is optional — a host page that omits it gets those buttons hidden |
+| `triple-mode.js` | `launch.js` | `buildStreamPanel`, `updateRenderedPanel`, `updatePanelHistoryButtons`, `navigatePanelTo`, `HOTSWAP_ACTIONS` |
+| `launch.js` / `triple-mode.js` | `panel-navigation.js` | `beginPanelContent`, `notePanelLoad`, `canNavigateBack`, `canNavigateForward`, `navigateBack`, `navigateForward`, `resetPanelNavigation`, `getPanelNavigationState` |
 | `grid-session.js` / `workspace.js` | `presets.js` | `getPresetById`, `getPresetPanels`, `saveWorkspaceToPreset`, `getPresets`, `getPresetSummary` |
 | `presets.js` / `state.js` | `panels.js` | `normalizePanelsArray`, `isEmptyPanel`, `getUrlPanelSource` |
 | `workspace.js` / `grid-session.js` | `undo-stack.js` | `createUndoStack(maxSize)` → `{push, pop, peek, canPop, clear, size}` |
@@ -137,14 +140,39 @@ Assert:
   the original's `options`.
 
 ### 2.2 `undo-stack.js`
+Now used by `workspace.js` only — `grid-session.js` moved to the canonical action history
+(see 2.4), which is not a plain snapshot stack.
 - `push` past `maxSize` drops the *oldest* entry, not the newest (`size` caps, `peek` returns
   most recent)
 - `pop` on empty returns `null`, does not throw
 - `canPop()` false on empty, true after one push
 - `clear()` resets `size` to 0
-- Stack holds references as given — confirm callers are responsible for cloning (they are;
-  `grid-session.js` and `workspace.js` both clone before pushing). Verify those clones are
-  real: mutating the live session after a checkpoint must not corrupt the snapshot.
+- Stack holds references as given — confirm callers are responsible for cloning
+  (`workspace.js` does). Verify those clones are real: mutating the live editing surface
+  after a checkpoint must not corrupt the snapshot.
+
+### 2.2c `panel-navigation.js`
+The second history — browsing inside a panel's content. Pure model tests live in
+`test/positions-history.test.js`; drive it by calling `notePanelLoad()` directly:
+- The generation **anchor** (the URL GS3 assigned) is always known, and a redirected
+  assignment re-anchors on where it landed — but a later traversal must never rewrite it,
+  and ⟳ Reload must anchor on the URL rather than its `about:blank` hop
+- A GS3 assignment opens a generation and its own load is **not** recorded as navigation
+  (`entries.length === 1`, `pendingLoads` back to 0) — otherwise one action would undo twice
+- Content loads push entries; back/forward move the cursor without re-recording
+- A new navigation truncates the forward path (Redo cannot resurrect an abandoned branch)
+- An unreadable navigation records `{url: null, opaque: true}` — never a guess, never dropped
+- Back from an opaque entry collapses to the nearest entry with a real URL, discards the
+  opaque ones (they are unreachable, so they must not linger as Redo targets), and does
+  **not** fall through to the action history
+- ⟳ Reload collapses to the assigned source and records neither of its two loads
+- State is per panel and never leaks across panels
+
+### 2.2b `positions.js`
+The only definition of Position geometry in the app. See 4.12 — the pure half of that
+section (the per-layout Position→grid-area table, contiguous numbering, and
+`resolvePositionOfSlot`/`resolveSlotAtPosition` round-tripping through a scrambled
+arrangement) is a Tier 1 test and lives in `test/positions-history.test.js`.
 
 ### 2.3 `presets.js`
 - `createEmptyPreset(3)` → has `layout: null`, `isEmpty: true`, `savedAt: null`, `panels: []`
@@ -179,13 +207,28 @@ Assert:
 - `setSessionArrangement(['screen2','screen1','screen3','screen4'])` then
   `getSessionArrangement()` returns a **copy** — mutating the returned array must not corrupt
   session state (same for `getSessionFolderMap` and `getSessionUrls`)
-- **Decoupling:** `updateGridSession(...)` does **not** change `canUndoGridSession()`.
-  Only `pushGridSessionCheckpoint()` does. This is the central Phase 4D invariant.
-- `pushGridSessionCheckpoint()` → mutate content → `undoGridSession()` restores content
-  **and** arrangement
-- `undoGridSession()` on an empty stack → `null`
+- Applied state lives on `slotState[slot]`, not on the action. Assert a single Shuffle
+  action can simultaneously hold `{0:'undone', 1:'applied', 2:'invalidated'}`, and that
+  `atomic` is `true` for Position actions and `false` for content actions
+- **Decoupling:** a bare `updateGridSession(...)` records nothing — history is opened
+  explicitly by `beginGridAction()` / `pushGridSessionCheckpoint()` and only becomes an
+  action when the mutation that follows commits it. Neither call alone changes
+  `canUndoGridSession()`; the pair does. This is the central Phase 4D invariant, restated
+  for the action model.
+- An opened action whose mutation changed nothing is **never recorded** — no phantom
+  history, no button that enables itself for a no-op
+- `beginGridAction()` → mutate content → `undoGridSession()` restores content **and**
+  arrangement, and reports exactly which slots changed URL, which changed folder, and
+  whether the arrangement moved
+- `undoGridSession()` with nothing applied → `null`
 - `setSessionSource(4)` changes `getSourceWorkspaceInfo()` to `{type:'preset', id:4}` without
-  touching panels/folderMap/undo stack
+  touching panels/folderMap/history
+- `initGridSession()` clears the history completely
+- `setSessionLayout(...)` invalidates Position actions (Positions are layout-scoped) but
+  leaves content actions undoable
+- Panel selection: `canUndoPanelHistory(n)` / `canRedoPanelHistory(n)` and their
+  `undo`/`redo` counterparts operate on the same one list master Undo reads — see 4.13 for
+  the behavioral proofs
 
 ### 2.5 `state.js` compatibility view
 - `setTargetUrls(['a','b'])` then `getPanels()` → 2 url-panels
@@ -329,7 +372,9 @@ For each of `top2, bottom2, 3col, lefttall, righttall, vsplit, hsplit, 4grid`:
 - Resizer handles present and draggable; dragging changes track sizes and respects the
   ~80px minimum (panel cannot collapse to zero)
 - Switching orientation resets arrangement to identity
-- 🖥 dropdown offers exactly the other visible slots, numbered clockwise from top-left
+- 📍 Move to Position offers exactly this layout's visible Positions, numbered clockwise
+  from top-left, with the panel's own current Position shown disabled rather than as a
+  meaningless swap with itself
 - `#master-status` stays pinned right while the button group stays centered
 
 ### 4.8 `launch.js` dual-context behavior
@@ -338,8 +383,9 @@ The same module runs on both pages and must behave differently:
   does **not** touch `localStorage['loop_matrix_urls']`
 - On `index.html` (no ctx capabilities): the same edit **does** write to
   `localStorage['loop_matrix_urls']` — this is the correct and only persistence path there
-- 🖥 Position button is **hidden** on `index.html` (no `getPositionOrder`) and **visible** on
-  `index3.html`
+- 📍 Move to Position, 📋 Copy to Position and ↩/↪ Panel Undo/Redo are all **hidden** on
+  `index.html` (it supplies none of those ctx hooks) and **visible** on `index3.html`, and
+  they are never offered as Quick Actions on a page that cannot perform them
 
 ### 4.9 Layer 2 nesting
 Load `index3.html`, use 🚀 in a panel to load `index.html` inside it. Assert on the nested
@@ -359,6 +405,122 @@ it still reveals).
 At viewport widths 1400 / 760 / 420: assert `#controls` fits within the viewport (its
 `scrollWidth <= clientWidth + tolerance`), every child button is within the visible bounds and
 clickable, and the `.sep` is hidden at the narrowest breakpoint.
+
+### 4.12 ★ Fixed Position semantics
+`js/positions.js` owns the only definition of a layout's Position geometry, and
+`test/positions-history.test.js` pins it: each layout's Position→grid-area table, that
+Position numbering is contiguous and covers only visible Positions, and that
+`resolvePositionOfSlot` / `resolveSlotAtPosition` round-trip through an arbitrary
+scrambled arrangement.
+
+The behavioral half matters more. Perform repeated moves — `A/B/C` → move A to Position 2
+→ move A to Position 3 → move B to Position 2 — and after **every** step assert:
+- Position N still maps to the expected physical location
+- the user-visible Position numbering (the `.slot-label` badges) is unchanged
+- internal slot identity never leaks into the UX: `getSessionUrls()` is still `[A, B, C]`,
+  because a Position move is presentation only
+
+The failure this guards against is subtle and was the reason for the rename: an
+implementation that says "Position" in the UI while still targeting the panel that
+*originally* started at that number passes a naive one-swap test and fails the second swap.
+
+### 4.13 ★ Panel-scoped history
+Panel Undo means "undo the most recent undoable action that affected THIS panel", not
+"undo the most recent thing that happened anywhere". Assert:
+- **Interleaved histories** — change A, change B, Panel Undo A ⇒ A restored, B still
+  changed. Panel Redo A ⇒ A's change back, B untouched throughout.
+- **Multi-panel content actions are per-panel undoable** — Master Shuffle `A1/B1/C1` →
+  `A2/B2/C2`, then Panel B Undo ⇒ `A2/B1/C2` (only B), Panel B Redo ⇒ `A2/B2/C2` (only B),
+  then Panel A Undo ⇒ `A1/B2/C2`. Panels A and C must not reload during B's Undo. This is
+  the behavior the first implementation got wrong: it selected the parent action and applied
+  it wholesale, undoing the entire Shuffle from one panel's button.
+- **Master Undo still reverses the whole thing** — after a panel has reversed its own
+  portion, Master Undo reverses the *remaining* applied portions and reports only those as
+  changed, so the already-restored panel is neither restored twice nor reloaded. It must
+  also never trample a newer independent change: once a panel moves on, that panel's undone
+  portion is invalidated and cannot come back over it.
+- **Linked Position actions are the exception** — a swap is ONE *atomic* action naming both
+  occupants and cannot be half-undone. Undo it from either panel; both sides move, it must
+  then be undoable from neither, and from master Undo neither. Invalidating either side
+  invalidates the whole swap, since a half-redo would leave the arrangement incoherent.
+- **Master/local interoperability** — an action undone through Panel Undo must not be
+  undoable again through master Undo, and vice versa. This is the double-apply bug that two
+  independent stacks would produce.
+- **Redo invalidation** — action → Undo → conflicting new action on the same panel ⇒ the
+  stale Redo is dropped, cannot resurrect itself over the newer value, and its button is
+  not left clickable. Invalidation is scoped: an unrelated panel's Redo survives.
+- **Button state** — no history ⇒ both disabled; after an action ⇒ undo enabled, redo
+  disabled; after Undo ⇒ redo enabled. Quick Action mirrors of ↩/↪ track the same
+  availability, since a Quick Action that silently does nothing is worse than no button.
+
+### 4.14 ★ Copy to Position
+`A/B/C` live. Copy A's URL to Position 3. Assert A unchanged, B unchanged, C's URL becomes
+A's, **only C loads**, and A/B canary contexts survive. Then Undo C (C returns to its own
+previous URL, A/B untouched) and Redo C (the copied URL returns, A/B untouched).
+
+Copy means URL only — assert the destination keeps its own folder assignment. Cloning a
+whole panel's metadata when the user asked to duplicate what is playing is a surprise, not
+a feature.
+
+### 4.15 ★ Smart Panel Undo/Redo across both histories
+The human-reported regression: GS3 loads Site B's selection page, the user clicks through to
+a video *inside* Site B, and Panel Undo jumped straight back to Site A. Panel Undo must walk
+the in-content navigation first and only then reach the GS3 action history.
+
+Drive navigations from **inside** the frame (`frame.evaluate(() => location.href = ...)`),
+never by assigning `src` from the parent — otherwise the test proves nothing about what GS3
+actually observes. Assert:
+- browse → category → video, then Undo ⇒ category, Undo ⇒ browse, Undo ⇒ the GS3 assignment
+  is reversed. Unrelated panels: zero loads, same nodes/parents/documents, counters advancing
+- Redo retraces the same path forward before touching action Redo
+- A new in-content navigation invalidates the stale forward path
+- Two panels keep independent navigation histories
+- A panel keeps its navigation history when it moves Position, and Undo steps browsing back
+  *before* reversing the Position move — which is itself reversed before the older URL
+  assignment, since the action history is LIFO in its own right
+- Master Undo reverses the Runtime action straight past the browsing, and never consumes it
+
+**Test-harness trap:** `page.waitForFunction` does not await a promise returned by its
+predicate, so an **async** predicate is always truthy and the wait silently passes on its
+first poll. Publish what the predicate needs on `window` and keep the predicate synchronous.
+Waiting on `location.href` alone is also not enough — it flips at navigation commit, before
+the `load` event settles the panel's pending-load count.
+
+### 4.16 ★ Opaque cross-origin navigation
+Run a **second** static server on another port (same host, so it always resolves — `localhost`
+can resolve to `::1` while the harness binds IPv4 only). A different port is a different
+origin, so reads across it really do throw SecurityError. No third-party network access.
+
+Assert the navigation is **detected** (a second entry appears), recorded as
+`{url: null, opaque: true}`, that no fabricated URL reached Runtime Session, that no
+SecurityError escaped to the page, and above all that Panel Undo returns the panel to the
+content GS3 loaded rather than falling through to the older GS3 URL. After that collapse,
+Redo is unavailable (the opaque entry has no address) and the *next* Undo reaches the action
+history.
+
+### 4.17 ★ Opaque navigation must block action-history fallthrough
+The human-reported bug: a cross-origin panel is Position-swapped, the user browses inside it,
+and Panel Undo reverses the *Position swap* instead of the browsing. Regression test drives
+the exact sequence against a real cross-origin panel:
+
+1. GS3 assigns a cross-origin URL → that URL is the generation **anchor**
+2. Position swap involving that panel
+3. Two opaque in-content navigations
+4. Panel Undo ⇒ returns to the anchor; the Position swap **remains applied**
+5. Panel Undo again ⇒ *now* the Position swap reverses, with **zero** iframe loads on every
+   panel including the one that moved, same nodes/parents/documents
+
+Also assert no fabricated URL, no `SecurityError` escaping, no impossible Redo advertised, and
+that Master Undo still reverses the Runtime action rather than consuming browsing history.
+
+`canNavigateBack` must **not** be computed from whether the current entry has a readable URL —
+an opaque marker plus a known anchor is enough. That is the specific mistake that produces the
+reported symptom.
+
+**Observability boundary** (measured — do not assume): a full frame navigation is observed at
+any origin; a hash change, an SPA `pushState`, and a nested-iframe load are **not** observed at
+all. A cross-origin SPA is therefore invisible in both directions, and Undo correctly falls
+through for it.
 
 ---
 
@@ -427,10 +589,11 @@ Everything else in this document is your job, not theirs.
 These look like defects and are not. Confirm they hold; report it as a **regression** if any
 of them has been violated.
 
-1. **Position swaps are pure CSS.** `_swapSlotContents` reassigns `style.gridArea` on slot
+1. **Position moves are pure CSS.** `_moveSlotToPosition` reassigns `style.gridArea` on slot
    *containers* only. It must never set `iframe.src`, move DOM nodes, or rebuild panels. This
-   is the reason live media survives a swap. Non-negotiable.
-2. **Swaps do not move content.** A swap changes *presentation* (arrangement) only —
+   is the reason live media survives a move. Non-negotiable — and it applies equally to
+   undoing and redoing one.
+2. **Moves do not move content.** A move changes *presentation* (arrangement) only —
    `urls`/`folderMap` stay bound to slot index. The old code swapped folderMap too and had a
    comment defending it; that was deliberately reversed.
 3. **Session updates and undo checkpoints are decoupled.** `updateGridSession()` deliberately

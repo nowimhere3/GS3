@@ -46,6 +46,10 @@ Examples:
 
 Panels should not own presentation.
 
+A Panel owns runtime media identity.
+
+Panels are what Undo and Redo are scoped to.
+
 ---
 
 # Slot
@@ -55,6 +59,79 @@ A Slot owns presentation.
 Slots determine where Panels appear.
 
 Panels may move between Slots without changing their content.
+
+---
+
+# Position
+
+A fixed physical location in a Runtime layout.
+
+Position 1 is always the first physical place.
+
+Position 2 is always the second.
+
+Media changes.
+
+Panels visually move.
+
+The Position itself never moves.
+
+Positions are numbered in the layout's established visual order,
+beginning from the top-left and continuing clockwise.
+
+Positions are scoped to a layout.
+
+Changing layout redefines them.
+
+---
+
+# Position Assignment
+
+Which Position a Panel is currently rendered in.
+
+Position assignment is presentation.
+
+Changing it never changes content,
+and never reloads media.
+
+Resolution is always:
+
+Position -> fixed grid-area -> whichever Panel currently renders as that area.
+
+A user should never have to ask where a screen currently is.
+
+They should be able to say "send this to Position 1"
+and know exactly where it will appear.
+
+---
+
+# Panel Action History
+
+Reversible Runtime mutations GS3 performed on a Panel.
+
+Owned by Runtime Session.
+
+Master Undo reads only this.
+
+---
+
+# Panel Navigation History
+
+Reversible browsing that occurred inside a Panel's
+current content generation.
+
+GS3 observes it but does not cause it.
+
+It is not a Runtime action.
+
+---
+
+# Content Generation
+
+One GS3 content assignment and the browsing done inside it.
+
+A new assignment opens a new generation,
+so browsing cannot leak across a deliberate content replacement.
 
 ---
 

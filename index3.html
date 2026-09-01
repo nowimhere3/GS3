@@ -95,6 +95,9 @@
         #screen-2-slot { grid-area: screen2; }
         #screen-3-slot { grid-area: screen3; }
         #screen-4-slot { grid-area: screen4; }
+        /* Badges the FIXED PHYSICAL Position this slot is currently rendering
+           in — triple-mode.js rewrites it on every arrangement/layout change, so
+           a given physical place always shows the same Position number. */
         .slot-label { position: absolute; left: 8px; top: 8px; z-index: 9998; background: rgba(0,0,0,0.6); border: 1px solid #333; color: #555; border-radius: 8px; font-size: 11px; padding: 3px 8px; }
         .stream-panel { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
         .post-iframe  { width: 100%; height: 100%; border: none; display: block; }
@@ -207,7 +210,7 @@
         /* Layer 2 (running one level nested) — every panel's own ··· trigger
            and Quick Action shortcuts move to the top-left with a yellow
            border, since the OUTER layer's own per-panel ··· always lives at
-           top-right for that same panel. Positioned just below the "Screen N"
+           top-right for that same panel. Positioned just below the "Position N"
            slot-label (which sits at top:8px) so they don't overlap it. The
            overlay pops out to the right instead of the left, since the
            trigger itself is now on the left. */
@@ -225,7 +228,9 @@
 
         /* Small square icon buttons */
         .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-kill,
-        .btn-purge, .btn-hotswap-position, .btn-hotswap-folder, .btn-hotswap-launchpad {
+        .btn-purge, .btn-hotswap-position, .btn-hotswap-copy-position,
+        .btn-hotswap-folder, .btn-hotswap-launchpad,
+        .btn-hotswap-undo, .btn-hotswap-redo {
             border-radius: 10px;
             width: 28px;
             height: 28px;
@@ -243,10 +248,21 @@
         .btn-hotswap-toggle:hover { background: #333; color: #fff; }
         .btn-hotswap-toggle.active { background: #0095f6; border-color: #0095f6; color: #fff; }
 
-        /* 🖥 Position-swap button */
+        /* 📍 Move to Position button */
         .btn-hotswap-position { background: #0a1a1a; border: 1px solid #1a6a5a; color: #4ad4c4; }
         .btn-hotswap-position:hover { background: #0d2a28; }
         .btn-hotswap-position.active { background: #0f9080; border-color: #0f9080; color: #fff; }
+
+        /* 📋 Copy to Position button */
+        .btn-hotswap-copy-position { background: #0a141a; border: 1px solid #1a4a6a; color: #4aa8d4; }
+        .btn-hotswap-copy-position:hover { background: #0d2028; }
+        .btn-hotswap-copy-position.active { background: #0f6f90; border-color: #0f6f90; color: #fff; }
+
+        /* ↩ / ↪ Panel Undo & Redo — availability-driven, so :disabled matters */
+        .btn-hotswap-undo, .btn-hotswap-redo { background: #1a1620; border: 1px solid #4a3a6a; color: #b39ae0; font-weight: bold; }
+        .btn-hotswap-undo:hover:not(:disabled), .btn-hotswap-redo:hover:not(:disabled) { background: #262030; color: #fff; }
+        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled,
+        .hotswap-shortcut-btn:disabled { opacity: 0.32; cursor: not-allowed; filter: grayscale(1); }
 
         /* 📁 Folder-assign button */
         .btn-hotswap-folder { background: #241a0a; border: 1px solid #6a4a1a; color: #d4a94a; }
@@ -331,11 +347,16 @@
         .hotswap-input:focus { border-color:#0095f6; }
         .hotswap-submit-btn { background:#0095f6; color:#fff; border:none; border-radius:50%; width:20px; height:20px; font-size:10px; font-weight:bold; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
 
-        /* 📁 Folder-picker and 🖥 Position-picker expandable lists */
-        .hotswap-folder-row, .hotswap-position-row { display: none; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
-        .hotswap-folder-row.open, .hotswap-position-row.open { display: flex; }
+        /* 📁 Folder-picker, 📍 Move-to-Position and 📋 Copy-to-Position expandable lists */
+        .hotswap-folder-row, .hotswap-position-row, .hotswap-copy-row { display: none; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+        .hotswap-folder-row.open, .hotswap-position-row.open, .hotswap-copy-row.open { display: flex; }
         .hotswap-folder-item, .hotswap-position-item { background: #181818; border: 1px solid #333; border-radius: 8px; padding: 6px 10px; font-size: 12px; color: #ccc; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.12s; }
         .hotswap-folder-item:hover, .hotswap-position-item:hover { background: #242424; color: #fff; }
+        /* The panel's OWN Position is always listed — disabled — so the fixed
+           numbering the user sees is the layout's complete numbering. */
+        .hotswap-position-item.current { opacity: 0.45; cursor: default; }
+        .hotswap-position-item.current:hover { background: #181818; color: #ccc; }
+        .hotswap-position-note { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
         .hotswap-folder-count { color: #666; font-size: 11px; }
 
         /* Bookmark modal */
@@ -371,10 +392,10 @@
 <body>
 
     <div id="triple-layout" class="layout-lefttall">
-        <div id="screen-1-slot" class="stream-slot"><span class="slot-label">Screen 1</span></div>
-        <div id="screen-2-slot" class="stream-slot"><span class="slot-label">Screen 2</span></div>
-        <div id="screen-3-slot" class="stream-slot"><span class="slot-label">Screen 3</span></div>
-        <div id="screen-4-slot" class="stream-slot"><span class="slot-label">Screen 4</span></div>
+        <div id="screen-1-slot" class="stream-slot"><span class="slot-label">Position 1</span></div>
+        <div id="screen-2-slot" class="stream-slot"><span class="slot-label">Position 2</span></div>
+        <div id="screen-3-slot" class="stream-slot"><span class="slot-label">Position 3</span></div>
+        <div id="screen-4-slot" class="stream-slot"><span class="slot-label">Position 4</span></div>
     </div>
 
     <!-- Always-visible floating buttons -->

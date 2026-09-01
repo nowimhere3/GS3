@@ -12,11 +12,20 @@
  *   - CONTENT  (_panels, _folderMap) — what each slot actually contains.
  *     Slot identity never changes here; index 0 is always index 0.
  *   - PRESENTATION (_arrangement, _layout) — how that content is currently
- *     arranged on screen. A 🖥 position swap is a PRESENTATION change only —
- *     it never touches content. This distinction is what lets a swap be a
+ *     arranged on screen. A 📍 Move to Position is a PRESENTATION change only
+ *     — it never touches content. This distinction is what lets a move be a
  *     pure CSS grid-area reassignment (no iframe rebuild, no reload, live
  *     video/slideshow state fully preserved) while still being fully owned
  *     by the session and fully serializable by Save Session As.
+ *
+ *     _arrangement is slot-index -> grid-area name. positions.js turns that
+ *     into the user-facing model: a POSITION is a fixed physical location, and
+ *     "Position N" resolves to a fixed grid-area and from there to whichever
+ *     panel currently renders as it. Panels move; Positions never do.
+ *
+ * It also owns the session's ACTION HISTORY — one canonical list backing both
+ * master Undo and every panel's own ↩/↪. See the "History" section at the
+ * bottom of this file.
  *
  * Nothing here ever writes to Store's shared matrixUrls/folderMap/lockState
  * keys, and nothing here ever writes to presets.json — the ONLY way this
@@ -33,10 +42,8 @@
 
 import { Store } from './storage.js';
 import { getPresetById, getPresetPanels } from './presets.js';
-import { getUrlPanelSource, normalizePanelsArray } from './panels.js';
-import { createUndoStack } from './undo-stack.js';
-
-const IDENTITY_ARRANGEMENT = ['screen1', 'screen2', 'screen3', 'screen4'];
+import { getUrlPanelSource, normalizePanel, normalizePanelsArray } from './panels.js';
+import { IDENTITY_ARRANGEMENT } from './positions.js';
 
 let _sourceType = 'live'; // 'live' | 'preset'
 let _sourceId = null;     // null for live, numeric preset id otherwise
@@ -49,7 +56,14 @@ let _folderMap = {};
 let _arrangement = [...IDENTITY_ARRANGEMENT]; // slot-index -> grid-area name currently rendering there
 let _layout = 'lefttall';
 
-const _undoStack = createUndoStack(50);
+// ── Canonical action history ─────────────────────────────────────────────────
+// ONE list, shared by master Undo and every panel's own Undo/Redo. See the
+// "History" section at the bottom of this file for the full model.
+const MAX_HISTORY = 50;
+let _history = [];
+let _actionSeq = 0;
+let _undoSeq = 0;
+let _pendingAction = null;
 
 function _readSourceWorkspaceIdFromUrl() {
     const params = new URLSearchParams(window.location.search);
@@ -89,7 +103,10 @@ export function initGridSession(defaultLayout = 'lefttall') {
     }
 
     _arrangement = [...IDENTITY_ARRANGEMENT];
-    _undoStack.clear();
+    _history = [];
+    _actionSeq = 0;
+    _undoSeq = 0;
+    _pendingAction = null;
 
     return { urls: _panels.map(getUrlPanelSource), folderMap: { ..._folderMap }, layout: _layout };
 }
@@ -134,6 +151,7 @@ export function getSessionFolderMap() {
 export function updateGridSession(urls, folderMap) {
     _panels = normalizePanelsArray(urls);
     _folderMap = { ...(folderMap || {}) };
+    _commitPendingAction();
 }
 
 /**
@@ -161,6 +179,7 @@ export function getSessionArrangement() {
 
 export function setSessionArrangement(arrangement) {
     _arrangement = [...arrangement];
+    _commitPendingAction();
 }
 
 export function getSessionLayout() {
@@ -176,49 +195,244 @@ export function getSessionLayout() {
 export function setSessionLayout(layoutName) {
     _layout = layoutName;
     _arrangement = [...IDENTITY_ARRANGEMENT];
+    // Positions are defined per-layout, and the arrangement has just been reset
+    // to identity, so any recorded Position action now describes geometry that
+    // no longer exists. Drop them from both the undo and redo pools rather than
+    // let a later Undo replay a swap against a layout it was never made in.
+    // Content actions are unaffected — a URL is a URL in any layout.
+    _history.forEach((action) => {
+        if (!action.arrangement) return;
+        action.slots.forEach((slot) => { action.slotState[slot] = 'invalidated'; });
+    });
+    _pendingAction = null;
 }
 
-// ── Undo ─────────────────────────────────────────────────────────────────────
-// Deliberately decoupled from updateGridSession()/setSessionArrangement() —
-// "did the session change" and "is this worth an undo point" are separate
-// questions now. Snapshots capture content + arrangement together (what the
-// user was actually looking at), not layout — switching orientation already
-// resets arrangement on its own, and undo isn't expected to flip the screen
-// shape back.
+// ── History ──────────────────────────────────────────────────────────────────
+//
+// ONE canonical action list backs master Undo AND every panel's own Undo/Redo.
+// There is deliberately no second, panel-local stack: two stacks could drift
+// apart and undo the same change twice.
+//
+// An action is:
+//
+//   { id, seq, type,
+//     slots:         [ ...affected panel identities (slot indices) ],
+//     before:        { panels: {slot: Panel}, folders: {slot: string|null} },
+//     after:         { panels: {...},         folders: {...} },
+//     arrangement:   null | { swap: [a, b] | null, before: [...], after: [...] },
+//     atomic:        true only for arrangement (Position) actions — see below,
+//     slotState:     { slot: 'applied' | 'undone' | 'invalidated' },
+//     slotUndoneSeq: { slot: n } }
+//
+// Recording is a begin/commit pair. Every call site already followed the
+// "checkpoint, then mutate" shape, so beginGridAction() captures the BEFORE
+// snapshot and the very next content/arrangement mutation commits the action by
+// diffing against it. An action that turns out to have changed nothing is never
+// recorded at all.
+//
+// APPLIED-NESS IS PER SLOT, NOT PER ACTION
+//   An action's identity is global, but a multi-panel CONTENT action is really a
+//   bundle of independent per-panel effects that merely happened at the same
+//   moment. Shuffle All is the clear case: it changed panel B's URL for reasons
+//   that have nothing to do with what it did to panel A, so "undo the last
+//   change to panel B" should give B its old URL back and leave A and C exactly
+//   where they are. Applied-ness therefore lives on `slotState[slot]`, and a
+//   partial undo is a first-class state rather than an accident.
+//
+//   `atomic` is the exception, and it is what keeps that from degenerating.
+//   A Position swap is not a bundle of two independent effects — moving A to
+//   B's place IS moving B to A's place; there is no coherent "half" of it. An
+//   atomic action's slots always transition together, so it can only ever be
+//   reversed as a whole, once, from either participant. `atomic` is set exactly
+//   when the action carries an arrangement change; content actions never are.
+//
+// SELECTION
+//   master Undo      most recent action with ANY slot still 'applied'; reverses
+//                    every slot of it that is still applied, so it still undoes
+//                    a whole Shuffle All as one session action — while skipping
+//                    any portion a panel already reversed on its own
+//   Panel Undo N     most recent action whose slotState[N] is 'applied'.
+//                    Reverses N's portion only — or, if atomic, all of it
+//   Panel Redo N     the action whose slotState[N] was undone most recently.
+//                    Reapplies N's portion only — or, if atomic, all of it
+//
+// Because state lives on the action itself and not in a per-panel stack, a
+// portion undone from a panel is instantly invisible to master Undo, and vice
+// versa — nothing can be undone twice, and no already-restored panel gets
+// restored again. A Position swap is ONE atomic action listing BOTH occupants,
+// so undoing it from either panel reverses it once and it then disappears from
+// the other panel's undo pool too.
+//
+// REDO INVALIDATION
+//   Committing a new action invalidates every currently-'undone' SLOT whose
+//   panel the new action touched. Standard history branching, scoped per panel:
+//   once a panel's state has moved on, a stale Redo for that panel can never
+//   resurrect itself over the newer value, while the same action's portions on
+//   untouched panels stay redoable. Invalidating any slot of an atomic action
+//   invalidates all of it, since it cannot be partially redone. Changing layout
+//   invalidates every Position action, since Positions are layout-scoped.
+//
+// RESTORATION IS SURGICAL
+//   Undo/Redo only ever writes the slots the action itself recorded, and each
+//   returned descriptor names exactly which slots changed URL, which changed
+//   folder, and whether the arrangement moved — so the UI can reload precisely
+//   the one iframe involved and leave every other live document alone.
+//
+//   Arrangement is restored by re-applying the recorded SWAP to the CURRENT
+//   arrangement rather than by restoring a snapshot of the whole array. For the
+//   most recent action the two are identical; for an older one, inverse
+//   composition is what keeps a newer, still-applied swap from being silently
+//   discarded. The arrangement stays a valid permutation either way.
 
-export function pushGridSessionCheckpoint() {
-    _undoStack.push({
-        panels: _panels.map((p) => ({ ...p })),
+function _snapshotState() {
+    return {
+        panels: _panels.map((panel) => ({ ...panel })),
         folderMap: { ..._folderMap },
         arrangement: [..._arrangement],
+    };
+}
+
+/**
+ * Open a recording window: the NEXT content or arrangement mutation becomes one
+ * undoable action. `type` is descriptive metadata for diagnostics ('url',
+ * 'folder', 'position', 'copy', 'shuffle', ...) — selection never depends on it.
+ */
+export function beginGridAction(type = 'change') {
+    _pendingAction = { type, before: _snapshotState() };
+}
+
+/**
+ * Historical name for beginGridAction() — every existing call site already
+ * means "a change is about to happen here", which is exactly the begin marker.
+ */
+export function pushGridSessionCheckpoint() {
+    beginGridAction('change');
+}
+
+function _diffArrangement(before, after) {
+    const length = Math.max(before.length, after.length);
+    const changed = [];
+    for (let index = 0; index < length; index += 1) {
+        if (before[index] !== after[index]) changed.push(index);
+    }
+    if (changed.length === 0) return null;
+    // A Position move is always a 2-cycle. Anything else falls back to a plain
+    // snapshot restore rather than pretending it can be inverse-composed.
+    const isSwap = changed.length === 2
+        && before[changed[0]] === after[changed[1]]
+        && before[changed[1]] === after[changed[0]];
+    return {
+        swap: isSwap ? [changed[0], changed[1]] : null,
+        changed,
+        before: [...before],
+        after: [...after],
+    };
+}
+
+function _commitPendingAction() {
+    const pending = _pendingAction;
+    _pendingAction = null;
+    if (!pending) return null;
+
+    const { before } = pending;
+    const beforePanels = {};
+    const afterPanels = {};
+    const beforeFolders = {};
+    const afterFolders = {};
+    const contentSlots = [];
+
+    const length = Math.max(before.panels.length, _panels.length);
+    for (let index = 0; index < length; index += 1) {
+        const beforeUrl = getUrlPanelSource(before.panels[index]);
+        const afterUrl = getUrlPanelSource(_panels[index]);
+        const beforeFolder = before.folderMap[index] ?? null;
+        const afterFolder = _folderMap[index] ?? null;
+        if (beforeUrl === afterUrl && beforeFolder === afterFolder) continue;
+        contentSlots.push(index);
+        beforePanels[index] = normalizePanel(before.panels[index]);
+        afterPanels[index] = normalizePanel(_panels[index]);
+        beforeFolders[index] = beforeFolder;
+        afterFolders[index] = afterFolder;
+    }
+
+    const arrangement = _diffArrangement(before.arrangement, _arrangement);
+    if (contentSlots.length === 0 && !arrangement) return null; // nothing happened
+
+    const slots = [...new Set([...contentSlots, ...(arrangement?.changed || [])])].sort((a, b) => a - b);
+
+    // Redo invalidation — these panels' state has moved on. Scoped to the slots
+    // the new action actually touched, so an older action stays redoable on the
+    // panels it affected that this one didn't. An atomic action cannot be
+    // partially redone, so invalidating any of its slots invalidates all of it.
+    _history.forEach((action) => {
+        const stale = action.slots.filter((slot) => slots.includes(slot) && action.slotState[slot] === 'undone');
+        if (stale.length === 0) return;
+        const doomed = action.atomic ? action.slots : stale;
+        doomed.forEach((slot) => { action.slotState[slot] = 'invalidated'; });
     });
+
+    _actionSeq += 1;
+    const action = {
+        id: `action-${_actionSeq}`,
+        seq: _actionSeq,
+        type: pending.type,
+        slots,
+        before: { panels: beforePanels, folders: beforeFolders },
+        after: { panels: afterPanels, folders: afterFolders },
+        arrangement,
+        // Only a Position change is indivisible. A multi-panel CONTENT action is
+        // a bundle of per-panel effects each panel may reverse on its own.
+        atomic: Boolean(arrangement),
+        slotState: Object.fromEntries(slots.map((slot) => [slot, 'applied'])),
+        slotUndoneSeq: Object.fromEntries(slots.map((slot) => [slot, 0])),
+    };
+    _history.push(action);
+    if (_history.length > MAX_HISTORY) _history.shift();
+    return action;
 }
 
-export function canUndoGridSession() {
-    return _undoStack.canPop();
-}
-
-/** Restore the previous checkpoint. Returns null if there's nothing to undo. */
-export function undoGridSession() {
-    const snapshot = _undoStack.pop();
-    if (!snapshot) return null;
-
-    const currentUrls = _panels.map(getUrlPanelSource);
-    const restoredUrls = snapshot.panels.map(getUrlPanelSource);
-    const maxPanelCount = Math.max(currentUrls.length, restoredUrls.length);
+/**
+ * Write one side of an action back into the session, surgically — for `slots`
+ * only, which for a partial (per-panel) restoration is a single slot. Every
+ * other panel's content is left exactly as it is.
+ */
+function _applyActionSide(action, side, slots) {
     const changedUrlIndices = [];
     const changedFolderIndices = [];
-    for (let index = 0; index < maxPanelCount; index += 1) {
-        if ((currentUrls[index] || '') !== (restoredUrls[index] || '')) changedUrlIndices.push(index);
-        if ((_folderMap[index] || null) !== (snapshot.folderMap[index] || null)) changedFolderIndices.push(index);
-    }
-    const arrangementChanged = _arrangement.some((area, index) => area !== snapshot.arrangement[index]);
 
-    _panels = snapshot.panels;
-    _folderMap = snapshot.folderMap;
-    _arrangement = snapshot.arrangement;
+    slots.forEach((index) => {
+        const panel = action[side].panels[index];
+        if (panel !== undefined) {
+            while (_panels.length <= index) _panels.push(normalizePanel(''));
+            if (getUrlPanelSource(_panels[index]) !== getUrlPanelSource(panel)) changedUrlIndices.push(index);
+            _panels[index] = normalizePanel(panel);
+        }
+        const folder = action[side].folders[index];
+        if (folder !== undefined) {
+            if ((_folderMap[index] ?? null) !== folder) changedFolderIndices.push(index);
+            if (folder === null) delete _folderMap[index];
+            else _folderMap[index] = folder;
+        }
+    });
+
+    let arrangementChanged = false;
+    if (action.arrangement) {
+        if (action.arrangement.swap) {
+            const [a, b] = action.arrangement.swap;
+            const held = _arrangement[a];
+            _arrangement[a] = _arrangement[b];
+            _arrangement[b] = held;
+            arrangementChanged = true;
+        } else {
+            const next = [...action.arrangement[side]];
+            arrangementChanged = next.some((area, index) => area !== _arrangement[index]);
+            _arrangement = next;
+        }
+    }
 
     return {
+        actionId: action.id,
+        actionType: action.type,
         urls: _panels.map(getUrlPanelSource),
         folderMap: { ..._folderMap },
         arrangement: [..._arrangement],
@@ -226,4 +440,127 @@ export function undoGridSession() {
         changedFolderIndices,
         arrangementChanged,
     };
+}
+
+/**
+ * Which of `action`'s slots this request actually reverses/reapplies.
+ * An atomic action always moves as a whole. A per-panel request on a content
+ * action moves that panel only; a master request moves every portion of it that
+ * is still in `from` state, so master Undo still reverses a whole Shuffle All
+ * while skipping any panel that already reversed its own portion.
+ */
+function _targetSlots(action, slotIndex, from) {
+    const candidates = action.atomic || slotIndex === null ? action.slots : [slotIndex];
+    return candidates.filter((slot) => action.slotState[slot] === from);
+}
+
+function _undoAction(action, slotIndex = null) {
+    if (!action) return null;
+    const slots = _targetSlots(action, slotIndex, 'applied');
+    if (slots.length === 0) return null;
+    const restored = _applyActionSide(action, 'before', slots);
+    _undoSeq += 1;
+    slots.forEach((slot) => {
+        action.slotState[slot] = 'undone';
+        action.slotUndoneSeq[slot] = _undoSeq;
+    });
+    return restored;
+}
+
+function _redoAction(action, slotIndex = null) {
+    if (!action) return null;
+    const slots = _targetSlots(action, slotIndex, 'undone');
+    if (slots.length === 0) return null;
+    const restored = _applyActionSide(action, 'after', slots);
+    slots.forEach((slot) => {
+        action.slotState[slot] = 'applied';
+        action.slotUndoneSeq[slot] = 0;
+    });
+    return restored;
+}
+
+/** Whether any portion of this action is still live. */
+function _hasSlotIn(action, state) {
+    return action.slots.some((slot) => action.slotState[slot] === state);
+}
+
+/**
+ * Action-level summary, derived from the per-slot states: 'applied' while any
+ * portion is still applied, 'undone' once none are but some can still be
+ * redone, 'invalidated' when nothing is left. Reporting and diagnostics only —
+ * selection always works from the per-slot states.
+ */
+function _actionState(action) {
+    if (_hasSlotIn(action, 'applied')) return 'applied';
+    if (_hasSlotIn(action, 'undone')) return 'undone';
+    return 'invalidated';
+}
+
+function _findMasterUndoable() {
+    for (let index = _history.length - 1; index >= 0; index -= 1) {
+        if (_hasSlotIn(_history[index], 'applied')) return _history[index];
+    }
+    return null;
+}
+
+function _findPanelUndoable(slotIndex) {
+    for (let index = _history.length - 1; index >= 0; index -= 1) {
+        const action = _history[index];
+        if (action.slotState[slotIndex] === 'applied') return action;
+    }
+    return null;
+}
+
+function _findPanelRedoable(slotIndex) {
+    let best = null;
+    _history.forEach((action) => {
+        if (action.slotState[slotIndex] !== 'undone') return;
+        if (!best || action.slotUndoneSeq[slotIndex] > best.slotUndoneSeq[slotIndex]) best = action;
+    });
+    return best;
+}
+
+// ── Master Undo ──────────────────────────────────────────────────────────────
+
+export function canUndoGridSession() {
+    return _findMasterUndoable() !== null;
+}
+
+/** Undo the most recent still-applied action. Returns null if there is none. */
+export function undoGridSession() {
+    return _undoAction(_findMasterUndoable());
+}
+
+// ── Panel Undo / Redo ────────────────────────────────────────────────────────
+// "Undo the most recent undoable action that affected THIS panel" — not the
+// most recent thing that happened anywhere in the Runtime.
+
+export function canUndoPanelHistory(slotIndex) {
+    return _findPanelUndoable(slotIndex) !== null;
+}
+
+export function canRedoPanelHistory(slotIndex) {
+    return _findPanelRedoable(slotIndex) !== null;
+}
+
+export function undoPanelHistory(slotIndex) {
+    return _undoAction(_findPanelUndoable(slotIndex), slotIndex);
+}
+
+export function redoPanelHistory(slotIndex) {
+    return _redoAction(_findPanelRedoable(slotIndex), slotIndex);
+}
+
+/** Read-only projection of the canonical history — diagnostics and tests. */
+export function getGridHistory() {
+    return _history.map((action) => ({
+        id: action.id,
+        seq: action.seq,
+        type: action.type,
+        slots: [...action.slots],
+        state: _actionState(action),
+        slotState: { ...action.slotState },
+        atomic: action.atomic,
+        isPosition: Boolean(action.arrangement),
+    }));
 }

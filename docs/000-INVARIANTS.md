@@ -115,7 +115,7 @@ Presentation includes:
 - Layout
 - Arrangement
 - Orientation
-- Visible screen positions
+- Position assignment
 
 Changing presentation must never require content to reload.
 
@@ -135,6 +135,24 @@ The panel itself never changes ownership.
 
 ---
 
+# Fixed Positions
+
+A Position is a fixed physical location in a layout.
+
+A Position never moves.
+
+Panel identity and Position are separate concepts.
+
+Targeting "Position N" must resolve to the physical location,
+never to whichever panel originally started there.
+
+There is exactly one definition of a layout's Position geometry.
+
+Features must resolve Positions through it
+rather than deriving competing geometry of their own.
+
+---
+
 # Undo
 
 Undo is optional.
@@ -144,6 +162,100 @@ Runtime synchronization is mandatory.
 Undo must never become the mechanism that keeps Runtime synchronized.
 
 The Runtime Session is always updated regardless of whether Undo exists.
+
+---
+
+# History
+
+There is one canonical history.
+
+Every undoable action has identity, scope and state.
+
+Scope names the panel or panels the action affected.
+
+State records whether it is currently applied or undone.
+
+Panel-scoped Undo and master Undo are two ways of selecting from that
+one history, never two independent stacks.
+
+An action that has been undone is undone once,
+whichever control reversed it.
+
+Applied state is tracked per affected panel, not per action.
+
+A multi-panel content action is a bundle of per-panel effects.
+
+Panel Undo reverses only that panel's portion.
+
+Master Undo reverses every portion still applied,
+so it still reverses the whole action as one session step,
+while never restoring a panel that already restored itself.
+
+An intrinsically linked action is the exception.
+
+A Position swap cannot be half-undone.
+
+Its panels always transition together,
+and it is reversible once, from either participant.
+
+Independent histories that can drift out of sync are not permitted.
+
+---
+
+# Two Histories
+
+A panel has an action history and a navigation history.
+
+The action history holds Runtime mutations GS3 performed.
+
+The navigation history holds browsing that happened
+inside the content GS3 loaded.
+
+Website navigation is never recorded as a Runtime action.
+
+Panel Undo and Redo are smart and consult both,
+navigation first.
+
+Master Undo is Runtime-action-only
+and never traverses browsing history.
+
+Navigation history is keyed to panel identity, never to Position.
+
+See docs/010-PANEL-NAVIGATION.md.
+
+---
+
+# Honest Capability
+
+The Runtime never pretends to observe what the browser does not expose.
+
+Cross-origin navigation is detectable but its URL is not readable.
+
+Such a navigation is recorded as opaque.
+
+No fabricated URL may enter Runtime Session.
+
+A navigation that cannot be reversed precisely
+must not silently fall through to an older, unrelated action.
+
+---
+
+# Surgical Restoration
+
+History restoration is surgical.
+
+Undo and Redo never reload unaffected live media.
+
+Restoration mutates only the state, and only the DOM,
+that the action itself actually affected.
+
+Untouched live panels must retain their iframe nodes,
+their parents, their document contexts, their load state,
+and their playback continuity.
+
+A presentation-only operation reloads nothing at all.
+
+A content operation reloads only the panels whose content changed.
 
 ---
 

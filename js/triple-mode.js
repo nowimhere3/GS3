@@ -11,15 +11,23 @@ import { initBlacklist } from './blacklist.js';
 import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { loadPresetsSilently, getPresets, getPresetSummary, saveWorkspaceToPreset } from './presets.js';
 import { populateBookmarkFolderSelect } from './folders.js';
-import { buildStreamPanel, updateRenderedPanel } from './launch.js';
+import { buildStreamPanel, updateRenderedPanel, updatePanelHistoryButtons, navigatePanelTo } from './launch.js';
 import {
     initGridSession, updateGridSession, setGridSessionSilently, getSessionUrls,
     getSessionFolderMap, getSourceWorkspaceInfo, setSessionSource,
     getSessionLayout,
     canUndoGridSession, undoGridSession,
+    canUndoPanelHistory, canRedoPanelHistory, undoPanelHistory, redoPanelHistory,
     getSessionArrangement, setSessionArrangement, setSessionLayout,
-    pushGridSessionCheckpoint,
+    beginGridAction, pushGridSessionCheckpoint,
 } from './grid-session.js';
+import {
+    getLayoutSlotOrder, listPositions, resolvePositionOfSlot, resolveSlotAtPosition,
+} from './positions.js';
+import {
+    resetPanelNavigation, canNavigateBack, canNavigateForward,
+    navigateBack, navigateForward,
+} from './panel-navigation.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
 const LAYOUT_IDS = ['top2', 'bottom2', '3col', 'lefttall', 'righttall', 'vsplit', 'hsplit', '4grid'];
@@ -60,21 +68,9 @@ const LAYOUT_GRID_CONFIG = {
 
 const MIN_TRACK_SIZE = 80; // px-equivalent floor so a dragged panel can't collapse to nothing
 
-// Clockwise visual order of slot-indices (0=screen1, 1=screen2, 2=screen3,
-// 3=screen4) for each layout, always starting from the top-left-most panel.
-// Drives the 🖥 position-swap dropdown in each panel's hotswap overlay, and
-// — since it only ever lists the slots a layout actually uses — also defines
-// which slots are visible for that layout.
-const LAYOUT_POSITION_ORDER = {
-    top2:      [0, 1, 2],
-    bottom2:   [0, 2, 1],
-    '3col':    [0, 1, 2],
-    lefttall:  [0, 1, 2],
-    righttall: [1, 0, 2],
-    vsplit:    [0, 1],
-    hsplit:    [0, 1],
-    '4grid':   [0, 1, 3, 2], // TL, TR, BR, BL
-};
+// LAYOUT_POSITION_ORDER (the clockwise visual ordering of each layout's slots,
+// and therefore the definition of its fixed Positions) lives in positions.js so
+// there is exactly one copy of this geometry in the app. It is imported above.
 
 // Session-only memory of custom drag positions, keyed by layout name. Never
 // written to Store — a fresh visit to this page (including navigating back to
@@ -349,38 +345,110 @@ function _injectResizers(layoutName, tripleLayoutEl) {
 // UI privately owns. This file only reads/writes it through the session.
 
 /**
- * Swap what's showing in two screen slots — driven by the 🖥 button in each
- * panel's hotswap overlay. This NEVER touches the panel/iframe DOM or its
- * src — it only swaps which grid-area name the two slot *containers*
- * currently render as (via inline style, overriding their default CSS). The
- * panel stays in its original, untouched parent the whole time, so whatever
- * is playing live inside (video, slideshow, etc.) keeps running exactly like
- * it does when switching orientations — because this is the same kind of
- * change: pure CSS, zero DOM manipulation of the iframe itself.
+ * Move the panel in `slotIndex` to the FIXED PHYSICAL Position `position`,
+ * swapping it with whichever panel currently occupies that Position.
  *
- * A swap is PRESENTATION only: it mutates the session's arrangement, never its
+ * "Position 3" always means the layout's third physical place — never "the slot
+ * that started out third". positions.js resolves the Position to a fixed
+ * grid-area name and then to the slot currently rendering as that area, so this
+ * lands correctly no matter how many swaps preceded it.
+ *
+ * This NEVER touches the panel/iframe DOM or its src — it only swaps which
+ * grid-area name the two slot *containers* render as (via inline style,
+ * overriding their default CSS). Each panel stays in its original, untouched
+ * parent the whole time, so whatever is playing live inside (video, slideshow,
+ * etc.) keeps running — pure CSS, zero DOM manipulation of the iframe itself.
+ *
+ * A move is PRESENTATION only: it mutates the session's arrangement, never its
  * content. URLs and folder assignments stay bound to their slot-index, not to
  * the visual position — so this deliberately does NOT swap the folder map (a
  * later "own folder" Shuffle acts on the slot's own assignment, matching how
  * URLs stay put). The arrangement is owned by the runtime session
- * (grid-session.js), and a swap is checkpoint-worthy so undo can restore it.
+ * (grid-session.js). One move is ONE history action listing BOTH occupants, so
+ * either panel can undo it — once.
  */
-function _swapSlotContents(slotIndexA, slotIndexB) {
-    const slotAEl = document.getElementById(SLOT_IDS[slotIndexA]);
-    const slotBEl = document.getElementById(SLOT_IDS[slotIndexB]);
+function _moveSlotToPosition(slotIndex, position) {
+    const arrangement = getSessionArrangement();
+    const targetSlot = resolveSlotAtPosition(_currentLayout, arrangement, position);
+    if (targetSlot === null || targetSlot === slotIndex) return;
+
+    const slotAEl = document.getElementById(SLOT_IDS[slotIndex]);
+    const slotBEl = document.getElementById(SLOT_IDS[targetSlot]);
     if (!slotAEl || !slotBEl) return;
 
-    pushGridSessionCheckpoint();
+    beginGridAction('position');
 
-    const arrangement = getSessionArrangement();
-    const tmpArea = arrangement[slotIndexA];
-    arrangement[slotIndexA] = arrangement[slotIndexB];
-    arrangement[slotIndexB] = tmpArea;
+    const held = arrangement[slotIndex];
+    arrangement[slotIndex] = arrangement[targetSlot];
+    arrangement[targetSlot] = held;
     setSessionArrangement(arrangement);
 
-    slotAEl.style.gridArea = arrangement[slotIndexA];
-    slotBEl.style.gridArea = arrangement[slotIndexB];
-    _updateGridUndoButtonState();
+    slotAEl.style.gridArea = arrangement[slotIndex];
+    slotBEl.style.gridArea = arrangement[targetSlot];
+    _refreshPositionLabels();
+    _refreshHistoryButtons();
+}
+
+/**
+ * Rewrite each visible slot's on-screen badge to the FIXED PHYSICAL Position it
+ * is currently rendering in. Because a slot's grid-area is what decides its
+ * physical place, and the badge lives inside that slot, re-deriving the badge
+ * after every arrangement or layout change means a given physical place always
+ * shows the same Position number — which is the whole promise of the model:
+ * "Position 1 is that place", not "Position 1 is wherever screen 1 went".
+ */
+function _refreshPositionLabels() {
+    const arrangement = getSessionArrangement();
+    SLOT_IDS.forEach((id, slotIndex) => {
+        const label = document.getElementById(id)?.querySelector('.slot-label');
+        if (!label) return;
+        const position = resolvePositionOfSlot(_currentLayout, arrangement, slotIndex);
+        label.textContent = position === null ? '' : `Position ${position}`;
+    });
+}
+
+/** The complete, stable Position list for the current layout, flagging which
+ *  one `slotIndex` is sitting in right now. Both pickers render from this, so
+ *  the numbering the user sees is the layout's own fixed numbering. */
+function _getPositionOptions(slotIndex) {
+    const arrangement = getSessionArrangement();
+    const current = resolvePositionOfSlot(_currentLayout, arrangement, slotIndex);
+    return listPositions(_currentLayout).map((position) => ({ position, isCurrent: position === current }));
+}
+
+/**
+ * 📋 Copy to Position — put the SOURCE panel's current URL into whichever panel
+ * currently occupies `position`.
+ *
+ * URL only. The destination keeps its own folder assignment and every other
+ * piece of its metadata: the user asked to duplicate what is playing, not to
+ * clone a panel. The source is never touched, so only the destination iframe
+ * reloads; every other live document keeps running.
+ */
+function _copyUrlToPosition(sourceSlotIndex, position, ctx) {
+    const arrangement = getSessionArrangement();
+    const destSlot = resolveSlotAtPosition(_currentLayout, arrangement, position);
+    if (destSlot === null || destSlot === sourceSlotIndex) return;
+
+    // The runtime session is authoritative for "what is this panel playing" —
+    // never the iframe's own src attribute.
+    const urls = getSessionUrls();
+    const sourceUrl = urls[sourceSlotIndex] || '';
+    if (!sourceUrl || urls[destSlot] === sourceUrl) return; // nothing to do
+
+    beginGridAction('copy');
+    urls[destSlot] = sourceUrl;
+    updateGridSession(urls, getSessionFolderMap());
+    setTargetUrls(urls);
+
+    const destPanel = document.getElementById(SLOT_IDS[destSlot])?.querySelector('.stream-panel');
+    if (destPanel) {
+        updateRenderedPanel(destPanel, { url: sourceUrl });
+    } else {
+        const slot = document.getElementById(SLOT_IDS[destSlot]);
+        if (slot) slot.appendChild(buildStreamPanel(sourceUrl, destSlot, 'stream-panel triple-fill', '100%', ctx));
+    }
+    _refreshHistoryButtons();
 }
 
 /**
@@ -415,13 +483,15 @@ function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
 
     // Show only the slots this layout actually uses (2-screen splits only use
     // 2 of the 4 slots, 3-screen layouts use 3, only the 4-way grid uses all 4).
-    const activeSlots = LAYOUT_POSITION_ORDER[safeName] || [0, 1, 2];
+    const activeSlots = getLayoutSlotOrder(safeName);
     SLOT_IDS.forEach((id, i) => {
         const slotEl = document.getElementById(id);
         if (!slotEl) return;
         slotEl.style.gridArea = '';
         slotEl.style.display = activeSlots.includes(i) ? '' : 'none';
     });
+
+    _refreshPositionLabels();
 
     Object.entries(layoutBtns).forEach(([name, btn]) => {
         btn.classList.toggle('active', name === safeName);
@@ -435,16 +505,39 @@ function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
     });
 }
 
-/** Keep the master-bar Undo button's enabled/disabled state in sync with
- * whether there's actually anything left in THIS session's undo stack. Called
- * from _renderPanels() itself so every render path (initial load, Shuffle,
- * Shuffle All, folder selection, undo) keeps it correct automatically —
- * previously this was only refreshed at boot and after undo() itself, so it
- * stayed permanently disabled after the first Shuffle even though there was
- * something to undo. */
-function _updateGridUndoButtonState() {
+/** Keep every history control's enabled/disabled state in sync with the one
+ * canonical session history: the master-bar Undo button, and each panel's own
+ * ↩/↪ pair (tray buttons and their Quick Action mirrors alike).
+ *
+ * Called from _renderPanels() itself so every render path (initial load,
+ * Shuffle, Shuffle All, folder selection, undo) keeps it correct automatically,
+ * and after every individual history mutation — one action can change several
+ * panels' availability at once (a Position move affects both occupants; a
+ * master Undo can empty a panel's own undo pool), so this always refreshes ALL
+ * of them rather than just the panel that was clicked. */
+/**
+ * What a panel's own ↩/↪ can currently do, across BOTH of its histories: the
+ * browsing it did inside its content, and the GS3 actions that affected it.
+ * The single definition both the buttons and the click handlers read, so an
+ * enabled button and the operation it performs can never disagree.
+ */
+function _panelHistoryState(slotIndex) {
+    return {
+        canUndo: canNavigateBack(slotIndex) || canUndoPanelHistory(slotIndex),
+        canRedo: canNavigateForward(slotIndex) || canRedoPanelHistory(slotIndex),
+    };
+}
+
+function _refreshHistoryButtons() {
+    // Master Undo is Runtime-action-only and deliberately ignores browsing.
     const btn = document.getElementById('btn-master-undo');
     if (btn) btn.disabled = !canUndoGridSession();
+
+    SLOT_IDS.forEach((id, index) => {
+        const panel = document.getElementById(id)?.querySelector('.stream-panel');
+        if (!panel) return;
+        updatePanelHistoryButtons(panel, _panelHistoryState(index));
+    });
 }
 
 function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
@@ -514,11 +607,11 @@ function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
         slot.appendChild(panel);
     });
 
-    const visibleSlots = (LAYOUT_POSITION_ORDER[_currentLayout] || [0, 1, 2]).length;
+    const visibleSlots = getLayoutSlotOrder(_currentLayout).length;
     const active = urls.slice(0, visibleSlots).filter(Boolean).length;
     ctx.statusEl.textContent = `${active} streams`;
 
-    _updateGridUndoButtonState();
+    _refreshHistoryButtons();
 }
 
 /** Restore an Undo snapshot without treating unaffected live panels as disposable DOM. */
@@ -553,12 +646,81 @@ function _reconcileUndo(restored, ctx) {
             const slotEl = document.getElementById(SLOT_IDS[slotIndex]);
             if (slotEl) slotEl.style.gridArea = area;
         });
+        _refreshPositionLabels();
     }
 
-    const visibleSlots = (LAYOUT_POSITION_ORDER[_currentLayout] || [0, 1, 2]).length;
+    const visibleSlots = getLayoutSlotOrder(_currentLayout).length;
     const active = restored.urls.slice(0, visibleSlots).filter(Boolean).length;
     if (ctx.statusEl) ctx.statusEl.textContent = `${active} streams`;
-    _updateGridUndoButtonState();
+    _refreshHistoryButtons();
+}
+
+/**
+ * Apply one history restoration (master Undo, Panel Undo, Panel Redo — all
+ * three return the same descriptor) to the runtime. Restoration is surgical:
+ * only the slots the action itself recorded are written, and only those
+ * iframes can reload. Everything else keeps its node, its parent, its document
+ * and its playback.
+ */
+function _applyRestoredHistory(restored, ctx) {
+    if (!restored) return null;
+    setTargetUrls(restored.urls);
+    setUrlFolderMap(restored.folderMap);
+    _reconcileUndo(restored, ctx);
+    return restored;
+}
+
+function _panelEl(slotIndex) {
+    return document.getElementById(SLOT_IDS[slotIndex])?.querySelector('.stream-panel') || null;
+}
+
+/**
+ * SMART PANEL UNDO — "take THIS panel back to the last thing I was looking at
+ * or doing", whichever history that came from.
+ *
+ * Navigation first. A panel's browsing entries only exist inside its CURRENT
+ * content generation, which the most recent GS3 content action on that panel
+ * opened — so a pending navigation step is always something the user did after
+ * that action, and is what they mean by "back". Only once this panel has been
+ * returned to the content GS3 loaded does Undo fall through to the canonical
+ * action history and start reversing GS3's own mutations.
+ *
+ * This ordering holds even when a newer GS3 action exists that did not replace
+ * content (a Position move): moving a panel elsewhere on screen does not undo
+ * the user's place inside it, so Undo still steps the browsing back first and
+ * the panel stays where it is.
+ *
+ * Master Undo deliberately does NOT come through here — it stays purely
+ * Runtime-action-scoped and never traverses a website's browsing history.
+ */
+function _undoPanelSmart(slotIndex, ctx) {
+    if (canNavigateBack(slotIndex)) {
+        const panel = _panelEl(slotIndex);
+        // Only commit the cursor move if the panel is really there to navigate.
+        if (panel) {
+            const step = navigateBack(slotIndex);
+            if (step && navigatePanelTo(panel, step.url)) {
+                _refreshHistoryButtons();
+                return null;
+            }
+        }
+    }
+    return _applyRestoredHistory(undoPanelHistory(slotIndex), ctx);
+}
+
+/** SMART PANEL REDO — the mirror of _undoPanelSmart. */
+function _redoPanelSmart(slotIndex, ctx) {
+    if (canNavigateForward(slotIndex)) {
+        const panel = _panelEl(slotIndex);
+        if (panel) {
+            const step = navigateForward(slotIndex);
+            if (step && navigatePanelTo(panel, step.url)) {
+                _refreshHistoryButtons();
+                return null;
+            }
+        }
+    }
+    return _applyRestoredHistory(redoPanelHistory(slotIndex), ctx);
 }
 
 /** Build the 🌐 Folder dropup list (matches .dropup-item / .dropup-count CSS in index3.html) */
@@ -697,8 +859,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         dirDropdownEl: null,
         statusEl,
         openBookmarkModal: _openBookmarkModal,
-        getPositionOrder: () => LAYOUT_POSITION_ORDER[_currentLayout] || [0, 1, 2],
-        swapWithSlot: (slotIndexA, slotIndexB) => _swapSlotContents(slotIndexA, slotIndexB),
+        // Fixed Positions — the complete, stable Position list for this layout,
+        // plus the two Position-targeting actions. See positions.js.
+        getPositionOptions: (slotIndex) => _getPositionOptions(slotIndex),
+        moveToPosition: (slotIndex, position) => _moveSlotToPosition(slotIndex, position),
+        copyUrlToPosition: (slotIndex, position) => _copyUrlToPosition(slotIndex, position, ctx),
+        // Panel-scoped history — reads and writes the SAME canonical session
+        // history master Undo uses, so an action undone here is instantly
+        // invisible to master Undo and can never be undone a second time.
+        // Availability spans BOTH histories — a panel can have somewhere to go
+        // back to because of browsing, because of a GS3 action, or both.
+        getPanelHistory: (slotIndex) => _panelHistoryState(slotIndex),
+        undoPanel: (slotIndex) => _undoPanelSmart(slotIndex, ctx),
+        redoPanel: (slotIndex) => _redoPanelSmart(slotIndex, ctx),
+        // A panel navigated inside its own content: nothing in the Runtime
+        // Session changed, but this panel's ↩/↪ availability did.
+        onPanelNavigated: () => _refreshHistoryButtons(),
         // Runtime-session write-backs for launch.js's per-panel overlay. These
         // are how a single panel's own hotswap action (manual URL edit, folder
         // assign, per-panel Shuffle / Shuffle All, Delete, Purge, Kill, 🚀)
@@ -710,20 +886,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             const folderMap = getSessionFolderMap();
             urls[idx] = newUrl;
             if (newFolder !== undefined) folderMap[idx] = newFolder;
-            updateGridSession(urls, folderMap);
+            updateGridSession(urls, folderMap); // commits the pending action
             setTargetUrls(urls);      // keep state.js's compat view in sync
             setUrlFolderMap(folderMap);
+            _refreshHistoryButtons();
         },
         onPanelRemoved: (idx) => {
             const urls = getSessionUrls();
             urls[idx] = '';
-            updateGridSession(urls, getSessionFolderMap());
+            updateGridSession(urls, getSessionFolderMap()); // commits the pending action
             setTargetUrls(urls);
+            _refreshHistoryButtons();
         },
-        pushUndoCheckpoint: () => {
-            pushGridSessionCheckpoint();
-            _updateGridUndoButtonState();
-        },
+        // Opens the recording window only. The action itself doesn't exist —
+        // and no history control can change state — until the mutation that
+        // follows commits it, so the button refresh lives on the commit side
+        // (onPanelContentChanged / onPanelRemoved / _renderPanels) instead.
+        pushUndoCheckpoint: () => pushGridSessionCheckpoint(),
     };
 
     // 🎬 toggle open/close for the master control bar
@@ -778,6 +957,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // every slot with random picks instead of the actual saved workspace.
     await loadPresetsSilently();
 
+    resetPanelNavigation(); // a new Runtime session starts with no browsing history
     const initialSession = initGridSession(DEFAULT_LAYOUT); // Phase 4B/4D: load working copy + resolved layout from the URL-selected workspace
     // Now that the session exists, apply its resolved layout (preset.layout, or
     // the global tripleLayout preference, or DEFAULT_LAYOUT — decided inside
@@ -820,19 +1000,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         _renderPanels(set.urls, set.map, ctx);
     };
 
-    // ↩ Undo — steps back through this SESSION's own history only (Shuffle,
-    // Shuffle All, folder reassignment, position swaps). Never touches
-    // index.html's Undo — these are two entirely separate undo stacks.
+    // ↩ Master Undo — steps back through this SESSION's own history only
+    // (Shuffle, Shuffle All, folder reassignment, Position moves, Copy to
+    // Position). Never touches index.html's Undo — those are two entirely
+    // separate histories.
+    //
+    // Master Undo and each panel's own ↩ read the SAME canonical action list,
+    // differing only in which action they select: master takes the most recent
+    // still-applied action anywhere, a panel takes the most recent still-applied
+    // action affecting itself. Undoing marks the action itself as undone, so
+    // whichever control ran second simply doesn't see it any more — the same
+    // change can never be undone twice.
     if (undoBtn) {
         undoBtn.onclick = () => {
-            const restored = undoGridSession();
-            if (!restored) return;
-            setTargetUrls(restored.urls);
-            setUrlFolderMap(restored.folderMap);
-            _reconcileUndo(restored, ctx);
+            _applyRestoredHistory(undoGridSession(), ctx);
         };
     }
-    _updateGridUndoButtonState();
+    _refreshHistoryButtons();
 
     // 💾 Save Session As... — the ONLY way this session's changes ever reach
     // a real preset. Nothing else in this file writes to presets.json.
