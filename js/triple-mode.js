@@ -433,10 +433,8 @@ function _getPositionOptions(slotIndex) {
  * 📋 Copy to Position — put the SOURCE panel's current URL into whichever panel
  * currently occupies `position`.
  *
- * URL only. The destination keeps its own folder assignment and every other
- * piece of its metadata: the user asked to duplicate what is playing, not to
- * clone a panel. The source is never touched, so only the destination iframe
- * reloads; every other live document keeps running.
+ * Content assignment includes URL + ROOT folder. The source is untouched and
+ * only the destination iframe reloads; every other live document keeps running.
  */
 function _copyUrlToPosition(sourceSlotIndex, position, ctx) {
     const arrangement = getSessionArrangement();
@@ -446,17 +444,23 @@ function _copyUrlToPosition(sourceSlotIndex, position, ctx) {
     // The runtime session is authoritative for "what is this panel playing" —
     // never the iframe's own src attribute.
     const urls = getSessionUrls();
+    const folderMap = getSessionFolderMap();
     const sourceUrl = urls[sourceSlotIndex] || '';
-    if (!sourceUrl || urls[destSlot] === sourceUrl) return; // nothing to do
+    const sourceFolder = folderMap[sourceSlotIndex] || '';
+    const destFolder = folderMap[destSlot] || '';
+    if (!sourceUrl || (urls[destSlot] === sourceUrl && destFolder === sourceFolder)) return;
 
     beginGridAction('copy');
     urls[destSlot] = sourceUrl;
-    updateGridSession(urls, getSessionFolderMap());
+    if (sourceFolder) folderMap[destSlot] = sourceFolder;
+    else delete folderMap[destSlot];
+    updateGridSession(urls, folderMap);
     setTargetUrls(urls);
+    setUrlFolderMap(folderMap);
 
     const destPanel = document.getElementById(SLOT_IDS[destSlot])?.querySelector('.stream-panel');
     if (destPanel) {
-        updateRenderedPanel(destPanel, { url: sourceUrl });
+        updateRenderedPanel(destPanel, { url: sourceUrl, folder: sourceFolder });
     } else {
         const slot = document.getElementById(SLOT_IDS[destSlot]);
         if (slot) slot.appendChild(buildStreamPanel(sourceUrl, destSlot, 'stream-panel triple-fill', '100%', ctx));

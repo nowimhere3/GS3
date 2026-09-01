@@ -34,6 +34,9 @@ import {
 } from './state.js';
 import { isBlacklisted } from './blacklist.js';
 import { buildFolderOptions } from './folders.js';
+import {
+    getShuffleScopeFolder, setShuffleScopeFolder, planShuffleAllFolders,
+} from './shuffle-scope.js';
 
 // ── Module refs ───────────────────────────────────────────────────────────────
 // Set by initGrid — avoids repeated getElementById calls
@@ -331,6 +334,9 @@ export function renderInputRows() {
             input.draggable   = false;
             if (lockState === 1) input.readOnly = true;
             input.addEventListener('input', () => {
+                const fmap = getUrlFolderMap();
+                delete fmap[idx]; // manual Builder content has no truthful provenance
+                setUrlFolderMap(fmap);
                 saveInputsToState({ checkpoint: false });
             });
 
@@ -406,6 +412,22 @@ function _applyShuffleToInputs(inputs, getPoolForSlot) {
     setUrlFolderMap(urlFolderMap);
 }
 
+function _fillInputsFromFolder(folder) {
+    const db = getDatabaseStructure();
+    if (!db?.[folder]) return false;
+    const eligiblePool = db[folder].filter((url) => !isBlacklisted(url));
+    if (eligiblePool.length === 0) return false;
+
+    let sourcePool = [...eligiblePool];
+    const inputs = document.querySelectorAll('.url-grid-field');
+    _applyShuffleToInputs(inputs, () => {
+        if (sourcePool.length === 0) sourcePool = [...eligiblePool];
+        const randIdx = Math.floor(Math.random() * sourcePool.length);
+        return { url: sourcePool.splice(randIdx, 1)[0], folder };
+    });
+    return true;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -476,20 +498,11 @@ export function initGrid({ containerEl, dirDropdown, portraitToggle, launchCallb
         const selected = dirDropdown.value;
         const db       = getDatabaseStructure();
         if (selected === 'manual' || !db) return;
-
-        let sourcePool = [...db[selected]];
-        const inputs   = document.querySelectorAll('.url-grid-field');
-        const fmap     = getUrlFolderMap();
-
-        _applyShuffleToInputs(inputs, (i) => {
-            if (sourcePool.length === 0) return null;
-            const randIdx = Math.floor(Math.random() * sourcePool.length);
-            const url     = sourcePool.splice(randIdx, 1)[0];
-            fmap[i] = selected;
-            return { url, folder: selected };
-        });
-
-        setUrlFolderMap(fmap);
+        setShuffleScopeFolder(selected);
+        if (!_fillInputsFromFolder(selected)) {
+            alert('All URLs in the selected folder are blacklisted.');
+            return;
+        }
         saveInputsToState();
         if (getIsCuratedMode()) renderInputRows();
     });
@@ -499,32 +512,12 @@ export function initGrid({ containerEl, dirDropdown, portraitToggle, launchCallb
         const db = getDatabaseStructure();
         if (!db) { alert('Please connect your GitHub database pool before using the shuffle engine.'); return; }
 
-        const folders = Object.keys(db);
-        if (folders.length === 0) return;
-
-        const randomFolder = folders[Math.floor(Math.random() * folders.length)];
-        if (dirDropdown) dirDropdown.value = randomFolder;
-
-        let sourcePool = [...db[randomFolder]].filter(u => !isBlacklisted(u));
-        if (sourcePool.length === 0) { alert('All URLs in the selected folder are blacklisted.'); return; }
-
-        const newFolderMap = {};
-        const inputs = document.querySelectorAll('.url-grid-field');
-
-        _applyShuffleToInputs(inputs, (i) => {
-            if (sourcePool.length === 0) {
-                sourcePool = [...db[randomFolder]].filter(u => !isBlacklisted(u));
-            }
-            const randIdx = Math.floor(Math.random() * sourcePool.length);
-            const url     = sourcePool.splice(randIdx, 1)[0];
-            newFolderMap[i] = randomFolder;
-            return { url, folder: randomFolder };
-        });
-
-        // Merge newFolderMap (unlocked slots only) with existing
-        const fmap = getUrlFolderMap();
-        Object.assign(fmap, newFolderMap);
-        setUrlFolderMap(fmap);
+        const folder = getShuffleScopeFolder();
+        if (!folder || !db[folder]) { alert('Select a folder to shuffle from first.'); return; }
+        if (!_fillInputsFromFolder(folder)) {
+            alert('All URLs in the selected folder are blacklisted.');
+            return;
+        }
         saveInputsToState();
         if (getIsCuratedMode()) renderInputRows();
     });
@@ -544,16 +537,7 @@ export function initGrid({ containerEl, dirDropdown, portraitToggle, launchCallb
         const rowLockState = getRowLockState();
         const unlockedIdxs = [...Array(slotCount).keys()].filter(i => (rowLockState[i] || 0) === 0);
 
-        const folderUsage = {};
-        const slotFolders = {};
-
-        unlockedIdxs.forEach(i => {
-            let available = availableFolders.filter(f => (folderUsage[f] || 0) < 2);
-            if (available.length === 0) available = availableFolders;
-            const chosen = available[Math.floor(Math.random() * available.length)];
-            folderUsage[chosen] = (folderUsage[chosen] || 0) + 1;
-            slotFolders[i] = chosen;
-        });
+        const { slotFolders, unfilled } = planShuffleAllFolders({ unlockedIdxs, availableFolders });
 
         const fmap = getUrlFolderMap();
         _applyShuffleToInputs(inputs, (i) => {
@@ -566,8 +550,10 @@ export function initGrid({ containerEl, dirDropdown, portraitToggle, launchCallb
         });
 
         setUrlFolderMap(fmap);
-        if (dirDropdown) dirDropdown.value = 'manual';
         saveInputsToState();
         if (getIsCuratedMode()) renderInputRows();
+        if (unfilled.length > 0) {
+            alert(`Shuffle All can fill at most ${availableFolders.length * 2} ordinary unlocked rows from ${availableFolders.length} folder(s) (2 each). ${unfilled.length} row(s) were left unchanged.`);
+        }
     });
 }

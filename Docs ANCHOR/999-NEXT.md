@@ -103,3 +103,18 @@ Ideas intentionally postponed until the architecture is ready.
 - Collaborative Runtime
 
 These features should be built on top of Runtime Session rather than before it.
+# Pre-launch Shuffle Scope + Runtime ROOT repair breadcrumb
+
+WAS: the Builder dropdown simultaneously acted as user intent, generation
+read-out, and launch provenance fallback; Runtime normal Shuffle stayed active
+for content with no assigned folder, and Copy duplicated only the URL.
+
+IS: Builder Shuffle Scope is one persisted preference changed only by explicit
+dropdown selection. Row folder / Runtime ROOT remains independent and truthful.
+Unknown content stays unassigned, normal Runtime Shuffle derives availability
+from ROOT, and URL + ROOT travel together through Copy and Position swaps.
+
+WHY: "where should the next Builder Shuffle draw from?" and "which ROOT is this
+content assigned to?" are different facts and GS3 must not fabricate either.
+
+---

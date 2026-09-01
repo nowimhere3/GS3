@@ -136,6 +136,109 @@ test('Solo controls are explicitly disabled when no database is available', asyn
     await page.close();
 });
 
+test('Builder Shuffle Scope stays sticky, Shuffle All preserves it, and dropdown rebuild is non-mutating', async () => {
+    const page = await browser.newPage();
+    await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+    await page.evaluate(async () => {
+        const { setDatabaseStructure } = await import('./js/state.js');
+        const { updateDirectoryDropdown } = await import('./js/folders.js');
+        const db = Object.fromEntries(['A', 'B', 'C', 'D'].map((folder) => [folder,
+            Array.from({ length: 20 }, (_, i) => `https://fixture.test/${folder}/${i}`)]));
+        setDatabaseStructure(db);
+        updateDirectoryDropdown(document.getElementById('directory-dropdown'));
+    });
+    await page.locator('#directory-dropdown').selectOption('A');
+
+    for (let press = 0; press < 50; press += 1) {
+        const state = await page.evaluate(() => {
+            document.getElementById('dice-shuffle-btn').click();
+            return {
+                dropdown: document.getElementById('directory-dropdown').value,
+                stored: localStorage.getItem('builder_shuffle_folder'),
+                urls: [...document.querySelectorAll('.url-grid-field')].map((input) => input.value),
+            };
+        });
+        assert.equal(state.dropdown, 'A');
+        assert.equal(state.stored, 'A');
+        assert.ok(state.urls.every((url) => url.includes('/A/')));
+    }
+
+    await page.locator('#dice-shuffle-all-btn').click();
+    assert.deepEqual(await page.evaluate(() => ({
+        dropdown: document.getElementById('directory-dropdown').value,
+        stored: localStorage.getItem('builder_shuffle_folder'),
+    })), { dropdown: 'A', stored: 'A' });
+    await page.locator('#dice-shuffle-btn').click();
+    assert.ok((await page.locator('.url-grid-field').evaluateAll((inputs) => inputs.map((input) => input.value)))
+        .every((url) => url.includes('/A/')));
+
+    const rebuild = await page.evaluate(async () => {
+        const { getDatabaseStructure, setDatabaseStructure, getTargetUrls } = await import('./js/state.js');
+        const { updateDirectoryDropdown } = await import('./js/folders.js');
+        const select = document.getElementById('directory-dropdown');
+        const before = [...getTargetUrls()];
+        updateDirectoryDropdown(select);
+        const preserved = { value: select.value, stored: localStorage.getItem('builder_shuffle_folder'),
+            gridUnchanged: JSON.stringify(before) === JSON.stringify(getTargetUrls()) };
+        const db = getDatabaseStructure();
+        delete db.A;
+        setDatabaseStructure(db);
+        updateDirectoryDropdown(select);
+        return { preserved, fallback: select.value, stored: localStorage.getItem('builder_shuffle_folder'),
+            gridUnchanged: JSON.stringify(before) === JSON.stringify(getTargetUrls()) };
+    });
+    assert.deepEqual(rebuild.preserved, { value: 'A', stored: 'A', gridUnchanged: true });
+    assert.equal(rebuild.fallback, 'B');
+    assert.equal(rebuild.stored, 'B');
+    assert.equal(rebuild.gridUnchanged, true);
+    await page.close();
+});
+
+test('Runtime unassigned Shuffle availability is canonical and ROOT-changing actions resync it', async () => {
+    const page = await bootCanaryGrid();
+    const result = await page.evaluate(async () => {
+        const { setDatabaseStructure } = await import('./js/state.js');
+        const { updateRenderedPanel } = await import('./js/launch.js');
+        setDatabaseStructure({ CARS: ['/test/fixtures/canary.html?id=car'], PETS: ['/test/fixtures/canary.html?id=pet'] });
+        const panel = document.querySelectorAll('.stream-panel')[0];
+        updateRenderedPanel(panel, { folder: '' });
+        const availability = () => ({
+            tray: panel.querySelector('.btn-hotswap-shuffle').disabled,
+            mirrors: [...panel.querySelectorAll('.hotswap-mirror-btn[data-action-key="shuffle"]')]
+                .map((button) => button.disabled),
+            shuffleAll: panel.querySelector('.btn-hotswap-shuffle-all').disabled,
+            folder: panel.querySelector('.btn-hotswap-folder').disabled,
+            edit: panel.querySelector('.btn-hotswap-toggle').disabled,
+            root: panel.querySelector('iframe').getAttribute('data-source-folder'),
+        });
+        const unassigned = availability();
+        panel.querySelector('.btn-hotswap-shuffle-all').click();
+        const afterAll = availability();
+        panel.querySelector('.btn-hotswap-toggle').click();
+        panel.querySelector('.hotswap-input').value = '/test/fixtures/canary.html?id=manual';
+        panel.querySelector('.hotswap-submit-btn').click();
+        const afterEditAssigned = availability();
+        updateRenderedPanel(panel, { folder: '' });
+        panel.querySelector('.btn-hotswap-toggle').click();
+        panel.querySelector('.hotswap-input').value = '/test/fixtures/canary.html?id=unknown';
+        panel.querySelector('.hotswap-submit-btn').click();
+        const afterEditUnassigned = availability();
+        return { unassigned, afterAll, afterEditAssigned, afterEditUnassigned };
+    });
+    assert.equal(result.unassigned.tray, true);
+    assert.ok(result.unassigned.mirrors.every(Boolean));
+    assert.equal(result.unassigned.shuffleAll, false);
+    assert.equal(result.unassigned.folder, false);
+    assert.equal(result.unassigned.edit, false);
+    assert.ok(['CARS', 'PETS'].includes(result.afterAll.root));
+    assert.equal(result.afterAll.tray, false);
+    assert.equal(result.afterEditAssigned.root, result.afterAll.root);
+    assert.equal(result.afterEditAssigned.tray, false);
+    assert.equal(result.afterEditUnassigned.root, '');
+    assert.equal(result.afterEditUnassigned.tray, true);
+    await page.close();
+});
+
 test('typed URL persists and Launch Grid receives the exact visible value', async () => {
     const page = await browser.newPage();
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) => route.fulfill({ status: 204, body: '' }));
@@ -813,7 +916,7 @@ test('interleaved panel histories: undoing A leaves B changed', async () => {
     await page.close();
 });
 
-test('Copy to Position copies the URL to the destination only, undoably', async () => {
+test('Copy to Position copies URL and ROOT to the destination, undoably', async () => {
     const page = await bootCanaryGrid();
     const before = await readCanaries(page, ['A', 'B']);
     await armContinuityProbe(page);
@@ -843,7 +946,7 @@ test('Copy to Position copies the URL to the destination only, undoably', async 
     assert.deepEqual(await page.evaluate(async () => {
         const { getSessionFolderMap } = await import('./js/grid-session.js');
         return getSessionFolderMap();
-    }), { 0: 'FolderA', 2: 'FolderC' }, 'copy means URL only — no folder or other metadata is cloned');
+    }), { 0: 'FolderA', 2: 'FolderA' }, 'copy duplicates the source content assignment, including ROOT');
 
     assert.deepEqual(await readPanelHistoryButtons(page),
         [{ undo: false, redo: false }, { undo: false, redo: false }, { undo: true, redo: false }],

@@ -24,6 +24,7 @@
 
 import { getDatabaseStructure, setDatabaseStructure } from './state.js';
 import { pushDatabaseToRemote } from './sync.js';
+import { resolveShuffleScope, setShuffleScopeFolder } from './shuffle-scope.js';
 
 // ── Dropdown helpers ──────────────────────────────────────────────────────────
 
@@ -65,6 +66,12 @@ export function updateDirectoryDropdown(dirDropdownEl, onAfterUpdate, folderMana
             ingestSelect.appendChild(opt2);
         }
     });
+
+    if (dirDropdownEl) {
+        const scope = resolveShuffleScope(db);
+        dirDropdownEl.value = scope;
+        setShuffleScopeFolder(scope);
+    }
 
     if (folderManagerOpen) renderFolderManager(dirDropdownEl, onAfterUpdate);
     if (typeof onAfterUpdate === 'function') onAfterUpdate();

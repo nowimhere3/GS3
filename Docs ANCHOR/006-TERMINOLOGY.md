@@ -168,6 +168,28 @@ Examples:
 
 ---
 
+# Builder Shuffle Scope
+
+The user's persisted global Builder preference for normal Shuffle:
+"which folder should fresh links come from next?"
+
+It changes only when the user changes the main Builder folder dropdown.
+It is not row provenance, Preset data, Workspace design, or Runtime Session state.
+
+---
+
+# Row Folder / Runtime ROOT
+
+The known folder assignment carried by a row's content and, after launch, by
+the Runtime Panel. Normal Runtime Shuffle draws from this ROOT.
+
+Manual or otherwise unknown content may have no ROOT. Shuffle All may establish
+one; Assign Folder may establish or change one; Edit URL preserves an existing
+ROOT but never invents one. Copy duplicates ROOT. Position swaps preserve ROOT
+with the moving Panel/content because Position never owns it.
+
+---
+
 # Presentation
 
 Information describing how Panels are displayed.

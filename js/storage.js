@@ -42,6 +42,7 @@ export const KEYS = Object.freeze({
     portraitMode:       'matrixIsPortrait',
     lockState:          'matrix_lock_state',
     folderMap:          'matrix_folder_map',
+    builderShuffleFolder: 'builder_shuffle_folder',
 
     // GitHub sync
     gitToken:           'git_sync_token',
@@ -110,6 +111,7 @@ const DEFAULTS = {
     [KEYS.portraitMode]:    false,
     [KEYS.lockState]:       {},
     [KEYS.folderMap]:       {},
+    [KEYS.builderShuffleFolder]: '',
     [KEYS.gitToken]:        '',
     [KEYS.gitRepo]:         '',
     [KEYS.blacklist]:       [],
@@ -155,6 +157,7 @@ const TYPES = {
     [KEYS.portraitMode]:    'boolean',
     [KEYS.lockState]:       'json',
     [KEYS.folderMap]:       'json',
+    [KEYS.builderShuffleFolder]: 'string',
     [KEYS.gitToken]:        'string',
     [KEYS.gitRepo]:         'string',
     [KEYS.blacklist]:       'json',

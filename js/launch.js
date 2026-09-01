@@ -84,6 +84,27 @@ export function updateRenderedPanel(panel, { url, folder } = {}) {
         refreshPanelLayerScope(panel); // this content may have created or removed Layer 2
     }
     if (folder !== undefined) iframe.setAttribute('data-source-folder', folder || '');
+    updatePanelActionAvailability(panel);
+}
+
+/** One availability derivation for the canonical tray action and every mirror. */
+export function updatePanelActionAvailability(panel) {
+    const iframe = panel?.querySelector('iframe');
+    if (!iframe) return;
+    const aimedAtLayerTwo = panel.dataset.layerScope === LAYER_2
+        && panel.querySelector('.hotswap-layer-selector')?.hidden === false;
+    const folder = iframe.getAttribute('data-source-folder') || '';
+    const db = getDatabaseStructure();
+    const shuffleEnabled = aimedAtLayerTwo || Boolean(folder && db && Object.hasOwn(db, folder));
+    const title = shuffleEnabled
+        ? "Shuffle from this panel's assigned folder"
+        : 'No assigned folder - use Shuffle All or Assign Folder';
+    const trayBtn = panel.querySelector('.btn-hotswap-shuffle');
+    if (trayBtn) { trayBtn.disabled = !shuffleEnabled; trayBtn.title = title; }
+    panel.querySelectorAll('.hotswap-mirror-btn[data-action-key="shuffle"]').forEach((mirror) => {
+        mirror.disabled = !shuffleEnabled;
+        mirror.title = title;
+    });
 }
 
 /**
@@ -260,9 +281,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const db           = getDatabaseStructure();
     const urlFolderMap = getUrlFolderMap();
 
-    const launchFolder = urlFolderMap[index]
-        || (ctx.dirDropdownEl?.value !== 'manual' ? ctx.dirDropdownEl?.value : null)
-        || null;
+    const launchFolder = urlFolderMap[index] || null;
 
     // ── Panel shell ──────────────────────────────────────────────────────────
     const panel = document.createElement('div');
@@ -302,8 +321,9 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
 
     /** Pick a random non-blacklisted URL from a folder */
     const loadReplacement = (folderName) => {
-        if (!db || !db[folderName]) return null;
-        const pool = db[folderName].filter(u => !isBlacklisted(u));
+        const currentDb = getDatabaseStructure();
+        if (!currentDb || !currentDb[folderName]) return null;
+        const pool = currentDb[folderName].filter(u => !isBlacklisted(u));
         return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
     };
 
@@ -765,10 +785,8 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         positionBtn.style.display = 'none';
     }
 
-    // 📋 Copy to Position — copies THIS panel's current URL into whichever panel
-    // is currently occupying the chosen Position. URL only: the destination
-    // keeps its own folder assignment and everything else. The source panel is
-    // untouched, and only the destination iframe reloads.
+    // 📋 Copy to Position — duplicates this panel's content assignment (URL +
+    // ROOT) into the panel currently occupying the chosen Position.
     if (positionsSupported && typeof ctx.copyUrlToPosition === 'function') {
         copyBtn.onclick = (e) => {
             e.stopPropagation();
@@ -1060,6 +1078,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
             e.stopPropagation();
             panel.dataset.layerScope = button.dataset.layer === LAYER_1 ? LAYER_1 : LAYER_2;
             refreshPanelLayerScope(panel);
+            updatePanelActionAvailability(panel);
         };
     });
 
@@ -1257,6 +1276,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // A freshly built panel starts with whatever history it actually has — a
     // panel rebuilt mid-session by a master Shuffle may well have some.
     syncHistoryButtons();
+    updatePanelActionAvailability(panel);
 
     return panel;
 }
