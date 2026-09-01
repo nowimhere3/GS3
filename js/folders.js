@@ -9,7 +9,6 @@
  *   exportFolder(folderName, urls)   — downloads folder URLs as .txt
  *   deleteFolder(folderName, rowEl)  — confirms, removes from db, pushes, animates row out
  *   renderFolderManager()            — renders the Folder Manager card list with drag-reorder
- *   initFolderManagerDrawer()        — wires the Show/Hide drawer toggle
  *
  * Dependencies (injected via ctx or direct imports):
  *   getDatabaseStructure / setDatabaseStructure  — state.js
@@ -249,28 +248,6 @@ export function renderFolderManager(dirDropdownEl, onAfterUpdate) {
 
         list.appendChild(row);
     });
-}
-
-// ── Drawer toggle ─────────────────────────────────────────────────────────────
-
-/**
- * Wire up the Folder Manager drawer show/hide toggle button.
- * Re-renders the list when opened so it always reflects current db state.
- *
- * @param {HTMLElement} dirDropdownEl
- * @param {Function}    [onAfterUpdate]
- */
-export function initFolderManagerDrawer(dirDropdownEl, onAfterUpdate) {
-    const btn     = document.getElementById('btn-toggle-fm-drawer');
-    const content = document.getElementById('fm-drawer-content');
-    if (!btn || !content) return;
-
-    btn.onclick = () => {
-        const isOpen = content.style.display === 'block';
-        content.style.display = isOpen ? 'none' : 'block';
-        btn.textContent = isOpen ? '📋 Show Folders' : '✕ Hide Folders';
-        if (!isOpen) renderFolderManager(dirDropdownEl, onAfterUpdate);
-    };
 }
 
 // ── Bookmark modal folder list ────────────────────────────────────────────────

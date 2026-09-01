@@ -11,10 +11,11 @@ import { initBlacklist } from './blacklist.js';
 import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { loadPresetsSilently, getPresets, getPresetSummary, saveWorkspaceToPreset } from './presets.js';
 import { populateBookmarkFolderSelect } from './folders.js';
-import { buildStreamPanel } from './launch.js';
+import { buildStreamPanel, updateRenderedPanel } from './launch.js';
 import {
     initGridSession, updateGridSession, setGridSessionSilently, getSessionUrls,
     getSessionFolderMap, getSourceWorkspaceInfo, setSessionSource,
+    getSessionLayout,
     canUndoGridSession, undoGridSession,
     getSessionArrangement, setSessionArrangement, setSessionLayout,
     pushGridSessionCheckpoint,
@@ -379,6 +380,7 @@ function _swapSlotContents(slotIndexA, slotIndexB) {
 
     slotAEl.style.gridArea = arrangement[slotIndexA];
     slotBEl.style.gridArea = arrangement[slotIndexB];
+    _updateGridUndoButtonState();
 }
 
 /**
@@ -519,6 +521,46 @@ function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
     _updateGridUndoButtonState();
 }
 
+/** Restore an Undo snapshot without treating unaffected live panels as disposable DOM. */
+function _reconcileUndo(restored, ctx) {
+    const changedUrls = new Set(restored.changedUrlIndices);
+    const changedFolders = new Set(restored.changedFolderIndices);
+    const changedIndices = new Set([...changedUrls, ...changedFolders]);
+
+    changedIndices.forEach((index) => {
+        const slot = document.getElementById(SLOT_IDS[index]);
+        if (!slot) return;
+        let panel = slot.querySelector('.stream-panel');
+        if (!panel && changedUrls.has(index)) {
+            panel = buildStreamPanel(
+                restored.urls[index] || 'https://example.com',
+                index,
+                'stream-panel triple-fill',
+                '100%',
+                ctx
+            );
+            slot.appendChild(panel);
+        } else if (panel) {
+            updateRenderedPanel(panel, {
+                url: changedUrls.has(index) ? (restored.urls[index] || 'https://example.com') : undefined,
+                folder: changedFolders.has(index) ? (restored.folderMap[index] || '') : undefined,
+            });
+        }
+    });
+
+    if (restored.arrangementChanged) {
+        restored.arrangement.forEach((area, slotIndex) => {
+            const slotEl = document.getElementById(SLOT_IDS[slotIndex]);
+            if (slotEl) slotEl.style.gridArea = area;
+        });
+    }
+
+    const visibleSlots = (LAYOUT_POSITION_ORDER[_currentLayout] || [0, 1, 2]).length;
+    const active = restored.urls.slice(0, visibleSlots).filter(Boolean).length;
+    if (ctx.statusEl) ctx.statusEl.textContent = `${active} streams`;
+    _updateGridUndoButtonState();
+}
+
 /** Build the 🌐 Folder dropup list (matches .dropup-item / .dropup-count CSS in index3.html) */
 function _renderFolderDropup(folderDropupEl, ctx) {
     const db = getDatabaseStructure();
@@ -600,6 +642,7 @@ function _renderSaveSessionDropup(dropupEl, statusEl) {
 async function _handleSaveSessionAs(presetId, statusEl) {
     const urls = getSessionUrls();
     const folderMap = getSessionFolderMap();
+    const layout = getSessionLayout();
 
     if (statusEl) statusEl.textContent = 'Saving…';
 
@@ -607,6 +650,7 @@ async function _handleSaveSessionAs(presetId, statusEl) {
         panels: urls, // presets.js normalizes plain URL strings into url-type panels
         folderMap,
         lockState: {},
+        layout,
     });
 
     setSessionSource(presetId);
@@ -676,7 +720,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             updateGridSession(urls, getSessionFolderMap());
             setTargetUrls(urls);
         },
-        pushUndoCheckpoint: () => pushGridSessionCheckpoint(),
+        pushUndoCheckpoint: () => {
+            pushGridSessionCheckpoint();
+            _updateGridUndoButtonState();
+        },
     };
 
     // 🎬 toggle open/close for the master control bar
@@ -782,16 +829,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!restored) return;
             setTargetUrls(restored.urls);
             setUrlFolderMap(restored.folderMap);
-            _renderPanels(restored.urls, restored.folderMap, ctx, { skipUndoSnapshot: true });
-            // undoGridSession() already restored the session's arrangement; now
-            // reflect it on the slot elements. Without this, undoing a position
-            // swap would restore content but leave the swapped slots in place.
-            // _renderPanels only rebuilds panels inside slots — it never touches
-            // slot grid-area — so this must be applied explicitly, per slot.
-            restored.arrangement.forEach((area, slotIndex) => {
-                const slotEl = document.getElementById(SLOT_IDS[slotIndex]);
-                if (slotEl) slotEl.style.gridArea = area;
-            });
+            _reconcileUndo(restored, ctx);
         };
     }
     _updateGridUndoButtonState();

@@ -33,11 +33,11 @@
  * needs an explicit one-time migration step. Every NEW save writes `panels`
  * going forward.
  *
- * Presets are stored as an ARRAY, not five hardcoded keys — this is what
+ * Presets are stored as an ARRAY, not hardcoded keys — this is what
  * makes future work (more slots, reordering, duplicate, import/export)
  * additive instead of a rewrite. DEFAULT_PRESET_COUNT is the only place
- * "5" is hardcoded, and it only matters when bootstrapping a brand new
- * presets.json — an existing file's own length always wins.
+ * the count is defined. Older local/remote arrays are extended to that
+ * minimum without rewriting any existing entries.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -45,7 +45,7 @@ import { getPresetsStructure, setPresetsStructure } from './state.js';
 import { fetchPresetsSilently, fetchPresetsWithUI, pushPresetsToRemote } from './sync.js';
 import { normalizePanelsArray, isEmptyPanel } from './panels.js';
 
-export const DEFAULT_PRESET_COUNT = 5;
+export const DEFAULT_PRESET_COUNT = 9;
 
 /** A fresh, never-saved preset slot. */
 export function createEmptyPreset(id) {
@@ -71,6 +71,21 @@ export function createDefaultPresetsArray(count = DEFAULT_PRESET_COUNT) {
 }
 
 /**
+ * Preserve every supplied preset exactly while appending any missing IDs up
+ * to the current supported minimum. Arrays that are already complete are
+ * returned by reference, avoiding needless state churn or remote writes.
+ */
+export function ensureMinimumPresetCount(presets, count = DEFAULT_PRESET_COUNT) {
+    const source = Array.isArray(presets) ? presets : [];
+    const existingIds = new Set(source.map((preset) => Number(preset?.id)));
+    const missing = [];
+    for (let id = 1; id <= count; id += 1) {
+        if (!existingIds.has(id)) missing.push(createEmptyPreset(id));
+    }
+    return missing.length === 0 ? source : [...source, ...missing];
+}
+
+/**
  * Read a preset's panels, transparently upconverting legacy `urls: string[]`
  * data (anything saved before Phase 4A) into proper Panel objects. This is
  * the ONE function that should be used to read a preset's content — never
@@ -88,7 +103,10 @@ export function getPresetPanels(preset) {
  * falls back to a fresh default array so callers never need a null-check.
  */
 export function getPresets() {
-    return getPresetsStructure() || createDefaultPresetsArray();
+    const current = getPresetsStructure();
+    const normalized = ensureMinimumPresetCount(current || createDefaultPresetsArray());
+    if (normalized !== current) setPresetsStructure(normalized);
+    return normalized;
 }
 
 export function getPresetById(id) {
@@ -184,7 +202,9 @@ export async function loadPresetsSilently() {
     if (!ok && !getPresetsStructure()) {
         setPresetsStructure(createDefaultPresetsArray());
     }
-    return getPresets();
+    const normalized = ensureMinimumPresetCount(getPresetsStructure());
+    setPresetsStructure(normalized);
+    return normalized;
 }
 
 /** Load presets.json with alert feedback (e.g. a manual "refresh presets" action). */
@@ -193,7 +213,9 @@ export async function loadPresetsWithUI() {
     if (!ok && !getPresetsStructure()) {
         setPresetsStructure(createDefaultPresetsArray());
     }
-    return getPresets();
+    const normalized = ensureMinimumPresetCount(getPresetsStructure());
+    setPresetsStructure(normalized);
+    return normalized;
 }
 
 /**

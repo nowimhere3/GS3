@@ -13,7 +13,6 @@ import {
 import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
 import {
     updateDirectoryDropdown,
-    initFolderManagerDrawer,
     populateBookmarkFolderSelect,
     renderFolderManager,
 } from './folders.js';
@@ -21,8 +20,8 @@ import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { getPresets, getPresetSummary, loadPresetsSilently } from './presets.js';
 import { getActiveWorkspaceId, switchWorkspace, isLiveBuilder } from './workspace.js';
 import { initDropzone } from './parser.js';
-import { initGrid, renderInputRows } from './grid.js';
-import { initScrollEngine, stopScrolling, updateSpeedLabel } from './scroll.js';
+import { initGrid, renderInputRows, saveInputsToState } from './grid.js';
+import { initScrollEngine, stopScrolling } from './scroll.js';
 import { launchMatrix } from './launch.js';
 
 const MANUAL_DIRECTORY_OPTION = '<option value="manual">Manual Configuration Only (No Sync)</option>';
@@ -80,7 +79,6 @@ async function boot() {
     initBlacklistUI();
     renderBlacklistDisplay();
     initScrollEngine({ loopScreenEl });
-    updateSpeedLabel();
     console.log('[app] boot: checkpoint 3 — init modules done');
 
     // ── Frame height helper ───────────────────────────────────────────────────
@@ -169,7 +167,6 @@ async function boot() {
         const { token, repo } = _restoreGitInputsFromStorage(refreshFromDisk);
         console.log('[app] _restoreGitSyncState: token present?', !!token, 'repo present?', !!repo, 'repo value:', repo);
         if (!token || !repo) {
-            console.error('[app] _restoreGitSyncState: showing disconnected state — Store.get returned empty token/repo despite localStorage check. token:', token, 'repo:', repo);
             _showDisconnectedGitState();
             return;
         }
@@ -182,9 +179,6 @@ async function boot() {
     }
 
     // ── Folder manager ───────────────────────────────────────────────────────
-    initFolderManagerDrawer(dirDropdownEl, () => renderInputRows());
-    console.log('[app] boot: checkpoint 5 — folder manager drawer init');
-
     // ── Parser / dropzone ─────────────────────────────────────────────────────
     initDropzone(dropzoneEl, fileInputEl, {
         getDatabaseStructure,
@@ -209,7 +203,6 @@ async function boot() {
                 getFrameHeights,
                 openBookmarkModal,
                 stopScrolling,
-                updateSpeedLabel,
             });
         },
     });
@@ -233,6 +226,7 @@ async function boot() {
     // right source unambiguously (rather than re-reading Store at its own
     // boot, which could race if e.g. multiple tabs are open).
     document.getElementById('btn-launch-grid')?.addEventListener('click', () => {
+        saveInputsToState({ checkpoint: false });
         const workspaceId = getActiveWorkspaceId();
         window.location.href = `index3.html?workspace=${encodeURIComponent(workspaceId)}`;
     });

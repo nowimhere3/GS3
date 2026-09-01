@@ -17,7 +17,6 @@
  *     getFrameHeights,   // () => { landscape, portrait, spacerTopOn, ... }
  *     openBookmarkModal, // (url, starBtn) => void
  *     stopScrolling,     // () => void  — from scroll.js
- *     updateSpeedLabel,  // () => void  — from scroll.js
  *   }
  *
  * Each iframe panel contains:
@@ -35,6 +34,23 @@ import { Store } from './storage.js';
 import { getDatabaseStructure, setDatabaseStructure, getDatabaseSha, setDatabaseSha, getUrlFolderMap, setUrlFolderMap } from './state.js';
 import { isBlacklisted, addToBlacklist } from './blacklist.js';
 import { pushDatabaseToRemote } from './sync.js';
+
+/**
+ * Surgically synchronize one already-rendered panel. Omitting url guarantees
+ * the iframe document is untouched, which is required for metadata-only Undo.
+ */
+export function updateRenderedPanel(panel, { url, folder } = {}) {
+    if (!panel) return;
+    const iframe = panel.querySelector('iframe');
+    const input = panel.querySelector('.hotswap-input');
+    if (!iframe) return;
+    if (url !== undefined) {
+        iframe.src = url;
+        iframe.setAttribute('data-last-src', url);
+        if (input) input.value = url;
+    }
+    if (folder !== undefined) iframe.setAttribute('data-source-folder', folder || '');
+}
 
 // Canonical list of every hotswap-overlay action. Drives both the tray
 // (Overlay Button Visibility in Settings) and the Quick Action shortcut slots.
@@ -102,10 +118,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
      * setup-screen's own auto-save only covers its own inputs, not an
      * already-launched panel like this one. */
     const setIframeUrl = (newUrl, newFolder) => {
-        iframe.src = newUrl;
-        iframe.setAttribute('data-last-src', newUrl);
-        if (newFolder !== undefined) iframe.setAttribute('data-source-folder', newFolder || '');
-        if (inputField) inputField.value = newUrl;
+        updateRenderedPanel(panel, { url: newUrl, folder: newFolder });
 
         if (typeof ctx.onPanelContentChanged === 'function') {
             ctx.onPanelContentChanged(index, newUrl, newFolder);
@@ -236,6 +249,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
                 // no available URL right now — same as before, just funneled
                 // through one path instead of a direct attribute write plus
                 // a separate, session-unaware setUrlFolderMap() call.
+                if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
                 setIframeUrl(newUrl || currentUrl, folderName);
                 folderRow.classList.remove('open');
                 folderBtn.classList.remove('active');
@@ -258,6 +272,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const processHotswap = () => {
         const newUrl = inputField.value.trim();
         if (newUrl.length > 0) {
+            if (typeof ctx.pushUndoCheckpoint === 'function') ctx.pushUndoCheckpoint();
             setIframeUrl(newUrl);
             urlRow.classList.remove('open');
             toggleBtn.classList.remove('active');
@@ -528,5 +543,4 @@ export function launchMatrix(urls, ctx) {
     }
 
     if (ctx.statusEl)      ctx.statusEl.textContent = `${filtered.length} streams`;
-    if (ctx.updateSpeedLabel) ctx.updateSpeedLabel();
 }

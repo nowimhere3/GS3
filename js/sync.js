@@ -20,21 +20,23 @@
  *
  * Dependencies:
  *   Store          → reads gitToken, gitRepo
- *   getDatabaseStructure / setDatabaseStructure / getDatabaseSha / setDatabaseSha
+ *   getDatabaseStructure / setDatabaseStructure / setDatabaseSha
  *   getPresetsStructure / setPresetsStructure / getPresetsSha / setPresetsSha
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { Store } from './storage.js';
 import {
-    getDatabaseStructure, setDatabaseStructure,
-    getDatabaseSha, setDatabaseSha,
+    getDatabaseStructure, setDatabaseStructure, setDatabaseSha,
     getPresetsStructure, setPresetsStructure,
     getPresetsSha, setPresetsSha,
 } from './state.js';
 
 const LINKS_FILE   = 'links.json';
+const LINKS_INDEX_FILE = 'links-index.json';
 const PRESETS_FILE = 'presets.json';
+const CASSETTE_MAX_BYTES = 950 * 1024;
+let _linksIndexSha = null;
 
 /** Encode a JS value to base64 for GitHub API */
 function _encodeContent(value) {
@@ -50,6 +52,74 @@ function _decodeContent(base64Content) {
 function _apiUrl(filename) {
     const repo = Store.get('gitRepo');
     return `https://api.github.com/repos/${repo}/contents/${filename}`;
+}
+
+function _packDatabaseCassettes(db) {
+    const cassettes = [];
+    let current = {};
+    for (const [key, value] of Object.entries(db)) {
+        const record = { [key]: value };
+        if (new TextEncoder().encode(JSON.stringify(record, null, 2)).length > CASSETTE_MAX_BYTES) {
+            throw new Error(`Folder "${key}" is too large for one cassette; no data was written.`);
+        }
+        const candidate = { ...current, [key]: value };
+        if (Object.keys(current).length > 0 && new TextEncoder().encode(JSON.stringify(candidate, null, 2)).length > CASSETTE_MAX_BYTES) {
+            cassettes.push(current);
+            current = record;
+        } else {
+            current = candidate;
+        }
+    }
+    if (Object.keys(current).length > 0 || cassettes.length === 0) cassettes.push(current);
+    return cassettes;
+}
+
+async function _putContentsFile(filename, value, message, sha = null) {
+    const body = { message, content: _encodeContent(value) };
+    if (sha) body.sha = sha;
+    const res = await fetch(_apiUrl(filename), {
+        method: 'PUT', headers: _headers(), body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`GitHub rejected ${filename} (${res.status} ${res.statusText})`);
+    return res.json();
+}
+
+async function _loadIndexShaIfNeeded() {
+    if (_linksIndexSha) return;
+    const res = await fetch(_apiUrl(LINKS_INDEX_FILE), { headers: _headers(), cache: 'no-store' });
+    if (res.ok) {
+        _linksIndexSha = (await res.json()).sha;
+    } else if (res.status !== 404) {
+        throw new Error(`Could not inspect ${LINKS_INDEX_FILE} before publishing.`);
+    }
+}
+
+async function _fetchDatabaseFromRemote() {
+    const indexRes = await fetch(_apiUrl(LINKS_INDEX_FILE), { headers: _headers(), cache: 'no-store' });
+    if (indexRes.ok) {
+        const indexData = await indexRes.json();
+        const index = _decodeContent(indexData.content);
+        if (index.version !== 1 || !Array.isArray(index.cassettes)) throw new Error('Invalid links cassette index.');
+        const parts = await Promise.all(index.cassettes.map(async (filename) => {
+            const res = await fetch(_apiUrl(filename), { headers: _headers(), cache: 'no-store' });
+            if (!res.ok) throw new Error(`Missing cassette ${filename}.`);
+            return _decodeContent((await res.json()).content);
+        }));
+        const db = {};
+        parts.forEach((part) => Object.entries(part).forEach(([key, value]) => { db[key] = value; }));
+        _linksIndexSha = indexData.sha;
+        setDatabaseSha(indexData.sha);
+        return db;
+    }
+    if (indexRes.status !== 404) throw new Error(`Could not read ${LINKS_INDEX_FILE}.`);
+
+    // Backward compatibility: repositories that have not migrated yet still
+    // load their single legacy links.json unchanged.
+    const legacyRes = await fetch(_apiUrl(LINKS_FILE), { headers: _headers(), cache: 'no-store' });
+    if (!legacyRes.ok) throw new Error(`Could not read ${LINKS_FILE}.`);
+    const legacy = await legacyRes.json();
+    setDatabaseSha(legacy.sha);
+    return _decodeContent(legacy.content);
 }
 
 /** Build auth headers */
@@ -73,28 +143,29 @@ export async function pushDatabaseToRemote(commitMessage, silent = false) {
 
     if (!token || !repo || !db) return;
 
-    const updatedContent = _encodeContent(db);
-
     try {
-        const res = await fetch(_apiUrl(LINKS_FILE), {
-            method: 'PUT',
-            headers: _headers(),
-            body: JSON.stringify({
-                message: commitMessage,
-                content: updatedContent,
-                sha: getDatabaseSha(),
-            }),
-        });
+        await _loadIndexShaIfNeeded();
+        const cassettes = _packDatabaseCassettes(db);
+        const generation = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const filenames = cassettes.map((_, index) =>
+            `cassette-${generation}-${String(index + 1).padStart(3, '0')}.json`
+        );
 
-        if (res.ok) {
-            const resData = await res.json();
-            setDatabaseSha(resData.content.sha);
-            if (!silent) alert('Cloud Repository synchronized successfully! Links integrated.');
-        } else {
-            throw new Error('Push rejected. Double-check branch states or credential authorizations.');
+        // Immutable generation files are written first. The live index is
+        // updated only after every cassette succeeds, so readers can never be
+        // directed at a partial generation.
+        for (let index = 0; index < cassettes.length; index += 1) {
+            await _putContentsFile(filenames[index], cassettes[index], `${commitMessage} (cassette ${index + 1}/${cassettes.length})`);
         }
+        const index = { version: 1, generation, cassettes: filenames };
+        const result = await _putContentsFile(LINKS_INDEX_FILE, index, `${commitMessage} (publish cassette index)`, _linksIndexSha);
+        _linksIndexSha = result.content.sha;
+        setDatabaseSha(result.content.sha);
+        if (!silent) alert('Cloud Repository synchronized successfully! Links integrated.');
+        return true;
     } catch (err) {
         alert('Cloud Synchronization failed: ' + err.message);
+        return false;
     }
 }
 
@@ -110,15 +181,9 @@ export async function fetchDatabaseSilently(updateDropdownFn) {
     if (!token || !repo) return false;
 
     try {
-        const res = await fetch(_apiUrl(LINKS_FILE), { headers: _headers(), cache: 'no-store' });
-        if (res.ok) {
-            const data = await res.json();
-            setDatabaseSha(data.sha);
-            setDatabaseStructure(_decodeContent(data.content));
-            if (typeof updateDropdownFn === 'function') updateDropdownFn();
-            return true;
-        }
-        console.error('[sync] fetchDatabaseSilently: non-OK response', res.status, res.statusText);
+        setDatabaseStructure(await _fetchDatabaseFromRemote());
+        if (typeof updateDropdownFn === 'function') updateDropdownFn();
+        return true;
     } catch (e) {
         console.error('[sync] fetchDatabaseSilently failed:', e);
     }
@@ -142,12 +207,7 @@ export async function fetchDatabaseWithUI(updateDropdownFn) {
     }
 
     try {
-        const res = await fetch(_apiUrl(LINKS_FILE), { headers: _headers(), cache: 'no-store' });
-        if (!res.ok) throw new Error('Could not find or access links.json in root repository area.');
-
-        const data = await res.json();
-        setDatabaseSha(data.sha);
-        setDatabaseStructure(_decodeContent(data.content));
+        setDatabaseStructure(await _fetchDatabaseFromRemote());
         if (typeof updateDropdownFn === 'function') updateDropdownFn();
         alert('Database synchronized successfully! Directory pools populated.');
         return true;

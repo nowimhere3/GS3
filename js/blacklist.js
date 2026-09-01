@@ -112,7 +112,7 @@ export function clearBlacklist() {
 
 /**
  * Re-render the #blacklist-display element with the current blacklist.
- * Each entry gets an inline ✕ button that calls removeFromBlacklist().
+ * Each entry gets a ✕ button wired without compiling user data as code.
  */
 export function renderBlacklistDisplay() {
     const display = document.getElementById('blacklist-display');
@@ -123,11 +123,21 @@ export function renderBlacklistDisplay() {
         return;
     }
 
-    display.innerHTML = _blacklist.map(domain =>
-        `<span class="blacklist-tag">${domain}` +
-        `<button class="bl-remove-btn" onclick="removeFromBlacklist('${domain}')" title="Unblock">✕</button>` +
-        `</span>`
-    ).join('');
+    display.replaceChildren();
+    _blacklist.forEach((domain) => {
+        const tag = document.createElement('span');
+        tag.className = 'blacklist-tag';
+        tag.append(document.createTextNode(domain));
+
+        const button = document.createElement('button');
+        button.className = 'bl-remove-btn';
+        button.title = 'Unblock';
+        button.textContent = '✕';
+        button.addEventListener('click', () => removeFromBlacklist(domain));
+
+        tag.appendChild(button);
+        display.appendChild(tag);
+    });
 }
 
 /**

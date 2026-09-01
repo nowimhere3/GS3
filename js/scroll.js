@@ -12,7 +12,6 @@
  *   jumpPrev()              — snap to previous panel
  *   increaseSpeed()         — +0.05 speed
  *   decreaseSpeed()         — -0.05 speed
- *   updateSpeedLabel()      — refresh #speed-label text
  *
  * Why the scroll loop is performance-sensitive:
  *   smoothScrollLoop() runs inside requestAnimationFrame — up to 60 calls/sec.
@@ -38,7 +37,6 @@ let _accurateYPosition = 0;
 
 // DOM refs — set by initScrollEngine
 let _toggleBtn    = null;
-let _speedLabel   = null;
 let _loopScreenEl = null;
 
 // ── Core loop ─────────────────────────────────────────────────────────────────
@@ -119,18 +117,12 @@ export function increaseSpeed() {
     _scrollSpeed = Math.min(15, _scrollSpeed + 0.05);
     setScrollSpeed(_scrollSpeed);
     Store.set('scrollSpeed', _scrollSpeed);
-    updateSpeedLabel();
 }
 
 export function decreaseSpeed() {
     _scrollSpeed = Math.max(0.05, _scrollSpeed - 0.05);
     setScrollSpeed(_scrollSpeed);
     Store.set('scrollSpeed', _scrollSpeed);
-    updateSpeedLabel();
-}
-
-export function updateSpeedLabel() {
-    if (_speedLabel) _speedLabel.textContent = `Speed: ${_scrollSpeed.toFixed(2)}x`;
 }
 
 export function getCurrentSpeed() {
@@ -148,12 +140,10 @@ export function getCurrentSpeed() {
  */
 export function initScrollEngine({ loopScreenEl } = {}) {
     _toggleBtn    = document.getElementById('toggle');
-    _speedLabel   = document.getElementById('speed-label');
     _loopScreenEl = loopScreenEl || document.getElementById('loop-screen');
 
     // Restore persisted speed
     _scrollSpeed = getScrollSpeed();
-    updateSpeedLabel();
 
     // Button wiring
     if (_toggleBtn) {

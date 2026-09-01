@@ -206,6 +206,12 @@ function get(keyName) {
     return value;
 }
 
+/** Return whether a key has been explicitly persisted (ignoring defaults). */
+function has(keyName) {
+    const rawKey = KEYS[keyName];
+    return rawKey ? localStorage.getItem(rawKey) !== null : false;
+}
+
 /**
  * Store.set(keyName, value)
  * Write a value. Updates cache immediately, writes to disk.
@@ -263,4 +269,4 @@ function dump() {
     console.groupEnd();
 }
 
-export const Store = { get, set, remove, warmCache, invalidate, dump, KEYS };
+export const Store = { get, has, set, remove, warmCache, invalidate, dump, KEYS };

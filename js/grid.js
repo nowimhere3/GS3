@@ -57,8 +57,8 @@ let _launchCallback = null;  // called with filtered URLs when Launch is clicked
  * used by saveInputsToState() and by the drag-reorder handler below, so
  * neither one can silently bypass workspace-aware sync (drag-reorder used to,
  * before this refactor). */
-function _persistAndNotify(urls, folderMap, lockState) {
-    pushUndoSnapshot(); // capture state as it was BEFORE this change
+function _persistAndNotify(urls, folderMap, lockState, { checkpoint = true } = {}) {
+    if (checkpoint) pushUndoSnapshot(); // capture state as it was BEFORE this change
     Store.set('matrixUrls', urls);
     Store.set('folderMap', folderMap);
     Store.set('lockState', lockState);
@@ -73,7 +73,7 @@ function _updateUndoButtonState() {
     if (btn) btn.disabled = !canUndo();
 }
 
-export function saveInputsToState() {
+export function saveInputsToState({ checkpoint = true } = {}) {
     const inputs  = document.querySelectorAll('.url-grid-field');
     const urls    = [];
     inputs.forEach(input => urls.push(input.value.trim()));
@@ -83,7 +83,7 @@ export function saveInputsToState() {
 
     setTargetUrls(urls);
     Store.set('portraitMode', _portraitToggle?.checked ?? false);
-    _persistAndNotify(urls, folderMap, lockState);
+    _persistAndNotify(urls, folderMap, lockState, { checkpoint });
 }
 
 // ── Drag-drop helpers ─────────────────────────────────────────────────────────
@@ -164,11 +164,10 @@ function _applyDragEvents(row, idx) {
         setRowLockState(newLockState);
         setActiveDragIdx(-1);
 
-        // Save directly — do NOT call saveInputsToState() here because
-        // it re-reads the DOM (still in old order) and overwrites the reordered array
-        Store.set('matrixUrls', urls);
-        Store.set('lockState', newLockState);
-        Store.set('folderMap', newFolderMap);
+        // Persist the already-reordered arrays directly through the workspace
+        // funnel. saveInputsToState() is intentionally not used because the
+        // DOM is still in its old order until renderInputRows() below.
+        _persistAndNotify(urls, newFolderMap, newLockState);
 
         renderInputRows();
     });
@@ -218,6 +217,7 @@ function _makeLockBtn(idx, row) {
         current[idx]  = next;
         setRowLockState(current);
         applyState(next);
+        _persistAndNotify(getTargetUrls(), getUrlFolderMap(), current);
     };
 
     return btn;
@@ -262,7 +262,7 @@ export function renderInputRows() {
             removeBtn.textContent = '✕';
             removeBtn.onclick = (e) => {
                 e.stopPropagation();
-                saveInputsToState();
+                saveInputsToState({ checkpoint: false });
                 const urls  = getTargetUrls();
                 const fmap  = getUrlFolderMap();
                 const lmap  = getRowLockState();
@@ -330,6 +330,9 @@ export function renderInputRows() {
             input.dataset.idx = idx;
             input.draggable   = false;
             if (lockState === 1) input.readOnly = true;
+            input.addEventListener('input', () => {
+                saveInputsToState({ checkpoint: false });
+            });
 
             const lockBtn = _makeLockBtn(idx, row);
 
@@ -337,7 +340,7 @@ export function renderInputRows() {
             removeBtn.className   = 'btn btn-remove';
             removeBtn.textContent = '✕';
             removeBtn.onclick = () => {
-                saveInputsToState();
+                saveInputsToState({ checkpoint: false });
                 const urls = getTargetUrls();
                 const lmap = getRowLockState();
                 urls.splice(idx, 1);
@@ -430,7 +433,7 @@ export function initGrid({ containerEl, dirDropdown, portraitToggle, launchCallb
 
     // Add slot
     document.getElementById('add-field-btn')?.addEventListener('click', () => {
-        saveInputsToState(); // commit anything already typed, and mark this as the undo point to return to
+        saveInputsToState({ checkpoint: false }); // commit anything already typed
         const urls = getTargetUrls();
         urls.push('');
         setTargetUrls(urls);
@@ -466,15 +469,6 @@ export function initGrid({ containerEl, dirDropdown, portraitToggle, launchCallb
         const active = getTargetUrls().filter(u => u.length > 0);
         if (active.length === 0) { alert('Please provide at least one valid stream destination.'); return; }
         if (typeof _launchCallback === 'function') _launchCallback(active);
-    });
-
-    // Solo mode button — navigate to index2.html with first URL
-    document.getElementById('btn-solo-mode')?.addEventListener('click', () => {
-        saveInputsToState();
-        const active = getTargetUrls().filter(u => u.length > 0);
-        const firstUrl = active.length > 0 ? active[0] : '';
-        const param = firstUrl ? `?startUrl=${encodeURIComponent(firstUrl)}` : '';
-        window.location.href = `index2.html${param}`;
     });
 
     // Main folder dropdown — fill slots from selected folder

@@ -67,6 +67,7 @@ function _readSourceWorkspaceIdFromUrl() {
  */
 export function initGridSession(defaultLayout = 'lefttall') {
     const workspaceId = _readSourceWorkspaceIdFromUrl();
+    const storedLayout = Store.has('tripleLayout') ? Store.get('tripleLayout') : null;
 
     if (workspaceId === 'live') {
         _sourceType = 'live';
@@ -77,14 +78,14 @@ export function initGridSession(defaultLayout = 'lefttall') {
         // back to it afterward.
         _panels = normalizePanelsArray(Store.get('matrixUrls'));
         _folderMap = { ...(Store.get('folderMap') || {}) };
-        _layout = Store.get('tripleLayout') || defaultLayout;
+        _layout = storedLayout || defaultLayout;
     } else {
         _sourceType = 'preset';
         _sourceId = Number(workspaceId);
         const preset = getPresetById(_sourceId);
         _panels = getPresetPanels(preset); // transparently upconverts legacy `urls` data
         _folderMap = { ...(preset?.folderMap || {}) };
-        _layout = preset?.layout || Store.get('tripleLayout') || defaultLayout;
+        _layout = preset?.layout || storedLayout || defaultLayout;
     }
 
     _arrangement = [...IDENTITY_ARRANGEMENT];
@@ -202,6 +203,17 @@ export function undoGridSession() {
     const snapshot = _undoStack.pop();
     if (!snapshot) return null;
 
+    const currentUrls = _panels.map(getUrlPanelSource);
+    const restoredUrls = snapshot.panels.map(getUrlPanelSource);
+    const maxPanelCount = Math.max(currentUrls.length, restoredUrls.length);
+    const changedUrlIndices = [];
+    const changedFolderIndices = [];
+    for (let index = 0; index < maxPanelCount; index += 1) {
+        if ((currentUrls[index] || '') !== (restoredUrls[index] || '')) changedUrlIndices.push(index);
+        if ((_folderMap[index] || null) !== (snapshot.folderMap[index] || null)) changedFolderIndices.push(index);
+    }
+    const arrangementChanged = _arrangement.some((area, index) => area !== snapshot.arrangement[index]);
+
     _panels = snapshot.panels;
     _folderMap = snapshot.folderMap;
     _arrangement = snapshot.arrangement;
@@ -210,5 +222,8 @@ export function undoGridSession() {
         urls: _panels.map(getUrlPanelSource),
         folderMap: { ..._folderMap },
         arrangement: [..._arrangement],
+        changedUrlIndices,
+        changedFolderIndices,
+        arrangementChanged,
     };
 }

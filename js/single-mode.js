@@ -55,6 +55,10 @@ async function boot() {
 
     if (!db || Object.keys(db).length === 0) {
         statusEl.textContent = 'No database loaded. Connect GitHub to get started.';
+        [btnFolder, btnFavorite, btnPurge, btnDeleteReplace, btnShuffle, btnShuffleAll, btnToggleMaster]
+            .forEach((button) => {
+                if (button) button.disabled = true;
+            });
         return;
     }
 
