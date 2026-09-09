@@ -374,3 +374,10 @@ and Save Session act on.
 
 Where a user browsed inside that content
 belongs to the navigation layer, not to the session.
+
+## Nested Runtime launch handoff
+
+Ordinary in-content iframe navigation does not mutate Runtime Session. An
+explicit GS3 nested Runtime launch is different: Design-Time sends semantic
+intent to its parent Runtime, and the parent validates and records a new Panel
+content assignment. This is a host-level Runtime action, not inferred browsing.

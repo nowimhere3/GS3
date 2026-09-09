@@ -24,7 +24,7 @@ import {
 } from './workspace.js';
 import { initGrid, renderInputRows, saveInputsToState } from './grid.js';
 import { initScrollEngine, stopScrolling } from './scroll.js';
-import { launchMatrix } from './launch.js';
+import { launchMatrix, RUNTIME_LAUNCH_MESSAGE_SOURCE } from './launch.js';
 
 const MANUAL_DIRECTORY_OPTION = '<option value="manual">Manual Configuration Only (No Sync)</option>';
 
@@ -211,14 +211,34 @@ async function boot() {
         };
     }
 
-    // 🧩 Launch Grid — pass along exactly which workspace was active AT CLICK
-    // TIME via a URL param, so index3.html's working copy is tied to the
-    // right source unambiguously (rather than re-reading Store at its own
-    // boot, which could race if e.g. multiple tabs are open).
+    // 🧩 Launch Grid — top-level Design-Time owns navigation. When hosted by a
+    // Runtime Panel, it sends semantic intent and the parent assigns content.
+    // Neither branch depends on the parent's [L2][L1] command-target selector:
+    // this is a host-level "replace the Panel that hosts me" request, answered
+    // by identifying the sender's frame, never by which Runtime object the
+    // Master Bar currently has selected as its command target.
     document.getElementById('btn-launch-grid')?.addEventListener('click', () => {
-        saveInputsToState({ checkpoint: false });
-        flushPendingWorkspaceSync(); // do not abandon the pending mirror to a dying debounce
+        // Local bookkeeping (Builder autosave, the debounced preset mirror) is
+        // a courtesy, not the reason this button exists. A failure in either
+        // must never silently swallow the actual launch intent below it — that
+        // would look to the user like "Launch Grid does nothing," with no
+        // visible error to explain why.
+        try {
+            saveInputsToState({ checkpoint: false });
+            flushPendingWorkspaceSync(); // do not abandon the pending mirror to a dying debounce
+        } catch (err) {
+            console.error('[Launch Grid] local save/sync failed; launching anyway', err);
+        }
         const workspaceId = getActiveWorkspaceId();
+        if (window.parent !== window) {
+            window.parent.postMessage({
+                source: RUNTIME_LAUNCH_MESSAGE_SOURCE,
+                action: 'launchRuntime',
+                kind: 'grid',
+                workspace: workspaceId,
+            }, window.location.origin);
+            return;
+        }
         window.location.href = `index3.html?workspace=${encodeURIComponent(workspaceId)}`;
     });
 

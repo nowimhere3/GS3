@@ -4,6 +4,12 @@ This document defines the project's core architectural language.
 
 These definitions should remain stable over time.
 
+## Position shorthand
+
+`P1`, `P2`, `P3`, and `P4` mean Fixed Position 1–4. They are presentation
+addresses, never permanent Panel identities. Use “Panel currently at P1” when
+both facts need to be named.
+
 ---
 
 # Workspace
@@ -227,13 +233,14 @@ Design-Time never performs autonomous behavior.
 
 A page responsible for executing a Runtime.
 
-Current executors:
+Canonical executor family:
 
-- index.html (Stream Runtime)
-- index2.html (Solo Runtime)
-- index3.html (Grid Runtime)
+- index.html = Workspace / Design-Time
+- index1.html = Stream Runtime (future; not implemented)
+- index2.html = Solo Runtime
+- index3.html = Grid Runtime
 
-Long-term these should become sibling runtimes.
+The assignment-time executor registry distinguishes runtime from design-time. Stream extraction is deferred; current launch navigation still targets index.html.
 
 ---
 
@@ -250,6 +257,8 @@ Layer 1 establishes the primary execution environment.
 A Runtime executing inside another Runtime.
 
 Layer 2 enables nested execution and Runtime composition.
+
+Eligibility is declared by Panel content metadata in Runtime Session: an explicit Workspace Panel or an assigned Runtime executor carrying options.runtime.layer = 2. Ordinary URL resemblance does not declare Layer 2. Declaration is not runtime confirmation; a cooperative confirmation handshake is deferred.
 
 Only Layer 2 objects participate in Runtime automation.
 

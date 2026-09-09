@@ -1,3 +1,4 @@
+import { getPanelRuntimeLayer } from './panels.js';
 /**
  * launch.js — Stream Loop Launchpad
  * ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
 import {
     getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
     getVisibleTopDeepActions, getTopShortcutCount,
-    isLayerTwoUrl, LAYER_1, LAYER_2, CHROME_RETRACT_DELAY_MS,
+    LAYER_1, LAYER_2, CHROME_RETRACT_DELAY_MS,
     isEligibleFor, SURFACES,
 } from './hotswap-chrome.js';
 
@@ -92,7 +93,7 @@ export function updatePanelActionAvailability(panel) {
     const iframe = panel?.querySelector('iframe');
     if (!iframe) return;
     const aimedAtLayerTwo = panel.dataset.layerScope === LAYER_2
-        && panel.querySelector('.hotswap-layer-selector')?.hidden === false;
+        && getPanelRuntimeLayer(panel.getPanelIdentity?.()) === 2;
     const folder = iframe.getAttribute('data-source-folder') || '';
     const db = getDatabaseStructure();
     const shuffleEnabled = aimedAtLayerTwo || Boolean(folder && db && Object.hasOwn(db, folder));
@@ -189,10 +190,13 @@ export const HOTSWAP_ACTIONS = [
  */
 /**
  * The parent -> Layer 2 message contract. Only OUR OWN runtime executor pages
- * are ever addressed (isLayerTwoUrl proves same-origin), and the message is
+ * are addressed through declared Panel identity, and the message is
  * posted with an explicit same-origin target, never '*'.
  */
 export const LAYER_MESSAGE_SOURCE = 'gs3-layer-scope';
+
+/** Child Design-Time intent: the host Runtime owns the resulting assignment. */
+export const RUNTIME_LAUNCH_MESSAGE_SOURCE = 'gs3-runtime-launch';
 
 /**
  * Actions that mean something different when aimed at Layer 2, and can
@@ -239,7 +243,7 @@ export function refreshPanelLayerScope(panel) {
     const selector = panel.querySelector('.hotswap-layer-selector');
     const iframe = panel.querySelector('iframe');
     if (!selector || !iframe) return;
-    const available = isLayerTwoUrl(iframe.getAttribute('data-last-src') || '');
+    const available = (getPanelRuntimeLayer(panel.getPanelIdentity?.()) === 2);
     selector.hidden = !available;
     // `layerScope` is a PREFERENCE, not a live fact: it is never overwritten
     // just because Layer 2 is currently absent. Forcing it to L1 while there is
@@ -263,7 +267,7 @@ export function updatePanelHistoryButtons(panel, { canUndo, canRedo } = {}) {
     // hides a legitimate action. The forwarded request is always well-formed;
     // the nested runtime decides what it can do with it.
     const aimedAtLayerTwo = panel.dataset.layerScope === LAYER_2
-        && panel.querySelector('.hotswap-layer-selector')?.hidden === false;
+        && getPanelRuntimeLayer(panel.getPanelIdentity?.()) === 2;
     const set = (key, className, enabled) => {
         if (enabled === undefined) return;
         const trayBtn = panel.querySelector(`.${className}`);
@@ -292,6 +296,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // Slot index, never Position — a panel keeps its browsing history when it
     // moves to another Position.
     panel.dataset.slotIndex = String(index);
+    panel.getPanelIdentity = () => ctx.getPanelIdentity?.(index);
 
     // ── iframe ───────────────────────────────────────────────────────────────
     const iframe = document.createElement('iframe');
@@ -338,8 +343,6 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
      * setup-screen's own auto-save only covers its own inputs, not an
      * already-launched panel like this one. */
     const setIframeUrl = (newUrl, newFolder) => {
-        updateRenderedPanel(panel, { url: newUrl, folder: newFolder });
-
         if (typeof ctx.onPanelContentChanged === 'function') {
             ctx.onPanelContentChanged(index, newUrl, newFolder);
         } else {
@@ -350,6 +353,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
                 setUrlFolderMap({ ...getUrlFolderMap(), [index]: newFolder });
             }
         }
+        updateRenderedPanel(panel, { url: newUrl, folder: newFolder });
     };
 
     // ── Overlay HTML ─────────────────────────────────────────────────────────
@@ -1084,14 +1088,13 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
 
     /**
      * Forward an action into the nested runtime instead of acting on this
-     * panel. Same-origin by construction — isLayerTwoUrl() only ever matches
-     * our own executor pages — so the message is posted to our own origin and
-     * never to arbitrary third-party content.
+     * panel. Session Panel identity supplies eligibility; messages always use
+     * our explicit origin, never an arbitrary third-party target.
      * Returns true when the action was handed to Layer 2.
      */
     const dispatchToLayerTwo = (key) => {
         if (panel.dataset.layerScope !== LAYER_2) return false;
-        if (!isLayerTwoUrl(iframe.getAttribute('data-last-src') || '')) return false;
+        if (getPanelRuntimeLayer(panel.getPanelIdentity?.()) !== 2) return false;
         if (!LAYER_SCOPED_ACTIONS.has(key)) return false; // see LAYER_SCOPED_ACTIONS
         try {
             iframe.contentWindow?.postMessage(

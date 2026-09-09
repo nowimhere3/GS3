@@ -8,6 +8,59 @@ Runway top is derived from the website's current top plus 1.75 toolbar heights. 
 
 These are architectural rules.
 
+## Bottom Runtime Shell geometry
+
+Closed means completely outside the viewport, independent of rendered height,
+wrapped rows, zoom, or future controls. The Runtime shell reserves the actual
+rendered Orchestration Dock width through its one canonical measurement; no
+other surface may guess that width. Status participates in shell layout and
+never owns an independent viewport edge.
+
+Stage B keeps Grid's Shuffle, Shuffle All, Undo, and Redo structurally
+reachable. Grid layout shortcuts are a preference over the canonical eight
+layout vocabulary (1-4 visible, default 2); visible slots never reshuffle
+merely because another layout becomes active. Layout overflow and general
+control overflow are separate gateways, and the layout gateway stays DOM- and
+visually-adjacent to the visible shortcuts — never drifting toward the fixed
+Dock or general overflow. A layout shortcut, and the gateway's own
+active-overflow state, render the SAME readable mini-floorplan grammar the
+permanent layout picker has always used — never an abstract single glyph, and
+never a second icon system. Grid and Solo share this one shell renderer but
+declare different action relevance (Folder is contextual in Grid, structural
+in Solo; layouts exist only in Grid) — a shared shell does not mean identical
+controls.
+
+B.1 breadcrumb — click-target correctness: any Chrome control whose content
+can become a nested element (an icon `<span>`, not a plain text glyph) must
+have its outside-click dismissal test containment (`btn.contains(event.target)`),
+never strict reference equality (`event.target !== btn`). A real pointer click
+lands on the topmost element under the cursor, which is the child, not
+necessarily the button reference a handler was written against.
+
+Settings reuses this same mini-floorplan grammar for its Grid Layout Order
+rows — the icon is the primary recognition cue, a human-readable title (the
+canonical registry's own `title`, not a Settings-only vocabulary) is the
+supporting label, and the raw internal layout id is never the user-facing
+text. One layout registry (`js/grid-layouts.js`), reused by every consumer
+that needs to show a layout to a person.
+
+The [L2][L1] Layer target lives in its own central shell region, not inside
+the right-side layout/Dock working cluster — see 011-HOTSWAP-CHROME.md § The
+Layer target is a central conductor control.
+
+A nested Grid Runtime remains a fully capable Grid Runtime. Nesting, or an
+iframe viewport narrower than the small-screen breakpoint, must never by
+itself disable internal layout/resizing capability — a Panel's SIZE is not a
+device class. A genuinely narrow TOP-LEVEL viewport still gets the
+small-screen fallback; only the nested case is excluded from it. See
+011-HOTSWAP-CHROME.md § Nested Runtime geometry is hierarchy, not duplicated
+Chrome.
+
+Mirrored layout counterparts (Left Tall <-> Right Tall) preserve each Panel's
+visual role (tall / top-short / bottom-short) across the switch rather than
+blindly preserving physical slot occupancy — see 007-PANEL-IDENTITY.md §
+Mirrored layout transitions.
+
 They are expected to remain true unless intentionally redesigned.
 
 Features should conform to these rules.
@@ -252,6 +305,10 @@ See docs/010-PANEL-NAVIGATION.md.
 ---
 
 # Honest Capability
+
+## Layer Identity
+
+A Panel hosts a Layer 2 Runtime only when the Runtime Session recorded that GS3 assigned one, or the Panel is an explicit Workspace Panel. Resemblance is never evidence. No fallback or projection may create Layer identity that was not assigned. A lossy compatibility projection may render state; it may never decide state. Position changes never fabricate or destroy Layer identity.
 
 The Runtime never pretends to observe what the browser does not expose.
 

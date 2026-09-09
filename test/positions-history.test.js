@@ -929,18 +929,23 @@ test('exactly two opacity preferences, clamped and persisted', async () => {
     assert.deepEqual(chrome.getChromeOpacity(), { resting: 100, hover: 0 });
 });
 
-test('Layer 2 is recognised only for our own runtime pages, same-origin', async () => {
-    const chrome = await freshChrome();
-    assert.equal(chrome.isLayerTwoUrl('index3.html'), true);
-    assert.equal(chrome.isLayerTwoUrl('https://host.test/index.html'), true);
-    assert.equal(chrome.isLayerTwoUrl('/index2.html?workspace=2'), true);
-
-    assert.equal(chrome.isLayerTwoUrl('https://example.com/index3.html'), false,
-        'a third-party page that merely shares a filename is not our runtime');
-    assert.equal(chrome.isLayerTwoUrl('https://host.test/other.html'), false);
-    assert.equal(chrome.isLayerTwoUrl(''), false);
-    assert.equal(chrome.isLayerTwoUrl(null), false);
-    assert.equal(chrome.isLayerTwoUrl('not a url at all'), false, 'never throws on junk');
+test('executor classifier rejects fabricated identity and derives semantics from its registry', async () => {
+    const { classifyRuntimeExecutorUrl: classify, RUNTIME_EXECUTORS } = await freshChrome();
+    const negatives = ['/', './', '../', '#frag', '?q=1', '   ', 'some/dir/',
+        'www.site.com/gallery/', 'https://host.test/', 'https://host.test',
+        'https://host.test/videos/', 'https://host.test/settings.html', 'https://host.test/other.html',
+        'https://example.com/index3.html', null, undefined, 'not a url at all', 'javascript:void(0)'];
+    for (const value of negatives) {
+        assert.equal(classify(value), null, String(value));
+        assert.equal(classify(value, { base: window.location.href }), null, String(value));
+    }
+    for (const entry of RUNTIME_EXECUTORS) {
+        assert.equal(classify(`https://host.test/${entry.file}`), entry);
+        assert.equal(classify(entry.file), null, 'relative paths require assignment intent');
+        assert.equal(classify(entry.file, { base: window.location.href }), entry);
+    }
+    assert.equal(classify('https://host.test/index.html').role, 'design-time');
+    assert.equal(classify('https://host.test/index1.html').kind, 'stream');
 });
 
 test('Top Shortcuts are their own collection, independent of the runway', async () => {
@@ -983,4 +988,102 @@ test('the retract delay is forgiving but prompt', async () => {
     const chrome = await freshChrome();
     assert.ok(chrome.CHROME_RETRACT_DELAY_MS >= 750 && chrome.CHROME_RETRACT_DELAY_MS <= 1000,
         `${chrome.CHROME_RETRACT_DELAY_MS}ms is within the intended window`);
+});
+
+test('typed Layer identity survives lossy writes, copies, Position, history and preset serialization', async () => {
+    const { getPanelRuntimeLayer, isEmptyPanel, markPanelRuntime } = await import('../js/panels.js');
+    const workspace = { type: 'workspace', source: 2, options: { layer: 2, custom: { label: 'nested' } } };
+    const runtime = markPanelRuntime('index3.html?workspace=2', { role: 'runtime', kind: 'grid' });
+    const session = await freshSession([workspace, runtime, 'ordinary']);
+    assert.equal(getPanelRuntimeLayer(workspace), 2);
+    assert.equal(isEmptyPanel(workspace), false);
+    const initial = session.getSessionPanels();
+    const copy = session.getSessionPanels();
+    copy[0].options.custom.label = 'mutated';
+    copy[1].options.runtime.kind = 'mutated';
+    assert.deepEqual(session.getSessionPanels(), initial, 'reads are safe deep copies');
+    session.updateGridSession(session.getSessionUrls(), session.getSessionFolderMap());
+    session.setGridSessionSilently(session.getSessionUrls(), session.getSessionFolderMap());
+    assert.deepEqual(session.getSessionPanels(), initial);
+    moveToPosition(session, 'lefttall', 0, 2);
+    assert.equal(JSON.stringify(session.getSessionPanels()), JSON.stringify(initial));
+    assert.ok(session.getSessionArrangement().every((area) => typeof area === 'string'));
+    for (const index of [0, 1]) {
+        setPanelUrl(session, index, 'https://ordinary.test/');
+        assert.equal(getPanelRuntimeLayer(session.getSessionPanels()[index]), null);
+        assert.equal(session.getSessionPanels()[index].options.runtime, undefined);
+        session.undoPanelHistory(index);
+        assert.deepEqual(session.getSessionPanels()[index], initial[index]);
+        session.redoPanelHistory(index);
+        assert.equal(getPanelRuntimeLayer(session.getSessionPanels()[index]), null);
+    }
+    session.beginGridAction('metadata');
+    const panels = session.getSessionPanels();
+    panels[0] = { ...panels[0], options: { runtime: { layer: 2, kind: 'grid' } } };
+    session.updateGridSession(panels, {});
+    session.undoPanelHistory(0);
+    assert.equal(getPanelRuntimeLayer(session.getSessionPanels()[0]), null, 'same-source metadata changes record history');
+    session.redoPanelHistory(0);
+    assert.equal(getPanelRuntimeLayer(session.getSessionPanels()[0]), 2);
+    const { buildPresetFromWorkspace, getPresetPanels } = await import('../js/presets.js');
+    const saved = buildPresetFromWorkspace(2, 'Nested', { panels: initial, folderMap: {}, lockState: {} });
+    assert.deepEqual(getPresetPanels(JSON.parse(JSON.stringify(saved))), initial);
+    const restored = await freshSession(getPresetPanels(saved));
+    assert.deepEqual(restored.getSessionPanels(), initial);
+});
+
+test('explicit assignment distinguishes replacement from a no-op lossy projection', async () => {
+    const session = await freshSession([{ type: 'workspace', source: 2, options: { layer: 2 } }]);
+    window.location.href = 'https://host.test/index3.html';
+    window.location.origin = 'https://host.test';
+    const { getPanelRuntimeLayer, markPanelRuntime } = await import('../js/panels.js');
+    const nested = session.createAssignedUrlPanel('index3.html?workspace=2');
+    assert.equal(getPanelRuntimeLayer(nested), 2);
+    assert.equal(getPanelRuntimeLayer(session.createAssignedUrlPanel('index.html')), null);
+    assert.equal(getPanelRuntimeLayer({ type: 'url', source: 'index3.html', options: {} }), null,
+        'a typed URL without a declaration acquires no identity by resemblance');
+    const cleared = markPanelRuntime(nested, null);
+    assert.equal(getPanelRuntimeLayer(cleared), null);
+    assert.equal(getPanelRuntimeLayer(nested), 2, 'pure helper never mutates its input');
+    session.beginGridAction('replace');
+    session.updateGridSession([session.createAssignedUrlPanel('')], {});
+    assert.equal(getPanelRuntimeLayer(session.getSessionPanels()[0]), null);
+    session.undoPanelHistory(0);
+    assert.equal(getPanelRuntimeLayer(session.getSessionPanels()[0]), 2);
+});
+
+test('Grid layout shortcuts clamp to 1-4, default 2, and reconcile against the canonical eight', async () => {
+    const chrome = await freshChrome();
+    assert.equal(chrome.MAX_GRID_LAYOUT_SHORTCUTS, 4);
+    assert.equal(chrome.getGridLayoutShortcutCount(), 2, 'default is 2, independent of the raised ceiling');
+
+    chrome.setGridLayoutShortcutCount(99);
+    assert.equal(chrome.getGridLayoutShortcutCount(), 4, 'clamps to the new ceiling');
+    chrome.setGridLayoutShortcutCount(0);
+    assert.equal(chrome.getGridLayoutShortcutCount(), 1, 'clamps to the floor');
+    chrome.setGridLayoutShortcutCount(4);
+    assert.equal(chrome.getGridLayoutShortcutCount(), 4, '4 is a legal, reachable value');
+
+    const { GRID_LAYOUT_IDS } = await import('../js/grid-layouts.js');
+    assert.equal(GRID_LAYOUT_IDS.length, 8, 'all eight layouts remain the canonical registry');
+
+    // A stored order naming an unknown layout and omitting real ones reconciles:
+    // unknown keys drop, missing ones append in registry order — never breaks.
+    chrome.setGridLayoutShortcutOrder(['lefttall', 'not-a-real-layout', '4grid']);
+    const order = chrome.getGridLayoutShortcutOrder();
+    assert.deepEqual(order.slice(0, 2), ['lefttall', '4grid']);
+    assert.equal(order.length, GRID_LAYOUT_IDS.length, 'every real layout still appears exactly once');
+    assert.deepEqual([...new Set(order)].sort(), [...GRID_LAYOUT_IDS].sort());
+});
+
+test('layout icon markup is a readable mini-floorplan, not an abstract glyph, shared by every consumer', async () => {
+    const { GRID_LAYOUTS, getLayoutIconMarkup } = await import('../js/grid-layouts.js');
+    for (const layout of GRID_LAYOUTS) {
+        const markup = getLayoutIconMarkup(layout.id);
+        assert.ok(markup.includes(`li-${layout.id}`), `${layout.id} carries its own floorplan class`);
+        const cellCount = (markup.match(/<i><\/i>/g) || []).length;
+        assert.equal(cellCount, layout.cells, `${layout.id} draws ${layout.cells} mini-panels`);
+        assert.equal(/[▦▤▥]/.test(markup), false, `${layout.id} is not an abstract stripe glyph`);
+    }
+    assert.equal(getLayoutIconMarkup('not-a-real-layout'), '', 'an unknown id never injects broken markup');
 });

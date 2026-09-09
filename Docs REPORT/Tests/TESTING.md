@@ -408,7 +408,21 @@ For each of `top2, bottom2, 3col, lefttall, righttall, vsplit, hsplit, 4grid`:
 - 📍 Move to Position offers exactly this layout's visible Positions, numbered clockwise
   from top-left, with the panel's own current Position shown disabled rather than as a
   meaningless swap with itself
-- `#master-status` stays pinned right while the button group stays centered
+- `#master-status` participates in the three-region Master shell flow; it
+  truncates inside the measured Dock reserve and owns no viewport edge
+- **Mirrored Left Tall <-> Right Tall**: a Panel's visual role (tall /
+  top-short / bottom-short) survives the switch and the reverse switch, with
+  zero iframe reload (same nodes, same parents, zero loads fired) and byte-
+  identical `getSessionPanels()` before/after — content, Runtime metadata and
+  ROOT/folder assignment are untouched by construction, since a layout switch
+  only ever rewrites the session arrangement, never Panel content
+- **Nested Grid resizers**: a nested Grid Runtime hosted in a Panel under
+  900px wide keeps its own `.resizer` elements visible and hit-testable
+  within its own document; a real mouse drag at true viewport coordinates
+  changes the nested Grid's own tracks without touching the outer Grid's
+  tracks, and the outer resizer keeps working independently. A genuinely
+  narrow TOP-LEVEL (never-nested) viewport still gets the small-screen
+  fallback (resizers hidden, single column) — only the nested case is excluded
 
 ### 4.8 `launch.js` dual-context behavior
 The same module runs on both pages and must behave differently:
@@ -420,13 +434,57 @@ The same module runs on both pages and must behave differently:
   `index.html` (it supplies none of those ctx hooks) and **visible** on `index3.html`, and
   they are never offered as Quick Actions on a page that cannot perform them
 
-### 4.9 Layer 2 nesting
-Load `index3.html`, use 🚀 in a panel to load `index.html` inside it. Assert on the nested
-document: `html.is-nested` and `html.layer-2` both present; `.hotswap-trigger` computed
-`left` is set and `right` is `auto`; border color is the yellow sentinel (`#f0c020`);
-nested `#controls` is right-anchored rather than centered. Then assert the **outer** page's
-`#floating-btns` and the nested one do not overlap (compare bounding boxes — they must not
-intersect).
+### 4.9 Layer 2 identity and nesting
+
+Mechanical coverage lives in `test/positions-history.test.js` and the `Layer identity`
+plus `layer selector` tests in `test/boot-smoke.test.js`.
+
+- Executor classification rejects missing filenames, directory/fragment/query/schemeless
+  input, junk, third-party lookalikes and same-origin non-executors. Relative executor
+  paths require an explicit assignment base. Registry rows own kind/role semantics.
+- Typed Workspace Panels are occupied and Layer-2-declared. Typed options survive the
+  exact `updateGridSession(getSessionUrls(), folderMap)` compatibility round trip.
+- Replacement clears Layer metadata; Undo/Redo restore full Panels, including changes
+  whose URL projection is unchanged. Position swaps leave Panel bytes unchanged.
+- Ordinary third-party and same-origin content hides both Master and panel selectors.
+- Workspace Panels survive boot, Copy, Save Session As through a mocked GitHub backend,
+  relaunch and removal. Hidden slots in two-Position layouts cannot expose Master scope.
+- Master dispatch and panel selectors read session identity even when DOM URL attributes
+  disagree. Assignment, swap, replacement, Undo and Redo keep UI eligibility consistent.
+- **Layer target placement**: the `[L2][L1]` selector sits in its own central shell
+  region (a dedicated flex spacer balances the status region), sits after the structural
+  group and before the layout cluster, is no longer a child of `.master-contextual`, and
+  never overlaps the Dock. The right-side layout cluster (visible shortcuts -> gateway ->
+  general overflow) stays exactly as contiguous as before. Retargeting Undo through the
+  relocated selector is unchanged.
+
+The launch button still targets `index.html` (Design-Time); this does not declare Runtime
+identity. Nested-page Chrome geometry remains existing behavior, outside this identity
+repair. Runtime confirmation handshake and Stream extraction remain deferred.
+
+**Nested Runtime launch handoff** (`test/boot-smoke.test.js`, `nested Design-Time Grid
+launch…`): the semantic `gs3-runtime-launch` message, sender-frame resolution, and the
+activation boundary (nested Design-Time is not itself L2 until the parent assigns a
+Runtime executor). Covers two saved Workspace ids, Live Builder (`workspace=live`), the
+Master `[L2][L1]` selector explicitly set to L1 across the launch, sibling-Panel
+preservation via the canary continuity probe, and the untrusted-origin/malformed-message/
+unrelated-frame security negatives. The launch is proven independent of Master scope by
+construction — see `Docs ANCHOR/011-HOTSWAP-CHROME.md` § The selector has no jurisdiction
+over launch.
+
+**Grid layout shortcuts** (`test/positions-history.test.js` + `test/boot-smoke.test.js`,
+`B.1 Grid layout shortcuts…`): count clamps to 1-4, default 2; a stored order naming an
+unknown layout reconciles; every visible shortcut and the gateway's overflow-active state
+render the same readable `li-<id>` mini-floorplan grammar the permanent overflow buttons
+use (never the retired abstract ▦/▤/▥ glyph); the gateway is DOM-adjacent to the visible
+shortcuts; all eight layouts stay reachable at every count. The pre-existing
+"stay ordered, configurable, and complete" test is also the regression lock for a real
+click-target bug: the outside-click dismissal for a Chrome control whose content can
+become a nested icon element must test containment, not reference equality — see
+`Docs ANCHOR/000-INVARIANTS.md` § Bottom Runtime Shell geometry. Settings' own
+Grid Layout Order rows reuse the same `getLayoutIconMarkup()`/`GRID_LAYOUTS` registry —
+each row's icon is the same `li-<id>` floorplan the Runtime uses, and its primary label
+is the registry's human-readable `title`, never the raw internal layout id.
 
 ### 4.10 Ghost Mode
 With `ghost-trigger` enabled and opacity 12: assert `.hotswap-trigger` computed opacity is
@@ -795,6 +853,7 @@ of them has been violated.
 6. **`state.js`'s `getTargetUrls`/`setTargetUrls` are a lossy compatibility view** over
    `panels[]`. Intentional. They keep pre-Phase-4A call sites working untouched. A
    workspace-type panel reading as `''` through that view is documented behavior.
+   The lossy view may render compatibility state; it must never decide Layer identity.
 7. **Plain strings are valid panel input everywhere.** All historical saved data is strings.
    `normalizePanel` handles it. Do not "clean up" by requiring objects.
 8. **`Store.set('tripleLayout')` coexisting with `setSessionLayout()` is intentional** — the
@@ -830,7 +889,7 @@ of them has been violated.
 | 12 | `links.json` exceeded GitHub's 1MB inline limit | §5.3 |
 | 13 | `index.html` auto-save wiped a Grid-saved `layout` | §2.3 |
 | 14 | Launch Grid reverted to a plain `<a href>`, dropping `?workspace=` | §4.6 |
-| 15 | `#master-status`'s `margin-left:auto` broke master-bar centering | §4.7 |
+| 15 | The old right-pinned status rule was retired: Stage A uses three-region flow and the measured Dock reserve | §4.7 |
 
 ---
 

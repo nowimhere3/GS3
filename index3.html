@@ -129,15 +129,15 @@
         #resizer-drag-overlay { display: none; position: fixed; inset: 0; z-index: 40000; }
         #resizer-drag-overlay.active { display: block; }
 
-        /* Always-visible floating buttons bottom-right */
-        #floating-btns { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
+        /* Orchestration Dock: its measured width is reserved by the Master Bar. */
+        #orchestration-dock { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
 
         /* When this page is loaded inside another Launchpad session (e.g. via
            🚀), move the master 🎬+⚙ cluster to the left instead of the right
            so it doesn't collide with the OUTER session's own 🎬+⚙ — which is
            always fixed to the true browser viewport's bottom-right corner,
            regardless of which panel this iframe happens to occupy. */
-        html.is-nested #floating-btns { right: auto; left: 18px; }
+        html.is-nested #orchestration-dock { right: auto; left: 18px; }
         html.is-nested .float-btn { border-color: #f0c020; border-width: 2px; }
         html.is-nested .float-btn:hover { border-color: #ffd84a; }
         html.is-nested .float-btn.active { border-color: #f0c020; }
@@ -145,12 +145,35 @@
         .float-btn:hover { background: rgba(0,0,0,0.95); color: #fff; border-color: #666; }
         .float-btn.active { background: rgba(0,95,200,0.85); border-color: #0095f6; color: #fff; }
 
-        /* Master control bar - hidden until toggled */
-        #master-bar { position: fixed; bottom: -120px; left: 0; right: 0; z-index: 29000; background: rgba(10,10,10,0.96); border-top: 1px solid #2d2d2d; backdrop-filter: blur(12px); padding: 14px 20px; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; transition: bottom 0.25s ease, opacity 0.15s ease; }
+        /* Master control bar: CLOSED always means its full rendered height is
+           below the viewport. Its right padding reserves the measured Dock. */
+        #master-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 29000; box-sizing: border-box; background: rgba(10,10,10,0.96); border-top: 1px solid #2d2d2d; backdrop-filter: blur(12px); padding: 14px calc(20px + var(--gs3-dock-reserve, 140px)) 14px 20px; transform: translateY(100%); transition: transform 0.25s ease, opacity 0.15s ease; }
 
         html.ghost-master #master-bar.open { opacity: var(--ghost-opacity, 0.12); }
         html.ghost-master #master-bar.open:hover { opacity: 1; }
-        #master-bar.open { bottom: 0; }
+        #master-bar.open { transform: translateY(0); }
+        .master-shell-content { width: 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .master-region { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+        .master-structural { flex: 0 1 auto; }
+        .master-status-region { flex: 1 1 140px; justify-content: center; min-width: 0; }
+        /* The Layer target is the conductor's routing control — neither a
+           layout shortcut, a Dock action, nor a history action — so it gets
+           its own central region rather than living inside the right-side
+           working cluster. A matching flex:1 spacer on its far side balances
+           the status region's own flex:1 grow, so the target sits between two
+           equally-growing gaps instead of drifting toward either edge. */
+        .master-layer-region { flex: 0 0 auto; }
+        .master-layer-spacer { flex: 1 1 0; }
+        .master-contextual { flex: 0 1 auto; justify-content: flex-end; }
+        .master-dropup-anchor { position: relative; }
+        .master-layout-shortcuts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .layout-gateway, .overflow-gateway { min-width: 42px; justify-content: center; font-size: 18px; }
+        .layout-gateway.has-overflow-active { color: #4ab0f5; border-color: #0095f6; }
+        .master-menu { position: absolute; bottom: calc(100% + 8px); display: none; flex-wrap: wrap; gap: 8px; padding: 10px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); z-index: 30001; max-width: min(620px, calc(100% - 32px)); }
+        .master-menu.open { display: flex; }
+        #master-layout-menu { right: calc(20px + var(--gs3-dock-reserve, 140px)); }
+        #master-general-menu { right: calc(62px + var(--gs3-dock-reserve, 140px)); }
+        .master-menu .master-btn { flex: 0 0 auto; }
         .master-btn { border: 1px solid #333; padding: 9px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px; background: #1a1a1a; color: #eee; transition: background 0.15s, border-color 0.15s; white-space: nowrap; flex-shrink: 0; text-decoration: none; display: inline-flex; align-items: center; }
         .master-btn:hover { background: #252525; border-color: #555; }
         .master-btn.folder-btn  { background: #0e1e2e; border-color: #0095f6; color: #4ab0f5; }
@@ -165,7 +188,7 @@
         .master-btn.back-btn    { background: #1a1a1a; border-color: #555; color: #999; }
         .master-btn.layout-btn  { padding: 8px 11px; }
         .master-btn.layout-btn.active { background: #0e1e2e; border-color: #0095f6; }
-        #master-status { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #555; font-family: monospace; }
+        #master-status { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #555; font-family: monospace; }
 
         /* Mini layout-preview icons for the layout-switcher buttons.
            These are temporary CSS-drawn placeholders — swap in your 56px
@@ -187,8 +210,9 @@
         .li-hsplit    { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a" "b"; }
         .li-4grid     { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c d"; }
 
-        /* Folder drop-up */
-        #master-folder-dropup { position: fixed; bottom: 80px; left: 20px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 320px; overflow-y: auto; z-index: 30001; min-width: 220px; display: none; }
+        /* Master dropups are anchored above their own bar controls, so wrapped
+           Master rows never require a guessed bar-height clearance. */
+        #master-folder-dropup { position: absolute; bottom: calc(100% + 8px); left: 20px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 320px; overflow-y: auto; z-index: 30001; min-width: 220px; display: none; }
         #master-folder-dropup.open { display: block; }
         .dropup-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #222; font-size: 13px; color: #ddd; transition: background 0.1s; display: flex; justify-content: space-between; align-items: center; }
         .dropup-item:hover { background: #1e2a3a; color: #4ab0f5; }
@@ -197,7 +221,7 @@
         .dropup-count { font-size: 11px; color: #555; margin-left: 8px; }
 
         /* Save Session As drop-up */
-        #master-save-dropup { position: fixed; bottom: 80px; right: 20px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 360px; overflow-y: auto; z-index: 30001; min-width: 240px; display: none; }
+        #master-save-dropup { position: absolute; bottom: calc(100% + 8px); right: calc(20px + var(--gs3-dock-reserve, 140px)); background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 360px; overflow-y: auto; z-index: 30001; min-width: 240px; display: none; }
         #master-save-dropup.open { display: block; }
         .save-session-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #222; transition: background 0.1s; }
         .save-session-item:hover { background: #241a38; }
@@ -557,9 +581,19 @@
         .btn-bm-cancel { background:#222; color:#777; }
         .btn-bm-save   { background:#f0c040; color:#111; }
 
+        /* This is a genuine top-level small-viewport fallback (phone/narrow
+           browser window), not a general "narrow Grid" rule. A nested Grid
+           Runtime's own iframe is very often under 900px wide even on a full
+           desktop monitor — that is a Panel's SIZE, not the device's — and
+           narrow-iframe alone must never strip a nested Grid down to a single
+           mobile column or hide its internal resizers. `html.is-nested` is
+           set synchronously before first paint, so every selector here is
+           scoped to exclude it; the fallback still applies exactly as before
+           to any top-level page that is genuinely this narrow. See
+           Docs ANCHOR/000-INVARIANTS.md — nested Grids remain fully capable. */
         @media (max-width: 900px) {
-            body { overflow: auto; }
-            #triple-layout {
+            html:not(.is-nested) body { overflow: auto; }
+            html:not(.is-nested) #triple-layout {
                 height: auto !important;
                 min-height: 100vh !important;
                 grid-template-columns: 1fr !important;
@@ -568,8 +602,8 @@
                 grid-auto-flow: row !important;
                 grid-auto-rows: minmax(40vh, auto) !important;
             }
-            .stream-slot { grid-area: auto !important; }
-            .resizer { display: none !important; }
+            html:not(.is-nested) .stream-slot { grid-area: auto !important; }
+            html:not(.is-nested) .resizer { display: none !important; }
         }
     </style>
 </head>
@@ -583,17 +617,37 @@
     </div>
 
     <!-- Always-visible floating buttons -->
-    <div id="floating-btns">
+    <div id="orchestration-dock">
         <button class="float-btn" id="btn-toggle-master" title="Toggle master controls">🎬</button>
         <a href="index.html" class="float-btn" title="Back to Launchpad">⚙</a>
     </div>
 
     <!-- Master control bar (hidden until toggled) -->
-    <div id="master-bar">
-        <div style="position:relative;">
-            <button class="master-btn folder-btn" id="btn-master-folder">🌐 Folder ▲</button>
-            <div id="master-folder-dropup"></div>
+    <div id="master-bar" class="master-dropup-anchor">
+        <div class="master-shell-content">
+        <div class="master-region master-structural">
+        <button class="master-btn shuffle-btn"   id="btn-master-shuffle">🎲 Shuffle</button>
+        <button class="master-btn shuffall-btn"  id="btn-master-shuffle-all">🎲🎲 Shuffle All</button>
+        <button class="master-btn undo-btn" id="btn-master-undo" disabled title="Undo the last change to this session">↩ Undo</button>
+        <button class="master-btn redo-btn" id="btn-master-redo" disabled title="Redo the last change to this session">↪ Redo</button>
         </div>
+        <div class="master-region master-status-region">
+            <span id="master-status">Not connected</span>
+        </div>
+        <div class="master-region master-layer-region">
+        <div class="hotswap-layer-selector" id="master-layer-selector" hidden>
+            <button class="hotswap-layer-btn" data-layer="L2">L2</button>
+            <button class="hotswap-layer-btn" data-layer="L1">L1</button>
+        </div>
+        </div>
+        <div class="master-layer-spacer"></div>
+        <div class="master-region master-contextual">
+        <div id="master-layout-shortcuts" class="master-layout-shortcuts"></div>
+        <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts">▦</button>
+        <button class="master-btn overflow-gateway" id="btn-master-overflow" title="More controls">⋯</button>
+        </div>
+        </div>
+        <div id="master-layout-menu" class="master-menu" aria-label="More layouts">
         <button class="master-btn layout-btn" id="btn-layout-top2" data-layout="top2" title="2 Top + 1 Bottom Wide">
             <span class="layout-icon li-top2"><i></i><i></i><i></i></span>
         </button>
@@ -618,20 +672,19 @@
         <button class="master-btn layout-btn" id="btn-layout-4grid" data-layout="4grid" title="4 Screen Grid">
             <span class="layout-icon li-4grid"><i></i><i></i><i></i><i></i></span>
         </button>
-        <div class="hotswap-layer-selector" id="master-layer-selector" hidden>
-            <button class="hotswap-layer-btn" data-layer="L2">L2</button>
-            <button class="hotswap-layer-btn" data-layer="L1">L1</button>
         </div>
-        <button class="master-btn shuffle-btn"   id="btn-master-shuffle">🎲 Shuffle</button>
-        <button class="master-btn shuffall-btn"  id="btn-master-shuffle-all">🎲🎲 Shuffle All</button>
-        <button class="master-btn undo-btn" id="btn-master-undo" disabled title="Undo the last change to this session">↩ Undo</button>
-        <div style="position:relative;">
+        <div id="master-general-menu" class="master-menu" aria-label="More controls">
+        <div>
+            <button class="master-btn folder-btn" id="btn-master-folder">🌐 Folder ▲</button>
+        </div>
+        <div>
             <button class="master-btn save-btn" id="btn-master-save">💾 Save Session As...</button>
-            <div id="master-save-dropup"></div>
         </div>
-        <span id="master-status">Not connected</span>
         <button class="master-btn close-btn" id="btn-master-close">🎬 Close</button>
         <a href="index.html" class="master-btn back-btn">⚙ Launchpad</a>
+        </div>
+        <div id="master-folder-dropup" class="master-dropup"></div>
+        <div id="master-save-dropup" class="master-dropup"></div>
     </div>
 
     <!-- Bookmark modal -->

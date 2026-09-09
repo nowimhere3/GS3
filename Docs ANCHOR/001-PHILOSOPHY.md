@@ -125,6 +125,28 @@ Complex behavior should emerge from simple primitives.
 
 ---
 
+# The Conductor
+
+Panels are the talent. The bottom Runtime shell is the conductor.
+
+Panel Chrome controls one Panel and its local content.
+
+The global bottom Runtime shell orchestrates the Runtime as a whole, and — as
+Layer routing matures — becomes the one coherent place to address nested
+Runtimes and external application capabilities.
+
+The user should never need to reason about iframe ownership, message
+plumbing, or which document rendered which control. Ownership must be
+visually and behaviorally coherent, not merely internally correct.
+
+Mouse controls and keyboard shortcuts are two invocation surfaces for the
+same semantic orchestration action, never two separate implementations of it.
+A shortcut invokes what the action means — "favorite the thing currently at
+Position 3" — not a DOM node. This is what keeps a shortcut binding portable
+across a UI that will keep rearranging itself.
+
+---
+
 # Design for the Future
 
 Every major decision should make future development easier.

@@ -14,14 +14,9 @@
  *     type:    'url' | 'workspace' | ...   — what kind of thing this panel is
  *     source:  string | number             — url-panel: the URL string
  *                                             workspace-panel: the preset id
- *     options: object                      — type-specific extras (e.g. a
- *                                             workspace panel's { layer: 2 }
- *                                             label — descriptive metadata
- *                                             only; the actual nesting depth
- *                                             is always self-detected at
- *                                             runtime by the nested page
- *                                             itself, this is never the
- *                                             mechanism, just a UI hint)
+ *     options: object                      - Panel-owned content metadata;
+ *                                             runtime: { layer: 2, kind }
+ *                                             declares a nested executor.
  *   }
  *
  * Backward compatibility: every existing preset/workspace already on disk
@@ -50,10 +45,10 @@ export function createUrlPanel(url = '') {
  * Build a Workspace-type panel — a reference to a nested Layer 2 workspace
  * (a preset id, or 'live' for a nested Live Builder session).
  * @param {string|number} presetId
- * @param {object} [options] — e.g. { layer: 2 } — descriptive only
+ * @param {object} [options] — e.g. { layer: 2 } — additional content metadata
  */
 export function createWorkspacePanel(presetId, options = { layer: 2 }) {
-    return { type: PANEL_TYPES.WORKSPACE, source: presetId, options: { ...options } };
+    return { type: PANEL_TYPES.WORKSPACE, source: presetId, options: structuredClone(options) };
 }
 
 /** True if `value` already looks like a well-formed panel object. */
@@ -69,12 +64,12 @@ function _isPanelShaped(value) {
  *
  * Accepts:
  *   - a plain string (legacy shorthand)   → becomes a url-type panel
- *   - an already-shaped panel object      → returned as-is (shallow-copied)
+ *   - an already-shaped panel object      → returned as a safe copy
  *   - null/undefined                      → becomes an empty url-type panel
  */
 export function normalizePanel(value) {
     if (_isPanelShaped(value)) {
-        return { type: value.type, source: value.source, options: { ...(value.options || {}) } };
+        return { type: value.type, source: value.source, options: structuredClone(value.options || {}) };
     }
     if (typeof value === 'string') {
         return createUrlPanel(value);
@@ -107,7 +102,29 @@ export function isEmptyPanel(panel) {
  * code that hasn't been made panel-aware yet (e.g. iframe.src assignment for
  * URL panels). Returns '' for any non-url panel type, so callers that expect
  * "just the URL string" degrade gracefully instead of throwing.
+ * This projection is lossy: it may render compatibility state, never decide identity.
  */
 export function getUrlPanelSource(panel) {
     return isUrlPanel(panel) ? (panel.source || '') : '';
+}
+
+/** Pure declaration helper. Design-Time candidates never declare a Runtime. */
+export function markPanelRuntime(panel, entry) {
+    const copy = normalizePanel(panel);
+    delete copy.options.runtime;
+    if (isUrlPanel(copy) && entry?.role === 'runtime') {
+        copy.options.runtime = { layer: 2, kind: entry.kind };
+    }
+    return copy;
+}
+
+export function getPanelRuntimeLayer(panel) {
+    return isWorkspacePanel(panel) || (isUrlPanel(panel) && panel.options?.runtime?.layer === 2) ? 2 : null;
+}
+
+/** Typed content rendering; the legacy URL projection deliberately stays lossy. */
+export function getPanelRenderUrl(panel) {
+    return isWorkspacePanel(panel)
+        ? `index3.html?workspace=${encodeURIComponent(panel.source)}`
+        : getUrlPanelSource(panel);
 }

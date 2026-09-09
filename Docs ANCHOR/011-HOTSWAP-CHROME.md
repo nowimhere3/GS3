@@ -48,6 +48,19 @@ WHY: the same canonical action should read as the same tight paired icon adapted
 
 ## Part 1-4 canonical utility dock breadcrumb
 
+## Bottom Runtime Shell Stage A
+
+The Grid Master Bar and Orchestration Dock share a finite shell z-scale. The
+Dock publishes its rendered width through the canonical shell reserve, and all
+Master rows stay inside that legal content region. Master dropups anchor above
+the full rendered bar. Nested shell relocation remains in place until capability
+routing makes later suppression safe.
+
+Stage B keeps the Dock reserve dynamic so future Position-labelled Browser
+Gallery controls can grow and shrink the Dock without new shell geometry. Those
+controls will be one per live recognized Browser Gallery instance, labelled by
+the instance's current Position, and independent of Layer scope.
+
 WAS: Edit URL and Assign Folder placement depended on invocation surface: Top opened below, while Runway and Deep Cuts opened leftward. Runway Shuffle All used the same horizontal glyph arrangement as Top.
 
 IS: both picker actions always open at the same compact inset from the current website area's top-right (measured 8px top / 12px right in the bordered panel), independent of the invoking surface and without revealing Top. Completion, Escape, observable outside pointerdown, or iframe focus closes through the canonical picker lifecycle. The canonical Shuffle All action remains horizontal in Top and stacks its two dice only in the vertical Runway presentation.
@@ -761,6 +774,60 @@ the same breadth, one layer down.
 
 There is no separate Layer 2 master bar to keep in sync.
 
+## The selector has no jurisdiction over launch
+
+Nested Design-Time asking its host to launch a Runtime
+("replace the Panel that hosts me") is a host-level
+Panel-assignment request, identified by sender frame —
+never a Layer-scoped Runtime COMMAND.
+
+The [L2][L1] selector governs which Runtime object
+Shuffle, Shuffle All, Undo, Redo and Reload act on.
+It has no say over whether a launch request is honored.
+
+A launch must succeed identically regardless of what
+the selector currently reads, including L1, including
+before any Layer 2 exists at all (the selector is then
+simply absent — there is nothing to have jurisdiction).
+
+Nested Design-Time is not itself an active Layer 2
+Runtime. It becomes one only once the parent has
+performed the assignment and the Panel carries declared
+Runtime identity — see 010-PANEL-NAVIGATION.md.
+
+## The Layer target is a central conductor control
+
+The [L2][L1] selector is the conductor's routing target — it names which
+Runtime object a Layer-scoped command addresses. It is not a layout
+shortcut, not a Dock action, and not a history action, so it does not live
+inside any of those groups. It occupies its own central shell region,
+between the status region and the right-side working cluster, balanced by a
+matching flex spacer so it sits toward the bar's middle rather than drifting
+to either edge.
+
+The right-side high-frequency working zone remains contiguous and
+unaffected by this: `[visible layouts] [layout gateway] | [dynamic Hearts]
+[🎬] [⚙]`. The Layer target never sits between the layout shortcuts and their
+gateway, and never drifts into that cluster.
+
+The future `[L2-P1] [L2-P3] [L1]` addressing selector occupies this same
+central region — see 999-NEXT.md.
+
+## Nested Runtime geometry is hierarchy, not duplicated Chrome
+
+A Layer-2 Grid Runtime is still a complete Grid Runtime. The OUTER geometry
+(a Panel's own resizer, sizing how much space the nested Runtime receives)
+and the nested Runtime's OWN internal resizers (sizing how it divides that
+space among its own Panels) are two legitimate, independent geometry
+owners, exactly like outer Panel Chrome addressing a nested Runtime as one
+Panel versus that Runtime's own Panel Chrome addressing content inside it.
+
+Nesting, or an iframe viewport narrower than the small-screen breakpoint,
+must never by itself strip a nested Grid of its configured layout or its
+internal resizers — see 000-INVARIANTS.md. Resize commands stay local to
+the Runtime that owns that geometry; the parent does not — and must not —
+route resize actions through the Layer command system.
+
 ---
 
 # Small panels
@@ -858,3 +925,7 @@ Dimming already communicates "unavailable".
 and aimed it at the wrong control — the one control
 that must stay trustworthy, because it is the fallback gateway
 to every action on a narrow panel.
+
+## Durable Layer identity (Tier 1 + Tier 2)
+
+Master and panel Layer selectors derive visibility and targeting from Runtime Session Panel identity, never iframe URLs or data-last-src. Master visibility and dispatch share the same eligible slot list, filtered through canonical Position/layout geometry. A hidden nested Panel cannot light the Master selector. Scope remains a preference; absence never rewrites it.

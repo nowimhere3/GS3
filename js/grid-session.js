@@ -30,7 +30,7 @@
  * Nothing here ever writes to Store's shared matrixUrls/folderMap/lockState
  * keys, and nothing here ever writes to presets.json — the ONLY way this
  * session's state reaches a saved preset is "💾 Save Session As...", which
- * reads getSessionUrls()/getSessionFolderMap()/getSessionLayout() and hands
+ * reads getSessionPanels()/getSessionFolderMap()/getSessionLayout() and hands
  * them to presets.js directly.
  *
  * Source workspace detection: index.html's "🧩 Launch Grid" button encodes
@@ -42,7 +42,8 @@
 
 import { Store } from './storage.js';
 import { getPresetById, getPresetPanels } from './presets.js';
-import { getUrlPanelSource, normalizePanel, normalizePanelsArray } from './panels.js';
+import { getUrlPanelSource, normalizePanel, normalizePanelsArray, markPanelRuntime } from './panels.js';
+import { classifyRuntimeExecutorUrl } from './hotswap-chrome.js';
 import { IDENTITY_ARRANGEMENT } from './positions.js';
 
 let _sourceType = 'live'; // 'live' | 'preset'
@@ -132,12 +133,30 @@ export function setSessionSource(presetId) {
 
 // ── Content ──────────────────────────────────────────────────────────────────
 
+export function getSessionPanels() {
+    return _panels.map(normalizePanel);
+}
+
+/** Lossy compatibility/render projection. Never use for identity decisions. */
 export function getSessionUrls() {
     return _panels.map(getUrlPanelSource);
 }
 
 export function getSessionFolderMap() {
     return { ..._folderMap };
+}
+
+/** Explicit URL assignment, including replacement of a non-URL Panel by ''. */
+export function createAssignedUrlPanel(url) {
+    return markPanelRuntime(url, classifyRuntimeExecutorUrl(url, { base: window.location.href }));
+}
+
+function _mergeAssignedPanels(values) {
+    return Array.isArray(values) ? values.map((value, index) => {
+        if (typeof value !== 'string') return normalizePanel(value);
+        if (_panels[index] && value === getUrlPanelSource(_panels[index])) return normalizePanel(_panels[index]);
+        return createAssignedUrlPanel(value);
+    }) : [];
 }
 
 /**
@@ -149,7 +168,7 @@ export function getSessionFolderMap() {
  * Store or presets.json — purely in-memory.
  */
 export function updateGridSession(urls, folderMap) {
-    _panels = normalizePanelsArray(urls);
+    _panels = _mergeAssignedPanels(urls);
     _folderMap = { ...(folderMap || {}) };
     _commitPendingAction();
 }
@@ -164,7 +183,7 @@ export function updateGridSession(urls, folderMap) {
  * render) rather than it being an accident of argument order.
  */
 export function setGridSessionSilently(urls, folderMap) {
-    _panels = normalizePanelsArray(urls);
+    _panels = _mergeAssignedPanels(urls);
     _folderMap = { ...(folderMap || {}) };
 }
 
@@ -286,7 +305,7 @@ export function setSessionLayout(layoutName) {
 
 function _snapshotState() {
     return {
-        panels: _panels.map((panel) => ({ ...panel })),
+        panels: getSessionPanels(),
         folderMap: { ..._folderMap },
         arrangement: [..._arrangement],
     };
@@ -343,11 +362,9 @@ function _commitPendingAction() {
 
     const length = Math.max(before.panels.length, _panels.length);
     for (let index = 0; index < length; index += 1) {
-        const beforeUrl = getUrlPanelSource(before.panels[index]);
-        const afterUrl = getUrlPanelSource(_panels[index]);
         const beforeFolder = before.folderMap[index] ?? null;
         const afterFolder = _folderMap[index] ?? null;
-        if (beforeUrl === afterUrl && beforeFolder === afterFolder) continue;
+        if (JSON.stringify(normalizePanel(before.panels[index])) === JSON.stringify(normalizePanel(_panels[index])) && beforeFolder === afterFolder) continue;
         contentSlots.push(index);
         beforePanels[index] = normalizePanel(before.panels[index]);
         afterPanels[index] = normalizePanel(_panels[index]);
@@ -404,7 +421,7 @@ function _applyActionSide(action, side, slots) {
         const panel = action[side].panels[index];
         if (panel !== undefined) {
             while (_panels.length <= index) _panels.push(normalizePanel(''));
-            if (getUrlPanelSource(_panels[index]) !== getUrlPanelSource(panel)) changedUrlIndices.push(index);
+            if (JSON.stringify(_panels[index]) !== JSON.stringify(panel)) changedUrlIndices.push(index);
             _panels[index] = normalizePanel(panel);
         }
         const folder = action[side].folders[index];
@@ -520,6 +537,18 @@ function _findPanelRedoable(slotIndex) {
     return best;
 }
 
+function _findMasterRedoable() {
+    let best = null;
+    _history.forEach((action) => {
+        if (!_hasSlotIn(action, 'undone')) return;
+        const seq = Math.max(...action.slots
+            .filter((slot) => action.slotState[slot] === 'undone')
+            .map((slot) => action.slotUndoneSeq[slot]));
+        if (!best || seq > best.seq) best = { action, seq };
+    });
+    return best?.action || null;
+}
+
 // ── Master Undo ──────────────────────────────────────────────────────────────
 
 export function canUndoGridSession() {
@@ -529,6 +558,15 @@ export function canUndoGridSession() {
 /** Undo the most recent still-applied action. Returns null if there is none. */
 export function undoGridSession() {
     return _undoAction(_findMasterUndoable());
+}
+
+export function canRedoGridSession() {
+    return _findMasterRedoable() !== null;
+}
+
+/** Redo the most recently undone eligible portion of the canonical history. */
+export function redoGridSession() {
+    return _redoAction(_findMasterRedoable());
 }
 
 // ── Panel Undo / Redo ────────────────────────────────────────────────────────

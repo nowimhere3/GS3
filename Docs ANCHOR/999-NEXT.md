@@ -118,3 +118,101 @@ WHY: "where should the next Builder Shuffle draw from?" and "which ROOT is this
 content assigned to?" are different facts and GS3 must not fabricate either.
 
 ---
+
+## Durable Layer identity (Tier 1 + Tier 2)
+
+The canonical executor registry now distinguishes Workspace / Design-Time from Runtime execution and anticipates index1.html. This prepares later Runtime separation as an additive registry/navigation change. No index1.html or launch retargeting was implemented. Runtime confirmation handshake remains deferred; current Layer UI uses Panel declarations.
+
+## Nested Runtime launch handoff
+
+Grid handoff is now a parent-owned semantic assignment. Stream receives the
+same truthful handoff only after `index1.html` exists as its distinct Runtime
+executor; `index.html` must not be claimed as Stream Runtime in the meantime.
+
+B.2 breadcrumb — the launch handoff is independent of the [L2][L1] command
+selector by construction: `_handleRuntimeLaunchRequest` resolves its Panel
+target from `event.source` alone and never reads Runtime scope. A dedicated
+mechanical trace (real and synthetic clicks, every canonical layout/slot,
+Master Bar open and closed, saved Workspace ids, Live Builder, and the
+selector explicitly set to L1) found the handoff, the activation boundary,
+and this independence already correct and reproducibly working; see
+011-HOTSWAP-CHROME.md § The selector has no jurisdiction over launch. The
+click handler now also tolerates a failing local autosave/sync without
+losing the launch itself — a silent failure there must never look to the
+user like "Launch Grid does nothing."
+
+## Bottom Runtime Shell follow-up
+
+Stage A establishes height-independent shell geometry and Dock measurement only.
+Stage B owns action/layout composition; Stage C may suppress nested shells only
+once capability routing preserves every nested control's reachability.
+
+Stage B now provides canonical Grid layout shortcut order/count preferences,
+separate layout/general gateways, Grid Folder demotion, Solo-specific Folder
+prominence, and Master Redo over the existing single Runtime history.
+
+## Future Browser Gallery Dock contract
+
+Browser Gallery Hearts remain unimplemented. Future semantic capability state
+will populate a dynamic Dock list such as `♡P1`, `♥P3`; the label follows the
+host Panel's current Position when that Panel moves. Favorite state must come
+from a Browser Gallery handshake, never DOM scraping or URL resemblance. Heart
+routing is independent of L1/L2 scope and will use the live Browser Gallery
+instance → host Panel → current Position mapping.
+
+The permanent physical Dock order, approved ahead of implementation:
+
+    [visible Grid layout shortcuts] [layout gateway] | [dynamic Hearts] [🎬] [⚙]
+
+Hearts sit inside the dynamic Dock, before 🎬 and ⚙. Only recognized live
+instances get a control — no reserved/invisible Heart slots. Stage A's
+measured Dock reserve already grows and shrinks the Master Bar's legal width
+to match, so Hearts need no new shell geometry, only population.
+
+Each Heart is invokable both by mouse and by its own configurable keyboard
+shortcut, and both invocations dispatch the SAME semantic action —
+`FAVORITE_CURRENT` targeting the live Browser Gallery instance whose host
+Panel is currently at that Heart's Position — never two separate
+implementations. See 001-PHILOSOPHY.md § The Conductor. Default shortcut
+bindings are not yet decided.
+
+## Post-B.1 refinement follow-up
+
+Settings' Grid Layout Order rows now render the canonical mini-floorplan icon
+and a human-readable title, reusing `js/grid-layouts.js` — no second layout
+vocabulary. The [L2][L1] Layer target moved into its own central Master shell
+region (a dedicated flex spacer balances the status region so it sits toward
+the bar's middle); the future `[L2-P1] [L2-P3] [L1]` selector will occupy the
+same region. index3.html's small-viewport `@media (max-width: 900px)`
+fallback is now scoped to `html:not(.is-nested)`, so a nested Grid's own
+internal resizers and configured layout survive being hosted in a Panel
+narrower than 900px — a genuinely narrow top-level viewport is unaffected.
+
+Left Tall <-> Right Tall already preserves each Panel's visual role (tall /
+top-short / bottom-short) with no permutation code of any kind: both layouts
+bind the same grid-area names to the same visual roles in index3.html's CSS,
+and a layout switch already resets the session arrangement to identity. This
+was verified mechanically, not assumed — see the Claude Report for this pass.
+
+Deferred, not guessed at:
+
+- **Top2 <-> Bottom2** is NOT an automatically-compatible pair the way Left
+  Tall/Right Tall is — `top2` binds `screen1`→top-left-half/`screen2`→
+  top-right-half/`screen3`→bottom-wide, while `bottom2` binds
+  `screen1`→top-wide/`screen2`→bottom-left-half/`screen3`→bottom-right-half.
+  A content role WOULD jump on switching (e.g. a top-left-half Panel would
+  land in the top-WIDE cell). If mirrored continuity is ever wanted for this
+  pair, it needs its own deliberate area-remapping design, not an assumption
+  that the Left Tall/Right Tall mechanism generalizes.
+- **Vsplit <-> Hsplit** have no tall/short role distinction to violate (two
+  equal panels either way), so there is nothing to design here.
+- A universal layout-transition/permutation engine was deliberately NOT built.
+  Only Left Tall <-> Right Tall was verified; extending "mirrored continuity"
+  to any other pair is a future product decision, not an inferred consequence
+  of this pass.
+- Full Portrait/Auto orientation architecture remains its own future pass;
+  this task only narrowed one existing rule's exclusion (nested + narrow),
+  it did not build the orientation model itself.
+- Future `[L2-P#]` addressing still needs its own design pass; only its
+  physical shell position (central, alongside the future Layer target) is
+  now settled.

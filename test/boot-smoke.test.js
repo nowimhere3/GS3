@@ -17,7 +17,7 @@ let crossServer;
 let browser;
 
 function startServer(port) {
-    const child = spawn('python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'], {
+    const child = spawn(process.platform === 'win32' ? 'python' : 'python3', ['-m', 'http.server', String(port), '--bind', '127.0.0.1'], {
         cwd: process.cwd(), stdio: 'ignore',
     });
     return new Promise((resolve, reject) => {
@@ -1135,6 +1135,12 @@ test('Panel Undo after a Master Shuffle restores only that panel, leaving the re
     assert.deepEqual(await srcs(), ['A2', 'B', 'C2'], 'ONLY panel B went back');
 
     let probe = await readContinuityProbe(page);
+    // A canary ticks every 25 ms. Undo can finish sooner; poll for liveness
+    // rather than assuming a timer tick occurred between two immediate reads.
+    await page.waitForFunction((previous) => [0, 2].every((slot, index) => {
+        const frame = document.querySelectorAll('.stream-panel iframe')[slot];
+        return frame.contentWindow.__canaryTicks > previous[['A2', 'C2'][index]].ticks;
+    }), before);
     const afterUndo = await readCanaries(page, ['A2', 'C2']);
     assert.equal(probe.loads.A2, 0, 'panel A did not reload');
     assert.equal(probe.loads.C2, 0, 'panel C did not reload');
@@ -2162,6 +2168,180 @@ test('the layer selector actually retargets the same controls', async () => {
     assert.equal(await shownBySlot0(), '/test/fixtures/canary.html?id=A2',
         'nothing moved — only the stated scope changed');
     await page.close();
+});
+
+// Phase 3 — the [L2][L1] target is the conductor's routing control, not a
+// layout shortcut or a Dock action, so it moved out of the right-side working
+// cluster into its own central shell region. The right cluster itself
+// (visible layouts -> layout gateway -> general overflow) must stay exactly
+// as contiguous as before.
+test('the Layer target sits centrally, apart from the contiguous right-side layout cluster', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 0, 'index3.html');
+        await page.waitForFunction(() => document.getElementById('master-layer-selector').hidden === false);
+        await page.evaluate(() => document.getElementById('btn-toggle-master').click());
+        await page.waitForTimeout(250);
+
+        const geo = await page.evaluate(() => {
+            const rect = (el) => el.getBoundingClientRect();
+            const bar = rect(document.getElementById('master-bar'));
+            const structural = rect(document.querySelector('.master-structural'));
+            const layerRegion = rect(document.querySelector('.master-layer-region'));
+            const shortcuts = rect(document.getElementById('master-layout-shortcuts'));
+            const gateway = rect(document.getElementById('btn-master-layout-overflow'));
+            const generalOverflow = rect(document.getElementById('btn-master-overflow'));
+            const dock = rect(document.getElementById('orchestration-dock'));
+            const hit = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+            const contextualChildren = [...document.querySelector('.master-contextual').children].map((el) => el.id || el.className);
+            return {
+                barCenter: bar.left + bar.width / 2,
+                layerCenter: layerRegion.left + layerRegion.width / 2,
+                structuralRight: structural.right,
+                shortcutsLeft: shortcuts.left,
+                layerRightOfStructural: layerRegion.left >= structural.right,
+                layerLeftOfShortcuts: layerRegion.right <= shortcuts.left,
+                gatewayImmediatelyFollowsShortcuts: Math.round(gateway.left - shortcuts.right) < 20,
+                generalOverflowFollowsGateway: generalOverflow.left >= gateway.right,
+                layerNotInContextual: !contextualChildren.includes('master-layer-selector'),
+                layerOverlapsDock: hit(layerRegion, dock),
+            };
+        });
+
+        // Structural (far left) -> central Layer target -> the contiguous
+        // right cluster (layouts -> gateway -> general overflow) -> Dock.
+        assert.ok(geo.layerRightOfStructural, 'Layer target sits after the structural group');
+        assert.ok(geo.layerLeftOfShortcuts, 'Layer target sits before the layout cluster, not inside it');
+        assert.ok(geo.layerNotInContextual, 'the layer selector is no longer a child of .master-contextual');
+        assert.ok(geo.gatewayImmediatelyFollowsShortcuts, 'the layout gateway is still glued to the visible shortcuts');
+        assert.ok(geo.generalOverflowFollowsGateway, 'general overflow still follows the layout cluster, not the Layer target');
+        assert.ok(!geo.layerOverlapsDock, 'moving toward the center never puts the Layer target under the Dock');
+
+        // "Toward the center" — meaningfully closer to the bar's midpoint than
+        // its old position glued against the layout cluster / Dock reserve.
+        const distanceFromCenter = Math.abs(geo.layerCenter - geo.barCenter);
+        assert.ok(distanceFromCenter < geo.barCenter * 0.35,
+            `Layer target (${geo.layerCenter}) is reasonably close to bar center (${geo.barCenter})`);
+
+        // Functionality is unchanged — the same control still retargets Undo.
+        await assignPanelUrl(page, 0, '/test/fixtures/canary.html?id=A2');
+        await waitForLiveId(page, 0, 'A2');
+        await assignPanelUrl(page, 0, 'index3.html');
+        await page.evaluate(() => document.querySelector('#master-layer-selector .hotswap-layer-btn[data-layer="L1"]').click());
+        assert.equal(await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-layer="L1"]').classList.contains('active')), true);
+    } finally { await page.close(); }
+});
+
+// Phase 4 — a nested Grid Runtime is still a real Grid Runtime: its own
+// internal resizers must survive being hosted in a Panel whose iframe is
+// narrower than the 900px small-viewport breakpoint, which is the ordinary
+// case (a Panel is rarely as wide as a whole desktop monitor). Root cause was
+// index3.html's own `@media (max-width: 900px)` firing on the NESTED
+// document's iframe viewport width and disabling `.resizer` — now scoped to
+// `html:not(.is-nested)` so a genuinely narrow TOP-LEVEL viewport still gets
+// the fallback, but nesting-plus-narrow does not.
+test('a nested Grid Runtime keeps its own internal resizers even when its iframe is under 900px', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(8000);
+    try {
+        await page.route(/^https?:\/\/(?!127\.0\.0\.1:).*/, (route) =>
+            route.fulfill({ contentType: 'text/html', body: '<p>Ordinary third-party content</p>' }));
+        await page.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+        await page.waitForFunction(() => document.querySelectorAll('.stream-panel').length === 4);
+
+        // Position 2 (top-right in the default Left Tall) is comfortably under
+        // 900px even at a generous desktop width — exactly the ordinary case.
+        await assignPanelUrl(page, 1, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 1);
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel').length >= 1);
+        await nested.waitForTimeout(300);
+
+        const before = await nested.evaluate(() => ({
+            innerWidth: window.innerWidth,
+            resizerCount: document.querySelectorAll('.resizer').length,
+            resizerDisplay: [...document.querySelectorAll('.resizer')]
+                .map((r) => getComputedStyle(r).display),
+            columns: getComputedStyle(document.getElementById('triple-layout')).gridTemplateColumns,
+        }));
+        assert.ok(before.innerWidth < 900, `sanity: the nested iframe is narrow (${before.innerWidth}px)`);
+        assert.ok(before.resizerCount > 0, 'the nested Grid still injects its own resizers');
+        assert.ok(before.resizerDisplay.every((d) => d !== 'none'), 'and they are not display:none');
+
+        // Hit-testable and draggable via a genuine mouse drag at true viewport
+        // coordinates (the only way to prove a real click/drag would reach it —
+        // a same-frame element.click() bypasses hit-testing entirely).
+        const panelOffset = await page.evaluate((slotId) => {
+            const iframe = document.getElementById(slotId).querySelector('iframe');
+            const r = iframe.getBoundingClientRect();
+            return { left: r.left, top: r.top };
+        }, 'screen-2-slot');
+        const resizerLocal = await nested.evaluate(() => document.querySelector('.resizer').getBoundingClientRect());
+        const rx = panelOffset.left + resizerLocal.x + resizerLocal.width / 2;
+        const ry = panelOffset.top + resizerLocal.y + resizerLocal.height / 2;
+        // elementFromPoint never crosses a document boundary — from the OUTER
+        // page it correctly (and only) resolves to the hosting iframe itself.
+        // Hit-testability of the resizer WITHIN its own document is what
+        // actually matters, checked in the nested document's own coordinates.
+        const hitLocal = await nested.evaluate(([x, y]) => {
+            const el = document.elementFromPoint(x, y);
+            return el ? el.className : null;
+        }, [resizerLocal.x + resizerLocal.width / 2, resizerLocal.y + resizerLocal.height / 2]);
+        assert.ok(String(hitLocal).includes('resizer'), `the resizer is hit-testable within its own document (got ${hitLocal})`);
+
+        // Capture the OUTER Grid's own track sizing before dragging the INNER
+        // resizer, so a leak between the two geometry owners is provable.
+        const outerColumnsBefore = await page.evaluate(() =>
+            getComputedStyle(document.getElementById('triple-layout')).gridTemplateColumns);
+
+        await page.mouse.move(rx, ry);
+        await page.mouse.down();
+        await page.mouse.move(rx + 60, ry, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForTimeout(150);
+
+        const after = await nested.evaluate(() => ({
+            columns: getComputedStyle(document.getElementById('triple-layout')).gridTemplateColumns,
+            panelCount: document.querySelectorAll('.stream-panel').length,
+        }));
+        assert.notEqual(after.columns, before.columns, 'the real drag actually changed the NESTED Grid\'s own tracks');
+        assert.equal(after.panelCount, 4, 'the nested document is still the same live document — no reload/rebuild');
+
+        const outerColumnsAfter = await page.evaluate(() =>
+            getComputedStyle(document.getElementById('triple-layout')).gridTemplateColumns);
+        assert.equal(outerColumnsAfter, outerColumnsBefore,
+            'dragging the INNER resizer never touches the OUTER Grid\'s own tracks');
+
+        // The outer resizer still works independently, on the OUTER document.
+        const outerResizer = await page.evaluate(() => document.querySelector('.resizer').getBoundingClientRect());
+        await page.mouse.move(outerResizer.x + outerResizer.width / 2, outerResizer.y + outerResizer.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(outerResizer.x + outerResizer.width / 2 + 60, outerResizer.y + outerResizer.height / 2, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForTimeout(150);
+        const outerColumnsAfterOwnDrag = await page.evaluate(() =>
+            getComputedStyle(document.getElementById('triple-layout')).gridTemplateColumns);
+        assert.notEqual(outerColumnsAfterOwnDrag, outerColumnsAfter, 'the outer resizer still works, on its own geometry');
+
+        // A genuinely narrow TOP-LEVEL (never-nested) viewport still gets the
+        // small-screen fallback — this task narrows the exclusion, it does not
+        // delete the fallback.
+        const narrowTop = await browser.newPage();
+        try {
+            await narrowTop.setViewportSize({ width: 700, height: 900 });
+            await narrowTop.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+            await narrowTop.waitForTimeout(300);
+            const topLevelNarrow = await narrowTop.evaluate(() => ({
+                isNested: document.documentElement.classList.contains('is-nested'),
+                resizerDisplay: [...document.querySelectorAll('.resizer')].map((r) => getComputedStyle(r).display),
+                columns: getComputedStyle(document.getElementById('triple-layout')).gridTemplateColumns,
+            }));
+            assert.equal(topLevelNarrow.isNested, false);
+            assert.ok(topLevelNarrow.resizerDisplay.every((d) => d === 'none'),
+                'genuine top-level narrow viewport still hides resizers');
+            assert.equal(topLevelNarrow.columns, '700px', 'genuine top-level narrow viewport still collapses to one column');
+        } finally { await narrowTop.close(); }
+    } finally { await page.close(); }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3413,9 +3593,9 @@ test('Part 1-2 Settings major cards collapse persistently and administrative UI 
         return route.fulfill({ status: 404, body: '{}' });
     });
     await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
-    const expected = ['github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
+    const expected = ['grid-layouts', 'github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
     assert.deepEqual(await page.locator('#settings-screen > .config-card').evaluateAll((cards) => cards.map((c) => c.dataset.section)), expected);
-    assert.equal(await page.locator('.config-card .section-toggle').count(), 7);
+    assert.equal(await page.locator('.config-card .section-toggle').count(), 8);
     assert.equal(await page.locator('.hotswap-surface .section-toggle, .hotswap-subsection .section-toggle').count(), 0);
     assert.ok((await page.locator('#ingest-folder-select option').allTextContents()).some((text) => text.includes('Alpha')));
     assert.equal(await page.locator('#file-dropzone').count(), 1);
@@ -3504,4 +3684,647 @@ test('Part 1-3 right-side toolbar cluster and Settings trailing grammar stay str
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'keyboard activation remains intact');
     assert.equal(await settings.locator('.hotswap-surface .section-toggle, .hotswap-subsection .section-toggle').count(), 0);
     await settings.close();
+});
+
+// Layer identity fixtures isolate the outer Grid. The nested executor response is
+// deterministic; declaration does not require the deferred confirmation handshake.
+async function bootLayerGrid(panels, layout = 'lefttall') {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(8000);
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1:4173).*/, (route) =>
+        route.fulfill({ contentType: 'text/html', body: '<p>Ordinary third-party content</p>' }));
+    await page.route('**/index3.html*', (route) => route.request().frame().parentFrame()
+        ? route.fulfill({ contentType: 'text/html', body: '<p>Nested executor fixture</p>' })
+        : route.continue());
+    await page.addInitScript(({ panels, layout }) => {
+        if (window !== window.top) return;
+        localStorage.setItem('loop_matrix_urls', JSON.stringify(panels));
+        localStorage.setItem('triple_screen_layout', layout);
+    }, { panels, layout });
+    await page.goto(`${ORIGIN}/index3.html?workspace=live`, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.querySelectorAll('.stream-panel').length === 4);
+    return page;
+}
+
+async function readLayerTruth(page) {
+    return page.evaluate(async () => {
+        const session = await import('./js/grid-session.js');
+        return {
+            panels: session.getSessionPanels(),
+            masterHidden: document.getElementById('master-layer-selector').hidden,
+            masterDisplay: getComputedStyle(document.getElementById('master-layer-selector')).display,
+            hidden: [...document.querySelectorAll('.stream-panel .hotswap-layer-selector')].map((el) => el.hidden),
+        };
+    });
+}
+
+test('Layer identity: ordinary third-party and same-origin content never exposes selectors', async () => {
+    for (const urls of [
+        ['https://third.test/gallery/', 'https://another.test/index3.html', 'https://third.test/videos/'],
+        ['settings.html', '/test/fixtures/canary.html', 'some/dir/'],
+    ]) {
+        const page = await bootLayerGrid(urls);
+        try {
+            const truth = await readLayerTruth(page);
+            assert.equal(truth.masterHidden, true);
+            assert.equal(truth.masterDisplay, 'none');
+            assert.ok(truth.hidden.every(Boolean));
+        } finally { await page.close(); }
+    }
+});
+
+test('Layer identity: typed Workspace survives boot, Copy, Save As, relaunch and removal', async () => {
+    const workspace = { type: 'workspace', source: 2, options: { layer: 2, label: 'keep me' } };
+    const page = await bootLayerGrid([workspace, 'https://third.test/B', 'https://third.test/C']);
+    try {
+        let truth = await readLayerTruth(page);
+        assert.deepEqual(truth.panels[0], workspace);
+        assert.equal(truth.masterHidden, false);
+        assert.deepEqual(truth.hidden.slice(0, 3), [false, true, true]);
+        assert.match(await page.locator('.stream-panel iframe').first().getAttribute('src'), /index3.html\?workspace=2$/);
+        await page.evaluate(() => {
+            const panel = document.querySelector('.stream-panel');
+            panel.querySelector('.btn-hotswap-copy-position').click();
+        });
+        await page.evaluate(() => {
+            const buttons = [...document.querySelector('.stream-panel').querySelectorAll('.hotswap-copy-row .hotswap-position-item')];
+            const option = buttons.find((button) => button.textContent.trim() === 'Copy to Position 2');
+            if (!option) throw new Error('Copy Position 2 missing');
+            option.click();
+        });
+        truth = await readLayerTruth(page);
+        assert.deepEqual(truth.panels[1], workspace);
+        let remotePresets;
+        await page.route('https://api.github.com/**', async (route) => {
+            if (!route.request().url().includes('/contents/presets.json')) {
+                await route.fulfill({ status: 404, body: '{}' });
+            } else if (route.request().method() === 'PUT') {
+                remotePresets = JSON.parse(Buffer.from(route.request().postDataJSON().content, 'base64').toString('utf8'));
+                await route.fulfill({ json: { content: { sha: 'saved-layer-panels' } } });
+            } else {
+                await route.fulfill({ json: { sha: 'saved-layer-panels', content: Buffer.from(JSON.stringify(remotePresets)).toString('base64') } });
+            }
+        });
+        await page.evaluate(async () => {
+            const { Store } = await import('./js/storage.js');
+            Store.set('gitToken', 'test-token');
+            Store.set('gitRepo', 'owner/repo');
+        });
+        await page.evaluate(() => document.getElementById('btn-master-save').click());
+        await Promise.all([
+            page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes('/contents/presets.json')),
+            page.evaluate(() => [...document.querySelectorAll('.save-session-item')]
+                .find((item) => item.textContent.includes('Preset 6')).click()),
+        ]);
+        const saved = await page.evaluate(async () => {
+            const { getPresetsStructure } = await import('./js/state.js');
+            return getPresetsStructure();
+        });
+        assert.deepEqual(saved.find((preset) => preset.id === 6).panels.slice(0, 2), [workspace, workspace]);
+        assert.deepEqual(remotePresets.find((preset) => preset.id === 6).panels.slice(0, 2), [workspace, workspace]);
+        await page.goto(`${ORIGIN}/index3.html?workspace=6`, { waitUntil: 'load' });
+        await page.waitForFunction(() => document.querySelectorAll('.stream-panel').length === 4);
+        assert.deepEqual((await readLayerTruth(page)).panels.slice(0, 2), [workspace, workspace]);
+        await page.evaluate(() => document.querySelectorAll('.stream-panel')[0].querySelector('.btn-hotswap-kill').click());
+        await page.waitForFunction(() => document.querySelectorAll('.stream-panel').length === 3);
+        assert.equal((await readLayerTruth(page)).panels[0].type, 'url');
+        assert.equal((await readLayerTruth(page)).panels[0].source, '');
+    } finally { await page.close(); }
+});
+
+test('Layer identity: hidden slots never expose the Master selector', async () => {
+    for (const nestedSlot of [2, 3]) {
+        const panels = Array(4).fill('https://third.test/ordinary');
+        panels[nestedSlot] = { type: 'workspace', source: 2, options: { layer: 2 } };
+        const page = await bootLayerGrid(panels, 'vsplit');
+        try {
+            const truth = await readLayerTruth(page);
+            assert.equal(truth.masterHidden, true);
+            assert.equal(truth.masterDisplay, 'none');
+            assert.deepEqual(truth.panels[nestedSlot], panels[nestedSlot]);
+        } finally { await page.close(); }
+    }
+});
+
+test('Layer identity: selectors agree across assignment, Position swap, replacement, Undo and Redo', async () => {
+    const page = await bootLayerGrid(Array(3).fill('https://third.test/ordinary'));
+    try {
+        const assertTruth = async (nested) => {
+            const truth = await readLayerTruth(page);
+            assert.equal(truth.masterHidden, !nested);
+            assert.equal(truth.hidden[0], !nested);
+            assert.ok(truth.hidden.slice(1).every(Boolean));
+        };
+        await assertTruth(false);
+        await assignPanelUrl(page, 0, 'index3.html?workspace=2');
+        await assertTruth(true);
+        const dispatched = await page.evaluate(() => {
+            const targets = [];
+            const frames = [...document.querySelectorAll('.stream-panel iframe')];
+            frames[0].contentWindow.postMessage = (message) => targets.push({ index: 0, action: message.action });
+            // DOM evidence deliberately contradicts both Panels. Session identity wins.
+            frames[0].setAttribute('data-last-src', 'https://third.test/ordinary');
+            frames[1].setAttribute('data-last-src', 'index3.html');
+            document.getElementById('btn-master-shuffle').click();
+            return targets;
+        });
+        assert.deepEqual(dispatched, [{ index: 0, action: 'shuffle' }]);
+        await assertTruth(true);
+        const before = (await readLayerTruth(page)).panels;
+        await page.evaluate(() => {
+            document.querySelector('.stream-panel .btn-hotswap-position').click();
+            const option = [...document.querySelector('.stream-panel').querySelectorAll('.hotswap-position-row .hotswap-position-item')]
+                .find((button) => button.textContent.trim() === 'Position 2');
+            if (!option) throw new Error('Move Position 2 missing');
+            option.click();
+        });
+        assert.deepEqual((await readLayerTruth(page)).panels, before);
+        await assertTruth(true);
+        await assignPanelUrl(page, 0, 'https://third.test/replaced');
+        await assertTruth(false);
+        await page.evaluate(() => document.getElementById('btn-master-undo').click());
+        await assertTruth(true);
+        await page.evaluate(() => {
+            const panel = document.querySelector('.stream-panel');
+            panel.querySelector('.hotswap-layer-btn[data-layer="L1"]').click();
+            panel.querySelector('.btn-hotswap-redo').click();
+        });
+        await assertTruth(false);
+    } finally { await page.close(); }
+});
+
+async function launchNestedGridWorkspace(page, workspace) {
+    const frame = await frameForSlot(page, 0);
+    await frame.locator('.workspace-tab').filter({ hasText: `Preset ${workspace}` }).click();
+    await frame.locator('#btn-launch-grid').click();
+    const expected = `index3.html?workspace=${workspace}`;
+    await page.waitForFunction(async (source) => {
+        const { getSessionPanels } = await import('./js/grid-session.js');
+        return getSessionPanels()[0]?.source === source;
+    }, expected);
+    return expected;
+}
+
+test('nested Design-Time Grid launch hands intent to the parent Session', async () => {
+    const page = await bootLayerGrid([
+        'index.html',
+        '/test/fixtures/canary.html?id=B',
+        '/test/fixtures/canary.html?id=C',
+    ]);
+    try {
+        const initial = await readLayerTruth(page);
+        assert.equal(initial.panels[0].source, 'index.html');
+        assert.equal(initial.masterHidden, true);
+
+        // Actual hosted children may request only a supported semantic launch.
+        const child = await frameForSlot(page, 0);
+        await child.evaluate(() => {
+            window.parent.postMessage({ source: 'gs3-runtime-launch', action: 'launchRuntime', kind: 'solo', workspace: '2' }, location.origin);
+            window.parent.postMessage({ source: 'gs3-runtime-launch', action: 'launchRuntime', kind: 'grid', workspace: '../bad' }, location.origin);
+        });
+        const unrelatedChild = await frameForSlot(page, 1);
+        await unrelatedChild.evaluate(() => window.parent.postMessage({
+            source: 'gs3-runtime-launch', action: 'launchRuntime', kind: 'grid', workspace: '2',
+        }, location.origin));
+        await page.waitForTimeout(50);
+        assert.equal((await readLayerTruth(page)).panels[0].source, 'index.html');
+        await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+            origin: 'https://untrusted.test',
+            source: window,
+            data: { source: 'gs3-runtime-launch', action: 'launchRuntime', kind: 'grid', workspace: '2' },
+        })));
+        assert.equal((await readLayerTruth(page)).panels[0].source, 'index.html');
+
+        const siblingsBefore = await readCanaries(page, ['B', 'C']);
+        await armContinuityProbe(page);
+        const first = await launchNestedGridWorkspace(page, 2);
+        let truth = await readLayerTruth(page);
+        assert.equal(truth.panels[0].source, first);
+        assert.deepEqual(truth.panels[0].options.runtime, { layer: 2, kind: 'grid' });
+        assert.equal(truth.masterHidden, false);
+        assert.equal(truth.hidden[0], false);
+        assert.equal(await page.locator('.stream-panel').first().locator('.hotswap-input').inputValue(), first);
+        const siblingsAfter = await readCanaries(page, ['B', 'C']);
+        const probe = await readContinuityProbe(page);
+        assert.equal(probe.loads.B, 0);
+        assert.equal(probe.loads.C, 0);
+        assert.ok(['B', 'C'].every((id) => siblingsAfter[id].startedAt === siblingsBefore[id].startedAt));
+
+        // A second selected Workspace proves the handoff carries child identity,
+        // not a generic/default Workspace or a Position-derived identifier.
+        await assignPanelUrl(page, 0, 'index.html');
+        const second = await launchNestedGridWorkspace(page, 7);
+        truth = await readLayerTruth(page);
+        assert.equal(truth.panels[0].source, second);
+        assert.deepEqual(truth.panels[0].options.runtime, { layer: 2, kind: 'grid' });
+
+        const beforeMove = structuredClone(truth.panels[0]);
+        await page.evaluate(() => {
+            const panel = document.querySelector('.stream-panel');
+            panel.querySelector('.btn-hotswap-position').click();
+            const option = [...panel.querySelectorAll('.hotswap-position-row .hotswap-position-item')]
+                .find((item) => item.textContent.trim() === 'Position 2');
+            if (!option) throw new Error('Position 2 missing');
+            option.click();
+        });
+        assert.deepEqual((await readLayerTruth(page)).panels[0], beforeMove);
+    } finally { await page.close(); }
+});
+
+// B.2 test matrix — the nested launch handoff is independent of the Master
+// [L2][L1] command-target selector, and Live Builder is a valid launch source
+// alongside saved Workspaces. That selector governs Layer-scoped Runtime
+// COMMANDS (Shuffle, Undo, Redo, Reload…) — never "which Panel may replace
+// itself with a Runtime," which is a host-level, sender-identified request.
+test('nested Design-Time Grid launch does not depend on the Master [L2][L1] selector, and Live Builder is a valid source', async () => {
+    const page = await bootLayerGrid(['index.html', 'index.html', 'https://third.test/ordinary']);
+    try {
+        // Before any launch, nothing has declared Layer 2 yet — nested
+        // Design-Time alone is never advertised as an active L2 target — so
+        // the selector does not even exist for the user to choose from.
+        assert.equal((await readLayerTruth(page)).masterHidden, true);
+
+        // C — Live Builder (no workspace tab selected; the nested page's own
+        // default) launches to the repo's canonical live identity.
+        const child0 = await frameForSlot(page, 0);
+        await child0.locator('#btn-launch-grid').click();
+        await page.waitForFunction(async () => {
+            const { getSessionPanels } = await import('./js/grid-session.js');
+            return getSessionPanels()[0]?.source === 'index3.html?workspace=live';
+        });
+        let truth = await readLayerTruth(page);
+        assert.equal(truth.panels[0].source, 'index3.html?workspace=live');
+        assert.deepEqual(truth.panels[0].options.runtime, { layer: 2, kind: 'grid' });
+
+        // F — activation boundary, now provable from the other side too: a
+        // genuine Layer-2 Runtime exists, so the selector is now available.
+        assert.equal(truth.masterHidden, false);
+
+        // D/E — explicitly aim the Master selector at L1, the scope that has
+        // no jurisdiction over this Panel's content at all, then launch a
+        // SECOND, independent nested Design-Time Panel from a saved Workspace.
+        await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-layer="L1"]').click());
+        assert.equal(await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-layer="L1"]').classList.contains('active')), true);
+
+        const child1 = await frameForSlot(page, 1);
+        await child1.locator('.workspace-tab').filter({ hasText: 'Preset 3' }).click();
+        await child1.locator('#btn-launch-grid').click();
+        await page.waitForFunction(async () => {
+            const { getSessionPanels } = await import('./js/grid-session.js');
+            return getSessionPanels()[1]?.source === 'index3.html?workspace=3';
+        });
+        truth = await readLayerTruth(page);
+        assert.equal(truth.panels[1].source, 'index3.html?workspace=3', 'launch succeeded while the selector read L1');
+        assert.deepEqual(truth.panels[1].options.runtime, { layer: 2, kind: 'grid' });
+
+        // The selector itself was never consulted or rewritten by the launch —
+        // it is exactly as the user left it.
+        assert.equal(await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-layer="L1"]').classList.contains('active')), true);
+
+        // H — the ordinary third panel was never touched by either launch.
+        assert.equal(truth.panels[2].source, 'https://third.test/ordinary');
+    } finally { await page.close(); }
+});
+
+test('Stage B Master Redo reuses canonical history, including panel-scoped undo', async () => {
+    const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C']);
+    try {
+        await assignPanelUrl(page, 0, 'https://third.test/first');
+        await assignPanelUrl(page, 1, 'https://third.test/second');
+        const before = await readLayerTruth(page);
+        await clickPanelHistory(page, 1, 'undo');
+        assert.equal((await readLayerTruth(page)).panels[1].source, 'https://third.test/B');
+        await page.locator('#btn-toggle-master').click();
+        await page.waitForTimeout(300);
+        await page.locator('#btn-master-redo').click();
+        await page.waitForTimeout(30);
+        const restored = await readLayerTruth(page);
+        assert.equal(restored.panels[1].source, 'https://third.test/second');
+        const redoState = await page.evaluate(async () => {
+            const session = await import('./js/grid-session.js');
+            return { canRedo: session.canRedoGridSession(), history: session.getGridHistory() };
+        });
+        assert.equal(redoState.canRedo, false);
+        assert.equal(restored.panels[0].source, before.panels[0].source);
+    } finally { await page.close(); }
+});
+
+// BREADCRUMBS — this test's overflow-menu-open step is also the regression
+// lock for a real click-target bug B.1 found and fixed: when the active
+// layout is off the visible shortcuts, the gateway's icon becomes a nested
+// <span> (the active layout's own mini-floorplan), so a genuine mouse click
+// lands on that child, not the button. The outside-click dismissal used to
+// compare `event.target !== gatewayBtn` by strict reference, which treated
+// that click as "outside" and closed the menu on the same event it opened.
+// Fixed to `!gatewayBtn.contains(event.target)` in triple-mode.js.
+test('Stage B Grid layout shortcuts stay ordered, configurable, and complete', async () => {
+    const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C']);
+    try {
+        await page.evaluate(async () => {
+            const { setGridLayoutShortcutCount, setGridLayoutShortcutOrder } = await import('./js/hotswap-chrome.js');
+            setGridLayoutShortcutCount(2);
+            setGridLayoutShortcutOrder(['lefttall', '3col', '4grid', 'vsplit', 'unknown']);
+        });
+        await page.reload({ waitUntil: 'load' });
+        await page.waitForFunction(() => document.querySelectorAll('#master-layout-shortcuts .layout-shortcut').length === 2);
+        await page.locator('#btn-toggle-master').click();
+        await page.waitForTimeout(300);
+        assert.deepEqual(await page.locator('#master-layout-shortcuts .layout-shortcut').evaluateAll((buttons) => buttons.map((button) => button.dataset.layout)), ['lefttall', '3col']);
+        await page.evaluate(() => document.getElementById('btn-layout-righttall').click());
+        await page.waitForFunction(() => document.querySelector('#triple-layout').className.includes('layout-righttall'));
+        assert.deepEqual(await page.locator('#master-layout-shortcuts .layout-shortcut').evaluateAll((buttons) => buttons.map((button) => button.dataset.layout)), ['lefttall', '3col']);
+        await page.locator('#btn-master-layout-overflow').click();
+        assert.equal(await page.locator('#master-layout-menu.open .layout-btn').count(), 8);
+        assert.ok(await page.locator('#btn-master-layout-overflow.has-overflow-active').count());
+        await page.locator('#btn-master-overflow').click();
+        assert.equal(await page.locator('#master-layout-menu.open').count(), 0);
+        assert.equal(await page.locator('#master-general-menu.open #btn-master-folder').count(), 1);
+        assert.equal(await page.locator('.master-shell-content #btn-master-folder').count(), 0);
+    } finally { await page.close(); }
+});
+
+test('B.1 Grid layout shortcuts extend to 1-4, stay readable floorplans, and the gateway stays glued to them', async () => {
+    const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C']);
+    try {
+        // Count clamps to the new 1-4 range; default stays 2 (untouched here).
+        const clamp = await page.evaluate(async () => {
+            const { setGridLayoutShortcutCount, getGridLayoutShortcutCount, MAX_GRID_LAYOUT_SHORTCUTS } =
+                await import('./js/hotswap-chrome.js');
+            setGridLayoutShortcutCount(99);
+            const clampedHigh = getGridLayoutShortcutCount();
+            setGridLayoutShortcutCount(0);
+            const clampedLow = getGridLayoutShortcutCount();
+            return { clampedHigh, clampedLow, max: MAX_GRID_LAYOUT_SHORTCUTS };
+        });
+        assert.equal(clamp.max, 4);
+        assert.equal(clamp.clampedHigh, 4);
+        assert.equal(clamp.clampedLow, 1);
+
+        await page.evaluate(async () => {
+            const { setGridLayoutShortcutCount, setGridLayoutShortcutOrder } = await import('./js/hotswap-chrome.js');
+            setGridLayoutShortcutCount(4);
+            setGridLayoutShortcutOrder(['lefttall', '3col', 'vsplit', '4grid']);
+        });
+        await page.reload({ waitUntil: 'load' });
+        await page.waitForFunction(() => document.querySelectorAll('#master-layout-shortcuts .layout-shortcut').length === 4);
+        await page.locator('#btn-toggle-master').click();
+        await page.waitForTimeout(300);
+
+        // Exactly N (4) visible shortcuts, in the configured order, each a
+        // readable mini-floorplan — the SAME li-<id> grammar the permanent
+        // overflow buttons use, never the old abstract ▦/▤/▥ glyph.
+        const shortcuts = await page.locator('#master-layout-shortcuts .layout-shortcut').evaluateAll(
+            (buttons) => buttons.map((b) => ({
+                layout: b.dataset.layout,
+                iconClass: b.querySelector('.layout-icon')?.className || '',
+                text: b.textContent.trim(),
+            })));
+        assert.deepEqual(shortcuts.map((s) => s.layout), ['lefttall', '3col', 'vsplit', '4grid']);
+        shortcuts.forEach((s) => {
+            assert.ok(s.iconClass.includes(`li-${s.layout}`), `${s.layout} carries its own floorplan class`);
+            assert.equal(/[▦▤▥]/.test(s.text), false, `${s.layout} shortcut is not an abstract glyph`);
+        });
+
+        // The gateway is DOM-adjacent to the shortcuts group — part of the
+        // layout cluster, not drifted toward Settings/Dock/general overflow —
+        // and the whole cluster still sits in the right-anchored contextual
+        // region, immediately before the reserved Dock padding.
+        const domOrder = await page.evaluate(() => [...document.querySelector('.master-contextual').children]
+            .map((el) => el.id || el.className));
+        const shortcutsIndex = domOrder.indexOf('master-layout-shortcuts');
+        assert.ok(shortcutsIndex >= 0);
+        assert.equal(domOrder[shortcutsIndex + 1], 'btn-master-layout-overflow');
+        assert.ok(await page.evaluate(() =>
+            document.querySelector('.master-contextual') ===
+            document.getElementById('btn-master-layout-overflow').closest('.master-contextual')));
+
+        // All eight remain reachable through the gateway regardless of count.
+        await page.locator('#btn-master-layout-overflow').click();
+        assert.equal(await page.locator('#master-layout-menu.open .layout-btn').count(), 8);
+    } finally { await page.close(); }
+});
+
+test('B.1 no Browser Gallery Hearts exist yet — the dynamic Dock contract is breadcrumbed, not implemented', async () => {
+    const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C']);
+    try {
+        const heartTraces = await page.evaluate(() => [...document.querySelectorAll('*')]
+            .filter((el) => /heart|favorite.?current|bg-gallery/i.test(el.id) || /heart|favorite.?current|bg-gallery/i.test(el.className))
+            .map((el) => el.id || el.className));
+        assert.deepEqual(heartTraces, []);
+    } finally { await page.close(); }
+});
+
+/** Bounding rect for the visible stream-slot currently showing canary `id`. */
+function readCanaryRect(page, id) {
+    return page.evaluate((wantedId) => {
+        const slot = [...document.querySelectorAll('.stream-slot')].find((candidate) => {
+            const src = candidate.querySelector('iframe')?.getAttribute('data-last-src') || '';
+            return src.includes(`id=${wantedId}`) && getComputedStyle(candidate).display !== 'none';
+        });
+        if (!slot) return null;
+        const r = slot.getBoundingClientRect();
+        return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    }, id);
+}
+
+// Left Tall and Right Tall are a deliberate mirrored pair: both layouts bind
+// grid-area `screen1` to their own tall cell and `screen2`/`screen3` to their
+// own top-short/bottom-short cells (index3.html's CSS), and a layout switch
+// always resets the session arrangement back to identity (slot 0 -> screen1,
+// slot 1 -> screen2, slot 2 -> screen3). Those two facts already compose into
+// exact visual-role continuity for the ordinary (unswapped) case with zero
+// permutation logic of any kind — proven here rather than assumed.
+test('Left Tall <-> Right Tall preserves visual role (tall / top-short / bottom-short) with zero reload', async () => {
+    const page = await bootCanaryGrid(); // A, B, C canaries; boots into the default lefttall, identity arrangement
+    try {
+        // A carries Runtime-relevant metadata (a ROOT/folder assignment) so its
+        // survival through the switch is provable, not merely plausible.
+        await page.evaluate(async () => {
+            const { updateGridSession, getSessionUrls } = await import('./js/grid-session.js');
+            updateGridSession(getSessionUrls(), { 0: 'FolderA' });
+        });
+        const panelsBefore = await page.evaluate(async () => {
+            const { getSessionPanels } = await import('./js/grid-session.js');
+            return getSessionPanels();
+        });
+
+        const before = { A: await readCanaryRect(page, 'A'), B: await readCanaryRect(page, 'B'), C: await readCanaryRect(page, 'C') };
+        assert.ok(before.A.h > before.B.h && before.A.h > before.C.h, 'sanity: A is the full-height tall cell');
+        assert.ok(before.B.y < before.C.y, 'B (top-short) sits above C (bottom-short)');
+        assert.ok(before.A.x < before.B.x, 'tall cell (A) is on the LEFT in Left Tall');
+
+        await armContinuityProbe(page);
+        await page.evaluate(() => document.getElementById('btn-toggle-master').click());
+        await page.waitForTimeout(200);
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-righttall').click());
+        await page.waitForFunction(() => document.querySelector('#triple-layout').className.includes('layout-righttall'));
+        await page.waitForTimeout(200);
+
+        const after = { A: await readCanaryRect(page, 'A'), B: await readCanaryRect(page, 'B'), C: await readCanaryRect(page, 'C') };
+        assert.equal(after.A.h, before.A.h, 'A stays the full-height tall cell');
+        assert.equal(after.B.h, before.B.h, 'B stays a short cell, same height');
+        assert.equal(after.C.h, before.C.h, 'C stays a short cell, same height');
+        assert.ok(after.B.y < after.C.y, 'B stays ABOVE C — top-short/bottom-short order unchanged');
+        assert.ok(after.A.x > after.B.x, 'the tall cell (still A) is now on the RIGHT — the geometry mirrored');
+        assert.ok(after.B.x < after.A.x && after.C.x < after.A.x, 'B and C moved to the left side together');
+
+        // Zero reload: same iframe nodes, same parents, no load fired — this is
+        // a pure grid-area reassignment, exactly like an ordinary Position swap.
+        const probe = readContinuityProbe(page);
+        const { sameNodes, sameParents, loads } = await probe;
+        assert.ok(sameNodes && sameParents);
+        assert.ok(Object.values(loads).every((count) => count === 0));
+
+        // Panel identity, Runtime metadata, and ROOT/folder assignment are
+        // untouched by construction — setSessionLayout() only ever rewrites
+        // _arrangement, never _panels.
+        const panelsAfter = await page.evaluate(async () => {
+            const { getSessionPanels } = await import('./js/grid-session.js');
+            return getSessionPanels();
+        });
+        assert.deepEqual(panelsAfter, panelsBefore);
+
+        // And the reverse direction holds symmetrically.
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-lefttall').click());
+        await page.waitForFunction(() => document.querySelector('#triple-layout').className.includes('layout-lefttall'));
+        await page.waitForTimeout(200);
+        const reverted = { A: await readCanaryRect(page, 'A'), B: await readCanaryRect(page, 'B'), C: await readCanaryRect(page, 'C') };
+        assert.equal(reverted.A.h, before.A.h);
+        assert.ok(reverted.A.x < reverted.B.x, 'back to Left Tall: the tall cell is on the left again');
+        assert.ok(reverted.B.y < reverted.C.y);
+    } finally { await page.close(); }
+});
+
+test('Stage B Settings exposes the canonical Grid layout collection and Solo keeps its own vocabulary', async () => {
+    const settings = await browser.newPage();
+    try {
+        await settings.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+        assert.equal(await settings.locator('#grid-layout-count-row .btn-slot-count').count(), 4);
+        assert.equal(await settings.locator('#grid-layout-order-list .hotswap-toggle-row').count(), 8);
+    } finally { await settings.close(); }
+    const solo = await browser.newPage();
+    try {
+        await solo.goto(`${ORIGIN}/index2.html`, { waitUntil: 'networkidle' });
+        assert.equal(await solo.locator('#orchestration-dock').count(), 1);
+        assert.equal(await solo.locator('#btn-folder').count(), 1);
+        assert.equal(await solo.locator('#btn-master-layout-overflow').count(), 0);
+    } finally { await solo.close(); }
+});
+
+test('Bottom Runtime Shell Stage A keeps the Master outside closed and outside the measured Dock reserve', async () => {
+    const intersects = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const readShell = (page) => page.evaluate(() => {
+        const rect = (el) => {
+            const { left, right, top, bottom, width, height } = el.getBoundingClientRect();
+            return { left, right, top, bottom, width, height };
+        };
+        const dock = document.getElementById('orchestration-dock');
+        const bar = document.getElementById('master-bar');
+        return {
+            dock: rect(dock),
+            bar: rect(bar),
+            reserve: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gs3-dock-reserve')),
+            content: rect(bar.querySelector('.master-shell-content')),
+            controls: [...bar.querySelectorAll('.master-btn, #master-status')]
+                .filter((el) => getComputedStyle(el).display !== 'none')
+                .map(rect),
+        };
+    });
+
+    for (const width of [1920, 1440, 1280, 1080, 880, 700, 560, 420]) {
+        const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C'], '4grid');
+        try {
+            await page.setViewportSize({ width, height: 720 });
+            await page.waitForTimeout(40);
+            let shell = await readShell(page);
+            assert.ok(shell.bar.top >= 720, `closed Master must be fully outside at ${width}px`);
+
+            await page.locator('#btn-toggle-master').click();
+            await page.waitForTimeout(300);
+            shell = await readShell(page);
+            assert.equal(shell.bar.bottom, 720, `open Master rests on viewport edge at ${width}px`);
+            assert.ok(shell.controls.every((control) => !intersects(control, shell.dock)),
+                `no Master content intersects the Dock at ${width}px`);
+            if ([1280, 560, 420].includes(width)) {
+                await page.locator('#btn-master-overflow').click();
+                for (const buttonId of ['btn-master-folder', 'btn-master-save']) {
+                    await page.locator(`#master-general-menu #${buttonId}`).click();
+                    await page.waitForTimeout(20);
+                    const dropup = await page.evaluate((id) => {
+                        const menu = document.getElementById(id).getBoundingClientRect();
+                        const master = document.getElementById('master-bar').getBoundingClientRect();
+                        const dock = document.getElementById('orchestration-dock').getBoundingClientRect();
+                        return {
+                            aboveBar: menu.bottom <= master.top,
+                            intersectsDock: menu.left < dock.right && menu.right > dock.left && menu.top < dock.bottom && menu.bottom > dock.top,
+                        };
+                    }, buttonId === 'btn-master-folder' ? 'master-folder-dropup' : 'master-save-dropup');
+                    assert.deepEqual(dropup, { aboveBar: true, intersectsDock: false }, `${buttonId} stays above the full bar at ${width}px`);
+                }
+            }
+        } finally { await page.close(); }
+    }
+
+    const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C'], '4grid');
+    try {
+        await page.setViewportSize({ width: 1280, height: 720 });
+        await page.locator('#btn-toggle-master').click();
+        await page.waitForTimeout(300);
+        const before = await readShell(page);
+        await page.evaluate(() => {
+            const child = document.createElement('span');
+            child.id = 'shell-wide-dock-fixture';
+            child.style.cssText = 'display:block; width:200px; height:1px; flex:0 0 200px';
+            document.getElementById('orchestration-dock').append(child);
+        });
+        await page.waitForTimeout(80);
+        const expanded = await readShell(page);
+        assert.ok(expanded.reserve >= before.reserve + 190, 'ResizeObserver expands the canonical Dock reserve');
+        assert.ok(expanded.content.width <= before.content.width - 190, 'Master legal content width follows the reserve');
+        assert.ok(expanded.controls.every((control) => !intersects(control, expanded.dock)), 'expanded Dock still has no Master overlap');
+        await page.evaluate(() => document.getElementById('shell-wide-dock-fixture').remove());
+        await page.waitForTimeout(80);
+        const restored = await readShell(page);
+        assert.ok(restored.reserve <= expanded.reserve - 190, 'reserve shrinks after Dock content is removed');
+        assert.ok(restored.content.width >= expanded.content.width + 190, 'Master legal content grows with the restored reserve');
+
+        await page.evaluate(() => { document.getElementById('master-status').textContent = 'status '.repeat(2000); });
+        const longStatus = await page.evaluate(() => {
+            const status = document.getElementById('master-status');
+            const style = getComputedStyle(status);
+            return { clipped: status.scrollWidth > status.clientWidth, position: style.position, overflow: style.overflow };
+        });
+        assert.deepEqual(longStatus, { clipped: true, position: 'static', overflow: 'hidden' });
+        const withLongStatus = await readShell(page);
+        assert.ok(withLongStatus.controls.every((control) => !intersects(control, withLongStatus.dock)), 'long status remains inside the legal shell region');
+
+        await page.locator('#btn-master-overflow').click();
+        await page.locator('#master-general-menu #btn-master-folder').click();
+        await page.waitForTimeout(20);
+        const folderDropup = await page.evaluate(() => {
+            const dropup = document.getElementById('master-folder-dropup').getBoundingClientRect();
+            const bar = document.getElementById('master-bar').getBoundingClientRect();
+            const dock = document.getElementById('orchestration-dock').getBoundingClientRect();
+            return { aboveBar: dropup.bottom <= bar.top, intersectsDock: dropup.left < dock.right && dropup.right > dock.left && dropup.top < dock.bottom && dropup.bottom > dock.top };
+        });
+        assert.deepEqual(folderDropup, { aboveBar: true, intersectsDock: false });
+
+        const zScale = await page.evaluate(async () => {
+            const nested = document.createElement('iframe');
+            nested.src = 'index.html';
+            document.body.append(nested);
+            await new Promise((resolve) => nested.addEventListener('load', resolve, { once: true }));
+            return {
+                master: Number(getComputedStyle(document.getElementById('master-bar')).zIndex),
+                dock: Number(getComputedStyle(document.getElementById('orchestration-dock')).zIndex),
+                nestedControls: Number(getComputedStyle(nested.contentDocument.getElementById('controls')).zIndex),
+            };
+        });
+        assert.deepEqual(zScale, { master: 29000, dock: 30000, nestedControls: 29000 });
+    } finally { await page.close(); }
 });

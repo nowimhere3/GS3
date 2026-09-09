@@ -41,6 +41,41 @@
 
 import { Store } from './storage.js';
 import { HOTSWAP_ACTIONS } from './launch.js';
+import { GRID_LAYOUT_IDS } from './grid-layouts.js';
+
+export const MAX_GRID_LAYOUT_SHORTCUTS = 4;
+
+function _reconcileGridLayoutOrder(stored) {
+    const known = new Set(GRID_LAYOUT_IDS);
+    const seen = new Set();
+    const result = [];
+    (Array.isArray(stored) ? stored : []).forEach((id) => {
+        if (known.has(id) && !seen.has(id)) { seen.add(id); result.push(id); }
+    });
+    GRID_LAYOUT_IDS.forEach((id) => { if (!seen.has(id)) result.push(id); });
+    return result;
+}
+
+export function getGridLayoutShortcutOrder() {
+    const order = _reconcileGridLayoutOrder(Store.get('gridLayoutSlotOrder'));
+    if (JSON.stringify(Store.get('gridLayoutSlotOrder')) !== JSON.stringify(order)) {
+        Store.set('gridLayoutSlotOrder', order);
+    }
+    return order;
+}
+
+export function setGridLayoutShortcutOrder(order) {
+    Store.set('gridLayoutSlotOrder', _reconcileGridLayoutOrder(order));
+}
+
+export function getGridLayoutShortcutCount() {
+    const raw = Number(Store.get('gridLayoutSlotCount'));
+    return Number.isFinite(raw) ? Math.max(1, Math.min(MAX_GRID_LAYOUT_SHORTCUTS, Math.round(raw))) : 2;
+}
+
+export function setGridLayoutShortcutCount(count) {
+    Store.set('gridLayoutSlotCount', Math.max(1, Math.min(MAX_GRID_LAYOUT_SHORTCUTS, Math.round(Number(count)) || 1)));
+}
 
 /** Hard ceiling on the runway. Eight fits Settings' two rows of four cleanly
  *  and is as many controls as a panel edge can carry without becoming a wall. */
@@ -308,19 +343,29 @@ export function setChromeOpacity({ resting, hover } = {}) {
 export const LAYER_1 = 'L1';
 export const LAYER_2 = 'L2';
 
-/** Our own runtime executors. A panel showing one of these hosts a Layer 2
- *  runtime — this is a same-origin judgement about OUR pages, never a guess
- *  about arbitrary third-party content. */
-const RUNTIME_EXECUTORS = ['index.html', 'index2.html', 'index3.html'];
+/** Assignment-time candidates only; never a live Layer identity authority. */
+export const RUNTIME_EXECUTORS = Object.freeze([
+    { file: 'index1.html', kind: 'stream', role: 'runtime' },
+    { file: 'index2.html', kind: 'solo', role: 'runtime' },
+    { file: 'index3.html', kind: 'grid', role: 'runtime' },
+    { file: 'index.html', kind: 'workspace', role: 'design-time' },
+].map(Object.freeze));
 
-export function isLayerTwoUrl(url) {
-    if (typeof url !== 'string' || url === '') return false;
+/** Relative executor paths require an explicit assignment base. */
+export function classifyRuntimeExecutorUrl(url, { base, origin = globalThis.window?.location?.origin } = {}) {
+    if (typeof url !== 'string' || !url.trim()) return null;
+    const input = url.trim();
+    if (/^[?#]/.test(input)) return null;
     try {
-        const resolved = new URL(url, window.location.href);
-        if (resolved.origin !== window.location.origin) return false; // third-party content is never our runtime
-        const file = resolved.pathname.split('/').pop() || 'index.html';
-        return RUNTIME_EXECUTORS.includes(file);
+        const resolved = base ? new URL(input, base) : new URL(input);
+        if (!['http:', 'https:'].includes(resolved.protocol) || resolved.origin !== origin) return null;
+        const file = resolved.pathname.split('/').pop();
+        if (!file) return null;
+        // Only executors in the application's directory are assignment candidates.
+        const appBase = base || globalThis.window?.location?.href;
+        if (appBase && new URL('.', resolved).href !== new URL('.', appBase).href) return null;
+        return RUNTIME_EXECUTORS.find((entry) => entry.file === file) || null;
     } catch {
-        return false;
+        return null;
     }
 }

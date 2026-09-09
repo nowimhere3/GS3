@@ -1664,7 +1664,8 @@
             background: rgba(15, 15, 18, 0.88);
             padding: 8px 12px;
             border-radius: 999px;
-            z-index: 2147483647;
+            /* Runtime shell controls share the finite host-chrome scale. */
+            z-index: 29000;
             display: flex;
             gap: 6px;
             align-items: center;

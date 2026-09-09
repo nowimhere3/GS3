@@ -114,3 +114,13 @@ The Runtime Session will eventually own:
 - Event Queue
 
 Future systems should integrate with the Runtime Session rather than creating new sources of truth.
+
+## Durable Layer identity (Tier 1 + Tier 2)
+
+getSessionPanels() returns safe typed copies. getSessionUrls() remains a lossy compatibility/render projection and never decides identity. Compatibility writes preserve existing Panels when their URL projection is unchanged. Explicit content replacement supplies a new Panel or derives executor metadata at assignment, clearing stale Runtime identity. History compares full Panel content, including type and options. Save Session As serializes typed Panels through the existing preset path; Runtime Session remains in-memory.
+
+## Nested Runtime launch handoff
+
+When nested Design-Time launches a Runtime, the child sends semantic intent and
+the parent Runtime validates the sender and owns the resulting Panel assignment.
+The child never writes parent Session state directly.

@@ -324,6 +324,26 @@
         }
         .hotswap-toggle-label { font-size: 13px; color: #ddd; display: flex; align-items: center; gap: 8px; }
         .hotswap-toggle-emoji { font-size: 15px; }
+
+        /* Grid layout mini-floorplan — the SAME visual grammar index3.html's
+           Master Bar uses for its layout shortcuts and overflow menu, reused
+           here verbatim so a Settings row and its Runtime counterpart are
+           recognizable as the same layout, never a second icon system. */
+        .layout-icon { display: grid; width: 26px; height: 20px; gap: 2px; flex-shrink: 0; }
+        .layout-icon i { background: #8ab4d8; display: block; border-radius: 1px; font-style: normal; }
+        .layout-icon i:nth-child(1) { grid-area: a; }
+        .layout-icon i:nth-child(2) { grid-area: b; }
+        .layout-icon i:nth-child(3) { grid-area: c; }
+        .layout-icon i:nth-child(4) { grid-area: d; }
+        .li-top2      { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c c"; }
+        .li-bottom2   { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a a" "b c"; }
+        .li-3col      { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b c"; }
+        .li-lefttall  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "a c"; }
+        .li-righttall { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "b a" "c a"; }
+        .li-vsplit    { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b"; }
+        .li-hsplit    { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a" "b"; }
+        .li-4grid     { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c d"; }
+        .hotswap-toggle-label .layout-icon-title { white-space: nowrap; }
         .hotswap-shortcut-badge {
             font-size: 10px;
             color: #6db8ff;
@@ -659,6 +679,27 @@
             </div>
         </div>
 
+        </div>
+    </div>
+
+    <div class="config-card" data-section="grid-layouts">
+        <div class="section-header"><h3>▦ Grid Layout Shortcuts</h3></div>
+        <p class="subtitle">Choose 1–4 stable Grid arrangement shortcuts. Drag to set their order; every remaining arrangement stays available in the Grid layout gateway.</p>
+        <div id="grid-layout-shortcuts-config">
+            <div class="input-group">
+                <label>Visible Shortcuts</label>
+                <div class="slot-count-grid" id="grid-layout-count-row">
+                    <button class="btn-slot-count" data-count="1">1</button>
+                    <button class="btn-slot-count" data-count="2">2</button>
+                    <button class="btn-slot-count" data-count="3">3</button>
+                    <button class="btn-slot-count" data-count="4">4</button>
+                </div>
+                <span class="subtitle">Showing <span id="grid-layout-count-echo">2</span> shortcuts</span>
+            </div>
+            <div class="input-group">
+                <label>Grid Layout Order</label>
+                <div class="hotswap-toggle-list" id="grid-layout-order-list"></div>
+            </div>
         </div>
     </div>
 

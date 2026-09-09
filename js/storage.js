@@ -88,6 +88,8 @@ export const KEYS = Object.freeze({
     quickActionsEnabled:     'hotswap_quick_actions_enabled',
     quickActionCount:        'hotswap_quick_action_count',
     quickActionOrder:        'hotswap_quick_action_order',
+    gridLayoutSlotCount:     'grid_layout_slot_count',
+    gridLayoutSlotOrder:     'grid_layout_slot_order',
     // BREADCRUMBS — WAS: one 'ghostOpacity' value, with hover hardcoded to 1.
     // IS: the same key is now Hotswap Chrome's RESTING opacity, joined by a
     // single HOVER value. WHY: two values, shared by the top toolbar and the
@@ -142,6 +144,8 @@ const DEFAULTS = {
     [KEYS.quickActionsEnabled]: false,
     [KEYS.quickActionCount]: 3,
     [KEYS.quickActionOrder]: [],
+    [KEYS.gridLayoutSlotCount]: 2,
+    [KEYS.gridLayoutSlotOrder]: [],
     [KEYS.ghostOpacity]: 12,
     [KEYS.hotswapHoverOpacity]: 100,
     [KEYS.ghostTargets]: { trigger: false, master: false, stream: false, solo: false },
@@ -181,6 +185,8 @@ const TYPES = {
     [KEYS.quickActionsEnabled]:     'boolean',
     [KEYS.quickActionCount]:        'number',
     [KEYS.quickActionOrder]:        'json',
+    [KEYS.gridLayoutSlotCount]:     'number',
+    [KEYS.gridLayoutSlotOrder]:     'json',
     [KEYS.ghostOpacity]:            'number',
     [KEYS.hotswapHoverOpacity]:     'number',
     [KEYS.ghostTargets]:            'json',

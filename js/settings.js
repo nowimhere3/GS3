@@ -11,11 +11,14 @@ import { getDatabaseStructure, setDatabaseStructure } from './state.js';
 import { initDropzone } from './parser.js';
 import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
 import { HOTSWAP_ACTIONS } from './launch.js';
+import { GRID_LAYOUTS, getLayoutIconMarkup } from './grid-layouts.js';
 import {
     getHotswapTrayOrder, setHotswapTrayOrder, getQuickActionOrder, setQuickActionOrder,
     getQuickActionCount, setQuickActionCount, isQuickActionRunwayEnabled,
     setQuickActionRunwayEnabled, getChromeOpacity, setChromeOpacity,
     getTopShortcutOrder, setTopShortcutOrder, getTopShortcutCount, setTopShortcutCount,
+    getGridLayoutShortcutOrder, setGridLayoutShortcutOrder,
+    getGridLayoutShortcutCount, setGridLayoutShortcutCount,
 } from './hotswap-chrome.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,7 +91,7 @@ function _initIngest() {
 
 function _initCollapsibleSections() {
     const screen = document.getElementById('settings-screen');
-    const order = ['github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
+    const order = ['grid-layouts', 'github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
     const state = { ...(Store.get('settingsSectionState') || {}) };
     const cards = new Map([...screen.querySelectorAll(':scope > .config-card[data-section]')]
         .map((card) => [card.dataset.section, card]));
@@ -287,9 +290,9 @@ function _initHotswapControls() {
         return row;
     }
 
-    function _renderList(listEl, keys, withToggle, onReorder) {
+    function _renderList(listEl, keys, withToggle, onReorder, rowFactory = _row) {
         listEl.innerHTML = '';
-        keys.forEach((key) => listEl.appendChild(_row(key, { withToggle })));
+        keys.forEach((key) => listEl.appendChild(rowFactory(key, { withToggle })));
         _makeReorderable(listEl, onReorder);
     }
 
@@ -302,7 +305,7 @@ function _initHotswapControls() {
      * canonical action may legitimately appear on both.
      */
     function _wireCollection({ enabledId, configId, countRowId, listId, echoId, withToggle = false,
-                               isEnabled, setEnabled, getCount, setCount, getOrder, setOrder }) {
+                               isEnabled, setEnabled, getCount, setCount, getOrder, setOrder, rowFactory }) {
         const enabledEl = enabledId && document.getElementById(enabledId);
         const configEl = document.getElementById(configId);
         const countRowEl = document.getElementById(countRowId);
@@ -338,7 +341,7 @@ function _initHotswapControls() {
         countRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
             btn.onclick = () => { setCount(parseInt(btn.dataset.count, 10)); renderCount(); };
         });
-        _renderList(listEl, getOrder(), withToggle, (order) => { setOrder(order); renderCount(); });
+        _renderList(listEl, getOrder(), withToggle, (order) => { setOrder(order); renderCount(); }, rowFactory);
         renderCount();
         renderEnabled();
     }
@@ -349,6 +352,28 @@ function _initHotswapControls() {
         getCount: getTopShortcutCount, setCount: setTopShortcutCount,
         getOrder: getTopShortcutOrder, setOrder: setTopShortcutOrder,
         withToggle: true,
+    });
+    _wireCollection({
+        configId: 'grid-layout-shortcuts-config',
+        countRowId: 'grid-layout-count-row', listId: 'grid-layout-order-list', echoId: 'grid-layout-count-echo',
+        getCount: getGridLayoutShortcutCount, setCount: setGridLayoutShortcutCount,
+        getOrder: getGridLayoutShortcutOrder, setOrder: setGridLayoutShortcutOrder,
+        // The icon is the primary recognition cue, the same mini-floorplan
+        // grammar the Runtime Master Bar already uses — never the raw
+        // internal layout id as the user-facing label. One canonical
+        // registry (grid-layouts.js), reused here rather than a second,
+        // Settings-only layout vocabulary.
+        rowFactory: (id) => {
+            const definition = GRID_LAYOUTS.find((layout) => layout.id === id);
+            const row = document.createElement('div');
+            row.className = 'hotswap-toggle-row';
+            row.dataset.key = id;
+            row.innerHTML = `<span class="hotswap-toggle-label">
+                <span class="drag-handle">☰</span>${getLayoutIconMarkup(id)}
+                <span class="layout-icon-title">${definition?.title || id}</span>
+            </span>`;
+            return row;
+        },
     });
     _wireCollection({
         enabledId: 'quick-actions-enabled', configId: 'quick-actions-config',
