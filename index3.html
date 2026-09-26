@@ -130,6 +130,21 @@
         .resizer-h { cursor: row-resize; }
         .resizer-v::after { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
         .resizer-h::after { content: ''; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+        .resizer-junc {
+            grid-column: 2;
+            grid-row: 2;
+            cursor: all-scroll;
+            position: relative;
+            z-index: 60;
+        }
+        .resizer-junc::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            bottom: -4px;
+            left: -4px;
+            right: -4px;
+        }
 
         /* Full-viewport overlay shown only while actively dragging — prevents
            iframes from swallowing mousemove/mouseup events mid-drag. */

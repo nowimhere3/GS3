@@ -346,6 +346,78 @@ function _startResizeDrag(e, resizerEl, axis, beforeIdx, afterIdx, trackTypes, t
     document.addEventListener('mouseup', onUp);
 }
 
+/**
+ * Handles a simultaneous two-axis drag gesture on the seam junction handle.
+ * Reads the CURRENT computed track sizes for both columns and rows, adjusts
+ * the tracks adjacent to track 2 on both axes (before: index 0, after: index 2),
+ * and writes the results back as inline style overrides on tripleLayoutEl.
+ * On release, saves both resulting properties into _customLayoutSizes[_currentLayout].
+ */
+function _startCombinedResizeDrag(e, juncEl, config, tripleLayoutEl) {
+    e.preventDefault();
+    const computedCols = getComputedStyle(tripleLayoutEl).gridTemplateColumns.split(' ').map(parseFloat);
+    const computedRows = getComputedStyle(tripleLayoutEl).gridTemplateRows.split(' ').map(parseFloat);
+    const startColBefore = computedCols[0];
+    const startColAfter  = computedCols[2];
+    const startRowBefore = computedRows[0];
+    const startRowAfter  = computedRows[2];
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    const overlay = _ensureDragOverlay();
+    overlay.style.cursor = 'all-scroll';
+    overlay.classList.add('active');
+    juncEl.classList.add('active');
+
+    const onMove = (moveEvt) => {
+        const deltaX = moveEvt.clientX - startX;
+        let newColBefore = startColBefore + deltaX;
+        let newColAfter  = startColAfter - deltaX;
+
+        if (newColBefore < MIN_TRACK_SIZE) { newColAfter -= (MIN_TRACK_SIZE - newColBefore); newColBefore = MIN_TRACK_SIZE; }
+        if (newColAfter  < MIN_TRACK_SIZE) { newColBefore -= (MIN_TRACK_SIZE - newColAfter); newColAfter = MIN_TRACK_SIZE; }
+        newColBefore = Math.max(newColBefore, 1);
+        newColAfter  = Math.max(newColAfter, 1);
+
+        const deltaY = moveEvt.clientY - startY;
+        let newRowBefore = startRowBefore + deltaY;
+        let newRowAfter  = startRowAfter - deltaY;
+
+        if (newRowBefore < MIN_TRACK_SIZE) { newRowAfter -= (MIN_TRACK_SIZE - newRowBefore); newRowBefore = MIN_TRACK_SIZE; }
+        if (newRowAfter  < MIN_TRACK_SIZE) { newRowBefore -= (MIN_TRACK_SIZE - newRowAfter); newRowAfter = MIN_TRACK_SIZE; }
+        newRowBefore = Math.max(newRowBefore, 1);
+        newRowAfter  = Math.max(newRowAfter, 1);
+
+        const colsCopy = [...computedCols];
+        colsCopy[0] = newColBefore;
+        colsCopy[2] = newColAfter;
+
+        const rowsCopy = [...computedRows];
+        rowsCopy[0] = newRowBefore;
+        rowsCopy[2] = newRowAfter;
+
+        const rebuiltCols = colsCopy.map((val, i) => (config.columns[i] === 'resizer' ? '6px' : `${val}fr`));
+        const rebuiltRows = rowsCopy.map((val, i) => (config.rows[i] === 'resizer' ? '6px' : `${val}fr`));
+        tripleLayoutEl.style.gridTemplateColumns = rebuiltCols.join(' ');
+        tripleLayoutEl.style.gridTemplateRows = rebuiltRows.join(' ');
+    };
+
+    const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        overlay.classList.remove('active');
+        juncEl.classList.remove('active');
+
+        // Remember this layout's custom sizing for the rest of the session
+        if (!_customLayoutSizes[_currentLayout]) _customLayoutSizes[_currentLayout] = {};
+        _customLayoutSizes[_currentLayout].gridTemplateColumns = tripleLayoutEl.style.gridTemplateColumns;
+        _customLayoutSizes[_currentLayout].gridTemplateRows = tripleLayoutEl.style.gridTemplateRows;
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+
 /** Build the draggable handle(s) for whichever layout is currently active. */
 function _injectResizers(layoutName, tripleLayoutEl) {
     _clearResizers(tripleLayoutEl);
@@ -360,6 +432,13 @@ function _injectResizers(layoutName, tripleLayoutEl) {
         el.addEventListener('mousedown', (e) => _startResizeDrag(e, el, axis, beforeIdx, afterIdx, trackTypes, tripleLayoutEl));
         tripleLayoutEl.appendChild(el);
     });
+
+    if (config.columns.includes('resizer') && config.rows.includes('resizer')) {
+        const juncEl = document.createElement('div');
+        juncEl.className = 'resizer resizer-junc';
+        juncEl.addEventListener('mousedown', (e) => _startCombinedResizeDrag(e, juncEl, config, tripleLayoutEl));
+        tripleLayoutEl.appendChild(juncEl);
+    }
 }
 
 // The slot-index -> grid-area arrangement now lives in grid-session.js

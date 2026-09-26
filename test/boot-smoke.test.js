@@ -2374,6 +2374,175 @@ test('a nested Grid Runtime keeps its own internal resizers even when its iframe
     } finally { await page.close(); }
 });
 
+test('Resize Junction: presence, cursor, ownership, combined drag, single seam regression, and nested isolation', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        // 1. Junction presence across all canonical layouts
+        // Eligible: 4grid, top2, bottom2, lefttall, righttall -> exactly 1
+        // Ineligible: 3col, vsplit, hsplit -> exactly 0
+        const eligibleLayouts = ['4grid', 'top2', 'bottom2', 'lefttall', 'righttall'];
+        const ineligibleLayouts = ['3col', 'vsplit', 'hsplit'];
+
+        for (const layout of eligibleLayouts) {
+            await page.evaluate((l) => {
+                const btn = document.getElementById(`btn-layout-${l}`);
+                if (btn) btn.click();
+            }, layout);
+            await page.waitForTimeout(100);
+            const count = await page.evaluate(() => document.querySelectorAll('#triple-layout .resizer-junc').length);
+            assert.equal(count, 1, `layout ${layout} must have exactly one .resizer-junc`);
+        }
+
+        for (const layout of ineligibleLayouts) {
+            await page.evaluate((l) => {
+                const btn = document.getElementById(`btn-layout-${l}`);
+                if (btn) btn.click();
+            }, layout);
+            await page.waitForTimeout(100);
+            const count = await page.evaluate(() => document.querySelectorAll('#triple-layout .resizer-junc').length);
+            assert.equal(count, 0, `layout ${layout} must have zero .resizer-junc`);
+        }
+
+        // Return to 4grid for cursor and ownership tests
+        await page.evaluate(() => document.getElementById('btn-layout-4grid').click());
+        await page.waitForTimeout(100);
+
+        // 2. Cursor: junction computed cursor is all-scroll
+        const juncCursor = await page.evaluate(() =>
+            getComputedStyle(document.querySelector('.resizer-junc')).cursor);
+        assert.equal(juncCursor, 'all-scroll', 'junction cursor must be all-scroll');
+
+        // 3. Ownership: at exact crossing, junction is active hit target
+        const juncRect = await page.evaluate(() => {
+            const el = document.querySelector('.resizer-junc');
+            const r = el.getBoundingClientRect();
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+        });
+        const centerX = juncRect.x + juncRect.width / 2;
+        const centerY = juncRect.y + juncRect.height / 2;
+
+        const centerHit = await page.evaluate(([x, y]) => {
+            const el = document.elementFromPoint(x, y);
+            return el ? el.className : null;
+        }, [centerX, centerY]);
+        assert.ok(centerHit.includes('resizer-junc'), `center hit must resolve to .resizer-junc, got ${centerHit}`);
+
+        // Outside junction zone:
+        // vertical seam (15px above junction) resolves to col-resize
+        const vHitCursor = await page.evaluate(([x, y]) => {
+            const el = document.elementFromPoint(x, y);
+            return el ? { className: el.className, cursor: getComputedStyle(el).cursor } : null;
+        }, [centerX, centerY - 15]);
+        assert.ok(vHitCursor.className.includes('resizer-v'), 'above junction resolves to vertical resizer');
+        assert.equal(vHitCursor.cursor, 'col-resize', 'vertical resizer cursor is col-resize');
+
+        // horizontal seam (15px left of junction) resolves to row-resize
+        const hHitCursor = await page.evaluate(([x, y]) => {
+            const el = document.elementFromPoint(x, y);
+            return el ? { className: el.className, cursor: getComputedStyle(el).cursor } : null;
+        }, [centerX - 15, centerY]);
+        assert.ok(hHitCursor.className.includes('resizer-h'), 'left of junction resolves to horizontal resizer');
+        assert.equal(hHitCursor.cursor, 'row-resize', 'horizontal resizer cursor is row-resize');
+
+        // 4. Combined drag: diagonal drag on junction changes BOTH gridTemplateColumns and gridTemplateRows
+        const initialTracks = await page.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+
+        await page.mouse.move(centerX, centerY);
+        await page.mouse.down();
+        await page.mouse.move(centerX + 50, centerY + 50, { steps: 5 });
+        await page.mouse.up();
+        await page.waitForTimeout(100);
+
+        const afterJuncTracks = await page.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+        assert.notEqual(afterJuncTracks.cols, initialTracks.cols, 'junction drag must update gridTemplateColumns');
+        assert.notEqual(afterJuncTracks.rows, initialTracks.rows, 'junction drag must update gridTemplateRows');
+
+        // 5. Single seam regression: dragging only vertical seam changes only columns, NOT rows
+        const vRect = await page.evaluate(() => {
+            const el = document.querySelector('.resizer-v');
+            const r = el.getBoundingClientRect();
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+        });
+        const vSeamX = vRect.x + vRect.width / 2;
+        const vSeamY = vRect.y + 40;
+
+        const vSeamBefore = await page.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+        await page.mouse.move(vSeamX, vSeamY);
+        await page.mouse.down();
+        await page.mouse.move(vSeamX - 30, vSeamY, { steps: 5 });
+        await page.mouse.up();
+        await page.waitForTimeout(100);
+
+        const vSeamAfter = await page.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+        assert.notEqual(vSeamAfter.cols, vSeamBefore.cols, 'vertical resizer drag changes columns');
+        assert.equal(vSeamAfter.rows, vSeamBefore.rows, 'vertical resizer drag leaves rows unchanged');
+
+        // 6. Nested isolation: dragging nested junction changes nested Grid only
+        await assignPanelUrl(page, 0, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 0);
+        await nested.waitForFunction(() => document.querySelectorAll('#triple-layout .resizer-junc').length === 1);
+        await nested.waitForTimeout(200);
+
+        const outerBeforeNestedDrag = await page.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+        const innerBeforeNestedDrag = await nested.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+
+        const panelOffset = await page.evaluate((slotId) => {
+            const iframe = document.getElementById(slotId).querySelector('iframe');
+            const r = iframe.getBoundingClientRect();
+            return { left: r.left, top: r.top };
+        }, 'screen-1-slot');
+
+        const nestedJuncRect = await nested.evaluate(() => {
+            const el = document.querySelector('.resizer-junc');
+            const r = el.getBoundingClientRect();
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+        });
+
+        const nestedGlobalX = panelOffset.left + nestedJuncRect.x + nestedJuncRect.width / 2;
+        const nestedGlobalY = panelOffset.top + nestedJuncRect.y + nestedJuncRect.height / 2;
+
+        await page.mouse.move(nestedGlobalX, nestedGlobalY);
+        await page.mouse.down();
+        await page.mouse.move(nestedGlobalX + 30, nestedGlobalY + 30, { steps: 5 });
+        await page.mouse.up();
+        await page.waitForTimeout(100);
+
+        const innerAfterNestedDrag = await nested.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+        const outerAfterNestedDrag = await page.evaluate(() => {
+            const s = getComputedStyle(document.getElementById('triple-layout'));
+            return { cols: s.gridTemplateColumns, rows: s.gridTemplateRows };
+        });
+
+        assert.notEqual(innerAfterNestedDrag.cols, innerBeforeNestedDrag.cols, 'nested drag modifies nested columns');
+        assert.notEqual(innerAfterNestedDrag.rows, innerBeforeNestedDrag.rows, 'nested drag modifies nested rows');
+        assert.equal(outerAfterNestedDrag.cols, outerBeforeNestedDrag.cols, 'nested drag does not touch outer columns');
+        assert.equal(outerAfterNestedDrag.rows, outerBeforeNestedDrag.rows, 'nested drag does not touch outer rows');
+    } finally {
+        await page.close();
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage 2.5 — explicit L2-P# addressing, nested local labels, subtle nested
 // Chrome, capability routing, and nested global-shell suppression.
