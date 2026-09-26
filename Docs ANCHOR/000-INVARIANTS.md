@@ -37,10 +37,12 @@ never strict reference equality (`event.target !== btn`). A real pointer click
 lands on the topmost element under the cursor, which is the child, not
 necessarily the button reference a handler was written against.
 
-Settings reuses this same mini-floorplan grammar for its Grid Layout Order
-rows — the icon is the primary recognition cue, a human-readable title (the
-canonical registry's own `title`, not a Settings-only vocabulary) is the
-supporting label, and the raw internal layout id is never the user-facing
+Settings represents Grid layouts using the same visual vocabulary as the Runtime
+controls; internal IDs remain implementation details. Settings Grid Layout Order
+rows present the mini-floorplan inside a button shell consistent with the
+Runtime controls — the icon is the primary recognition cue, a human-readable
+title (the canonical registry's own `title`, not a Settings-only vocabulary) is
+the supporting label, and the raw internal layout id is never the user-facing
 text. One layout registry (`js/grid-layouts.js`), reused by every consumer
 that needs to show a layout to a person.
 
@@ -60,6 +62,53 @@ Mirrored layout counterparts (Left Tall <-> Right Tall) preserve each Panel's
 visual role (tall / top-short / bottom-short) across the switch rather than
 blindly preserving physical slot occupancy — see 007-PANEL-IDENTITY.md §
 Mirrored layout transitions.
+
+State projection is truthful: a visible workspace or preset label is rendered
+from the canonical active workspace selection and updates when that selection
+changes, including after reload.
+
+Routine successful saves are silent. Failures remain visible through their
+existing failure path; this does not remove warnings or confirmations.
+
+## Runtime Memory diagnostics
+
+GS3 adopts RUNTIME MEMORY RM-1 for runtime truth. Tier 2 is an on-demand,
+current-truth snapshot generated in browser memory and exposed through Copy and
+Download. Diagnostics observe and never act: generation may read canonical
+state and perform the one contract-approved, bounded GitHub GET, but it never
+changes Runtime Session, persistence, history, selection, content, or remote
+state. `unknown` is a valid result whenever current truth cannot be observed.
+
+Where a live top-level Grid Runtime owns meaningful session truth, its existing
+Master Bar `…` utility menu provides direct Copy Diagnostics access. Gathering
+evidence must not require navigating away and destroying that Runtime context.
+
+The repository commits only `Diagnostics/README.md`, the GS3 contract, and the
+gitignore boundary. Runtime evidence may be projected manually into
+`Diagnostics/local/`, is machine-specific and disposable, and is never
+committed. Tier 1 Journal, Incidents, and Last-Known-Good are explicitly not
+implemented. See `Diagnostics/CONTRACT.md`.
+
+## Runtime Shell Ownership
+
+The global bottom shell — Master Bar and Orchestration Dock — belongs to the
+Runtime that owns the browser viewport. A Runtime executing inside a Panel
+does not own the viewport and renders no global shell. Suppression means not
+rendered — never relocated, never merely hidden. A nested Runtime cannot see
+the true viewport, so it cannot avoid a collision by moving; moving only
+relocates the collision. Nested capabilities are reached through the parent's
+shell and through the Panel that hosts them. A nested control may not be
+removed until its replacement route exists — see 011-HOTSWAP-CHROME.md § Stage
+2.5 — nested global-shell suppression, after routing parity. Embedding depth
+is a browser fact a page reads about itself (`IS_NESTED`, from `html.is-nested`).
+It is not Runtime Session state.
+
+The Master conductor's Layer target addresses ONE nested Runtime at a time,
+by the outer Position that hosts it (`[L2-P1] [L2-P3] [L1]`), never every
+nested Runtime simultaneously. Only Positions that truthfully host an active
+nested Runtime get a target — no fixed/future slots. See 006-TERMINOLOGY.md §
+L2-P# addressing for the distinction between this HOST-Position addressing and
+a nested Runtime's own internal `L2 · P#` local labels.
 
 They are expected to remain true unless intentionally redesigned.
 

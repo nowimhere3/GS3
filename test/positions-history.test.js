@@ -32,7 +32,7 @@ function makeStorage() {
 
 const {
     IDENTITY_ARRANGEMENT, LAYOUT_POSITION_ORDER, getPositionAreas, listPositions,
-    resolvePositionOfSlot, resolveSlotAtPosition, getLayoutSlotOrder,
+    getMirroredLayoutArrangement, resolvePositionOfSlot, resolveSlotAtPosition, getLayoutSlotOrder,
 } = await import('../js/positions.js');
 
 /** Boot a fresh isolated Grid session whose slots hold the given URLs. */
@@ -100,6 +100,17 @@ test('every layout Position maps to a fixed grid-area and numbers from the top-l
         assert.deepEqual(positions, getLayoutSlotOrder(layout).map((_, index) => index + 1));
         assert.equal(new Set(getPositionAreas(layout)).size, positions.length);
     });
+});
+
+test('Top2 and Bottom2 translate only their matching visual roles', () => {
+    const top2 = ['screen1', 'screen2', 'screen3', 'screen4'];
+    const bottom2 = getMirroredLayoutArrangement('top2', 'bottom2', top2);
+    assert.deepEqual(bottom2, ['screen2', 'screen3', 'screen1', 'screen4'],
+        'left-short, right-short, and wide each retain their role');
+    assert.deepEqual(getMirroredLayoutArrangement('bottom2', 'top2', bottom2), top2,
+        'the explicit reverse mapping restores the composition');
+    assert.equal(getMirroredLayoutArrangement('lefttall', 'righttall', top2), null,
+        'this Stage 2.6 mapping does not generalize unrelated layout transitions');
 });
 
 test('Position resolution round-trips through any arbitrary arrangement', () => {

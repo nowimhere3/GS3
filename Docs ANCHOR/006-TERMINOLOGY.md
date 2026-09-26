@@ -252,6 +252,33 @@ Layer 1 establishes the primary execution environment.
 
 ---
 
+# L2-P# addressing
+
+Two distinct vocabularies deliberately share the shape "Layer 2 + a number" and
+must never be conflated:
+
+`L2-P#` — in the MASTER conductor selector, names WHICH nested Runtime a
+Layer-scoped command addresses: the one entered through outer HOST Position
+`#` (e.g. `L2-P1` = the nested Runtime hosted by outer Position 1). Only
+rendered for Positions that truthfully host an active nested Runtime — never a
+fixed set of slots. `P#` here is the outer Runtime's own Position numbering
+(006-TERMINOLOGY.md § Position shorthand); it is re-derived on every refresh,
+so a Panel moving P1 -> P4 turns `L2-P1` into `L2-P4` for the SAME nested
+Runtime, with nothing recreated or reloaded.
+
+`L2 · P#` — in a NESTED Runtime's own local Chrome (Position labels, the
+Position button's tooltip), names an INTERNAL Position of that Layer-2
+Runtime — exactly the same fact an un-nested Runtime would call "Position #",
+spelled differently only so it is never mistaken for the host's `L2-P#`
+addressing of it from outside. Long form: "Layer 2 · Position #".
+
+The hyphen/interpunct distinction is the whole trick: `L2-P1` is an outer
+routing target; `L2 · P1` is an inner physical place. Selecting `L2-P1` on the
+Master conductor does not mean "go to that Runtime's own Position 1" — it
+means "address the Runtime that lives there."
+
+---
+
 # Layer 2
 
 A Runtime executing inside another Runtime.

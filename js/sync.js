@@ -132,11 +132,11 @@ function _headers() {
 
 /**
  * Push the current databaseStructure to GitHub.
- * Alerts on success or failure.
+ * Routine saves are silent on success; failures remain visible.
  * @param {string} commitMessage
- * @param {boolean} [silent=false] — if true, suppresses the success alert
+ * @param {boolean} [silent=true] — if true, suppresses the success alert
  */
-export async function pushDatabaseToRemote(commitMessage, silent = false) {
+export async function pushDatabaseToRemote(commitMessage, silent = true) {
     const token = Store.get('gitToken');
     const repo  = Store.get('gitRepo');
     const db    = getDatabaseStructure();

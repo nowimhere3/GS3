@@ -84,6 +84,22 @@ export function getVisiblePositionCount(layout) {
 }
 
 /**
+ * Preserve the three visual roles when switching the explicit horizontal
+ * mirror pair.  The arrangement still belongs to the Runtime Session; this
+ * only translates the grid-area names that represent wide / left-short /
+ * right-short between the two layouts.
+ */
+export function getMirroredLayoutArrangement(fromLayout, toLayout, arrangement) {
+    const maps = {
+        'top2->bottom2': { screen1: 'screen2', screen2: 'screen3', screen3: 'screen1' },
+        'bottom2->top2': { screen1: 'screen3', screen2: 'screen1', screen3: 'screen2' },
+    };
+    const areaMap = maps[`${fromLayout}->${toLayout}`];
+    if (!areaMap || !Array.isArray(arrangement)) return null;
+    return arrangement.map((area) => areaMap[area] || area);
+}
+
+/**
  * Which 1-based physical Position is `slotIndex` currently sitting in?
  * Returns null if that slot isn't visible in this layout.
  */

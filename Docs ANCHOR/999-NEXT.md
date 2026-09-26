@@ -4,6 +4,15 @@ This document tracks upcoming work.
 
 Items are grouped by architectural phase rather than priority.
 
+## Runtime Memory RM-1 binding
+
+Tier 2 current-truth snapshots are implemented as an on-demand browser reader.
+The committed front door is `Diagnostics/README.md`; generated evidence belongs
+only under gitignored `Diagnostics/local/`. The implementation deliberately
+stops at Tier 2: Tier 1 Journal, Incidents, Last-Known-Good, background
+instrumentation, and diagnostic repair/actions remain absent until separately
+approved.
+
 ---
 
 # Phase 1 — Runtime Foundation (Current)
@@ -216,3 +225,53 @@ Deferred, not guessed at:
 - Future `[L2-P#]` addressing still needs its own design pass; only its
   physical shell position (central, alongside the future Layer target) is
   now settled.
+
+## Stage 2.5 — Layer Clarity + Bottom Runtime Shell Stage C
+
+`[L2-P#]` addressing is implemented (see 006-TERMINOLOGY.md, 011-HOTSWAP-
+CHROME.md, 000-INVARIANTS.md § Runtime Shell Ownership): the Master conductor
+targets exactly one nested Grid Runtime, by its outer HOST Position, never
+broadcasting. Nested local Position labels read `L2 · P#`; nested top Chrome
+carries a subtle graphite/smoky `.is-nested` treatment. `Folder`, `Layout` and
+`Save Session As` joined the routed action set (`MASTER_LAYER_ACTIONS` in
+launch.js) alongside the already-routed Shuffle/Shuffle All/Undo/Redo/Reload,
+and a nested Grid now reports its own status outward to the parent's shell.
+Only once that parity was proven did a nested Grid Runtime stop constructing
+its own global Master Bar/Orchestration Dock — one shell per viewport.
+
+**Solo (index2.html) nested-shell suppression is explicitly deferred.** Solo
+has no Layer-scoped routing of its own today — no `_installLayerScopeReceiver`,
+no per-Panel system to route Folder/Shuffle/Undo through — so suppressing its
+nested global shell now would be a real, unreplaced capability loss. Per the
+acceptance rule (parity before suppression), Solo's `html.is-nested
+#orchestration-dock { right:auto; left:18px }` relocation workaround stays in
+place until a future pass gives Solo the same routing Grid now has. Note also
+that Solo cannot itself HOST a nested Runtime (a single iframe, no Panel/
+Position system) — only Grid (and future Stream) hosts nested Runtimes, so
+Grid-in-Grid is the only case Stage C's suppression needed to prove.
+
+## Future executor split (breadcrumbed, not implemented)
+
+Canonical Runtime executor family, approved but not yet built:
+
+```text
+index.html  → Workspace / Design-Time only
+index1.html → Stream Runtime
+index2.html → Solo Runtime
+index3.html → Grid Runtime
+```
+
+`index.html` today still carries historical mixed responsibilities; untangling
+that, creating `index1.html`, and splitting Design-Time from Runtime execution
+is Phase 5 work (see § Runtime Separation above) and was deliberately NOT
+touched by Stage 2.5.
+
+Manual Layer selection (`[L2-P#]`/`[L1]`) is an interaction SCOPE, not an
+Automation execution gate. Future Automations will address Panels/Runtimes
+semantically after the executor split is established — serious Launcher/
+Automation work should not proceed until that split and its plumbing receive
+their own dedicated pass. Stage 2.5 did not implement Automations, Launcher
+redesign, Browser Gallery Hearts, or Solo toolbar refresh — all remain future
+work in the order already recorded above (Solo toolbar refresh, then BG
+Hearts V1, then Heart shortcuts/L2 Hearts, then Launcher/Automation
+architecture after the executor split).

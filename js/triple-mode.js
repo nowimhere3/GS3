@@ -15,7 +15,7 @@ import { populateBookmarkFolderSelect } from './folders.js';
 import {
     buildStreamPanel, refreshPanelLayerScope, updateRenderedPanel, updatePanelHistoryButtons,
     updatePanelToolbar, navigatePanelTo, LAYER_MESSAGE_SOURCE, LAYER_SCOPED_ACTIONS,
-    RUNTIME_LAUNCH_MESSAGE_SOURCE,
+    RUNTIME_LAUNCH_MESSAGE_SOURCE, MASTER_LAYER_ACTIONS,
 } from './launch.js';
 import {
     initGridSession, updateGridSession, setGridSessionSilently, createAssignedUrlPanel, getSessionPanels, getSessionUrls,
@@ -27,7 +27,7 @@ import {
     beginGridAction, pushGridSessionCheckpoint,
 } from './grid-session.js';
 import {
-    getLayoutSlotOrder, listPositions, resolvePositionOfSlot, resolveSlotAtPosition,
+    getLayoutSlotOrder, getMirroredLayoutArrangement, listPositions, resolvePositionOfSlot, resolveSlotAtPosition,
 } from './positions.js';
 import { GRID_LAYOUT_IDS, GRID_LAYOUTS, getLayoutIconMarkup } from './grid-layouts.js';
 import {
@@ -38,10 +38,22 @@ import {
     resetPanelNavigation, canNavigateBack, canNavigateForward,
     navigateBack, navigateForward,
 } from './panel-navigation.js';
+import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
 const LAYOUT_IDS = GRID_LAYOUT_IDS;
 const DEFAULT_LAYOUT = 'lefttall';
+
+/**
+ * Embedding depth is a browser fact this page reads about itself, read once
+ * before any Runtime logic runs — never Runtime Session state (000-INVARIANTS
+ * § Runtime Shell Ownership). It decides two things: whether this page's own
+ * local Position labels read "L2 · P#" instead of "Position #" (011-HOTSWAP-
+ * CHROME.md § Nested local labels), and whether this page constructs its own
+ * global Master Bar / Orchestration Dock at all (§ Runtime Shell Ownership —
+ * one shell, owned by whoever owns the viewport).
+ */
+const IS_NESTED = typeof document !== 'undefined' && document.documentElement.classList.contains('is-nested');
 
 // Describes each layout's grid tracks (content vs resizer) and where its
 // draggable handle(s) sit. Shared by the resizer-injection and drag-math code
@@ -408,9 +420,27 @@ function _moveSlotToPosition(slotIndex, position) {
  * shows the same Position number — which is the whole promise of the model:
  * "Position 1 is that place", not "Position 1 is wherever screen 1 went".
  */
+/**
+ * BREADCRUMBS — WHY nested labels read differently: this Runtime's own
+ * Position labels and its HOST's Master conductor selector answer two
+ * different questions that happened to share the word "Position 1" — a human
+ * tester found both readable as the same fact even though they are not. The
+ * compact "L2 · P#" form (long-form "Layer 2 · Position #" in the tooltip)
+ * states unambiguously that this numbering is INTERNAL to this Layer-2
+ * Runtime, never the outer conductor's L2-P# HOST addressing (see
+ * 006-TERMINOLOGY.md). Only IS_NESTED changes the wording — the underlying
+ * fixed-Position resolution is identical either way.
+ */
 function _positionLabelFor(slotIndex) {
     const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
-    return position === null ? '' : `Position ${position}`;
+    if (position === null) return '';
+    return IS_NESTED ? `L2 · P${position}` : `Position ${position}`;
+}
+
+function _positionLongLabelFor(slotIndex) {
+    const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
+    if (position === null) return '';
+    return IS_NESTED ? `Layer 2 · Position ${position}` : `Position ${position}`;
 }
 
 function _refreshPositionLabels() {
@@ -419,11 +449,14 @@ function _refreshPositionLabels() {
         if (!slot) return;
         const text = _positionLabelFor(slotIndex);
         const label = slot.querySelector('.slot-label');
-        if (label) label.textContent = text;
+        if (label) { label.textContent = text; label.title = _positionLongLabelFor(slotIndex); }
         // The toolbar states the PHYSICAL Position it is sitting in. When two
         // panels swap, Position 1 stays Position 1 and the panel under that
         // label changes — so this is re-derived, never carried by the panel.
         updatePanelToolbar(slot.querySelector('.stream-panel'), { positionLabel: text });
+        const panel = slot.querySelector('.stream-panel');
+        const positionBtn = panel?.querySelector('.hotswap-position-btn');
+        if (positionBtn) positionBtn.title = _positionLongLabelFor(slotIndex);
     });
 }
 
@@ -502,7 +535,7 @@ function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
         // a readable tiny arrangement, never an abstract single glyph.
         button.innerHTML = getLayoutIconMarkup(name);
         button.classList.toggle('active', name === activeLayout);
-        button.onclick = () => _applyLayout(name, tripleLayoutEl, layoutBtns);
+        button.onclick = () => _doMasterLayout(name);
         shortcutEl.appendChild(button);
     });
     if (gateway) {
@@ -519,6 +552,9 @@ function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
 
 function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
     const safeName = LAYOUT_IDS.includes(layoutName) ? layoutName : DEFAULT_LAYOUT;
+    const previousLayout = _currentLayout;
+    const mirroredArrangement = getMirroredLayoutArrangement(
+        previousLayout, safeName, getSessionArrangement());
     _currentLayout = safeName;
 
     LAYOUT_IDS.forEach((name) => tripleLayoutEl.classList.remove(`layout-${name}`));
@@ -537,7 +573,10 @@ function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
     // elements' own inline grid-area is cleared just below, so DOM and session
     // agree. (Store.set('tripleLayout') below is a separate concern: the global
     // default orientation for brand-new sessions, not this session's own truth.)
-    setSessionLayout(safeName);
+    // Top2 and Bottom2 are the one explicit mirrored pair whose roles map
+    // directly: wide stays wide; left-short stays left-short; right-short
+    // stays right-short.  Every other layout retains the established reset.
+    setSessionLayout(safeName, mirroredArrangement || undefined);
 
     // Show only the slots this layout actually uses (2-screen splits only use
     // 2 of the 4 slots, 3-screen layouts use 3, only the 4-way grid uses all 4).
@@ -545,7 +584,10 @@ function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
     SLOT_IDS.forEach((id, i) => {
         const slotEl = document.getElementById(id);
         if (!slotEl) return;
-        slotEl.style.gridArea = '';
+        // The explicit Top2/Bottom2 mapping is presentation state, so apply
+        // it directly to the persistent slot containers. Other layouts retain
+        // the established identity-area CSS binding.
+        slotEl.style.gridArea = mirroredArrangement ? mirroredArrangement[i] : '';
         slotEl.style.display = activeSlots.includes(i) ? '' : 'none';
     });
 
@@ -786,8 +828,12 @@ function _redoPanelSmart(slotIndex, ctx) {
     return _applyRestoredHistory(redoPanelHistory(slotIndex), ctx);
 }
 
-/** Build the 🌐 Folder dropup list (matches .dropup-item / .dropup-count CSS in index3.html) */
-function _renderFolderDropup(folderDropupEl, ctx) {
+/**
+ * Build the 🌐 Folder dropup list (matches .dropup-item / .dropup-count CSS in
+ * index3.html). `onPick(folderName)` — '' means "Any Folder" — decides what a
+ * click actually does: act locally, or forward to a targeted nested Runtime.
+ */
+function _renderFolderDropup(folderDropupEl, onPick) {
     const db = getDatabaseStructure();
     folderDropupEl.innerHTML = '';
 
@@ -795,10 +841,8 @@ function _renderFolderDropup(folderDropupEl, ctx) {
     anyItem.className = 'dropup-item' + (_activeFolder ? '' : ' selected');
     anyItem.textContent = 'Any Folder (global random)';
     anyItem.onclick = () => {
-        _activeFolder = '';
         folderDropupEl.classList.remove('open');
-        const set = _reshuffleRandomFolders(getDatabaseStructure());
-        _renderPanels(set.urls, set.map, ctx);
+        onPick('');
     };
     folderDropupEl.appendChild(anyItem);
 
@@ -814,10 +858,8 @@ function _renderFolderDropup(folderDropupEl, ctx) {
         count.textContent = db[folderName].length;
         item.append(label, count);
         item.onclick = () => {
-            _activeFolder = folderName;
             folderDropupEl.classList.remove('open');
-            const set = _buildTripleSet(getDatabaseStructure(), _activeFolder);
-            _renderPanels(set.urls, set.map, ctx);
+            onPick(folderName);
         };
         folderDropupEl.appendChild(item);
     });
@@ -825,13 +867,20 @@ function _renderFolderDropup(folderDropupEl, ctx) {
 
 // ── Master layer scope ───────────────────────────────────────────────────────
 // BREADCRUMBS — WAS: a nested Grid moved its whole master cluster to the
-// opposite side of the screen so it would not sit under the outer session's.
-// IS: the master bar carries the same [L2][L1] selector as a panel's toolbar,
-// and stays exactly where it is.
-// WHY: identical reasoning to the panel toolbar, and deliberately the same
-// visual grammar so "which layer will this act on?" is answered the same way
-// everywhere. There is no separate Layer 2 master bar to keep in sync.
-let _masterLayerScope = LAYER_2;
+// opposite side of the screen so it would not sit under the outer session's;
+// later, a generic [L2][L1] selector broadcast every Layer-scoped action to
+// EVERY nested Runtime at once — honest breadth ("Master means all panels at
+// L1, so at L2 it means every nested runtime, one layer down") but not
+// addressable: with two nested Runtimes there was no way to aim at just one.
+// IS: explicit per-HOST-Position addressing. `[L2-P1] [L2-P3] [L1]` — one
+// button per outer Position that truthfully hosts an active nested Runtime,
+// plus L1. Selecting `L2-P1` targets ONLY the nested Runtime entered through
+// outer Position 1; it never fans out.
+// WHY: 006-TERMINOLOGY.md — L2-P# in the Master conductor names WHICH nested
+// Runtime, the same way Position already names a physical place. A control
+// that silently addressed "all of them" could not honestly represent two
+// simultaneous nested Runtimes at once.
+let _masterLayerTarget = null; // null = "not yet chosen, follow the first nested Runtime"; 'L1'; or a slot index
 
 /** Declared nested Panels occupying visible Positions; shared visibility/dispatch authority. */
 function _sessionLayerTwoSlots() {
@@ -839,38 +888,120 @@ function _sessionLayerTwoSlots() {
         getPanelRuntimeLayer(panel) === 2 && resolvePositionOfSlot(_currentLayout, getSessionArrangement(), index) !== null ? [index] : []);
 }
 
+/**
+ * Resolve what the selector currently means, without ever fabricating a
+ * target. An explicit L1 pick is sticky. An explicit slot pick is sticky as
+ * long as that Runtime is still truthfully nested at a visible Position;
+ * if it vanishes (content replaced, Position hidden by a layout change) this
+ * falls back to the first remaining nested Runtime rather than silently
+ * targeting nothing — the same "absence never rewrites the stored choice,
+ * dispatch handles absence" rule 011-HOTSWAP-CHROME.md already uses for the
+ * panel-level selector, applied to a set instead of a single boolean.
+ */
+function _effectiveMasterLayerTarget() {
+    const slots = _sessionLayerTwoSlots();
+    if (_masterLayerTarget === 'L1') return 'L1';
+    if (typeof _masterLayerTarget === 'number' && slots.includes(_masterLayerTarget)) return _masterLayerTarget;
+    return slots.length > 0 ? slots[0] : 'L1';
+}
+
 function _refreshMasterLayerSelector() {
     const selector = document.getElementById('master-layer-selector');
     if (!selector) return;
-    // Same rule as a panel's own selector: the scope is a preference and is
-    // never rewritten by Layer 2 merely being absent right now.
-    selector.hidden = _sessionLayerTwoSlots().length === 0;
-    selector.querySelectorAll('.hotswap-layer-btn').forEach((button) => {
-        const isActive = button.dataset.layer === _masterLayerScope;
+    const slots = _sessionLayerTwoSlots();
+    // Same rule as the panel's own selector: hidden entirely when there is no
+    // choice to present — a lone permanently-lit L1 would be pure clutter.
+    selector.hidden = slots.length === 0;
+    if (slots.length === 0) { selector.innerHTML = ''; return; }
+    const effective = _effectiveMasterLayerTarget();
+    selector.innerHTML = '';
+    slots.forEach((slotIndex) => {
+        const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'hotswap-layer-btn';
+        button.dataset.layer = LAYER_2;
+        button.dataset.slot = String(slotIndex);
+        button.textContent = `L2-P${position}`;
+        button.title = `Target the nested Runtime hosted at outer Position ${position}`;
+        const isActive = effective === slotIndex;
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-pressed', String(isActive));
+        button.onclick = () => { _masterLayerTarget = slotIndex; _refreshMasterLayerSelector(); _refreshMasterNestedStatus(); };
+        selector.appendChild(button);
     });
+    const l1Button = document.createElement('button');
+    l1Button.type = 'button';
+    l1Button.className = 'hotswap-layer-btn';
+    l1Button.dataset.layer = LAYER_1;
+    l1Button.textContent = LAYER_1;
+    l1Button.title = 'Target this Runtime';
+    const l1Active = effective === 'L1';
+    l1Button.classList.toggle('active', l1Active);
+    l1Button.setAttribute('aria-pressed', String(l1Active));
+    l1Button.onclick = () => { _masterLayerTarget = 'L1'; _refreshMasterLayerSelector(); _refreshMasterNestedStatus(); };
+    selector.appendChild(l1Button);
+    _refreshMasterNestedStatus();
 }
 
 /**
- * Hand a master action to every nested runtime instead of running it here.
- * Master means "all panels" at Layer 1, so at Layer 2 it means "every nested
- * runtime" — the same breadth, one layer down. Same-origin by construction.
- * Returns true when the action was forwarded.
+ * Hand a master action to the ONE nested Runtime the selector currently
+ * targets. `payload` carries data for MASTER_LAYER_ACTIONS (folder/layout/
+ * saveSessionAs); LAYER_SCOPED_ACTIONS remain key-only. Same-origin by
+ * construction. Returns true when the action was forwarded.
  */
-function _dispatchMasterToLayerTwo(actionKey) {
-    if (_masterLayerScope !== LAYER_2 || !LAYER_SCOPED_ACTIONS.has(actionKey)) return false;
-    const targets = _sessionLayerTwoSlots()
-        .map((index) => document.getElementById(SLOT_IDS[index])?.querySelector('.stream-panel iframe'))
-        .filter(Boolean);
-    if (targets.length === 0) return false;
-    targets.forEach((iframe) => {
+function _dispatchMasterToLayerTwo(actionKey, payload) {
+    if (!LAYER_SCOPED_ACTIONS.has(actionKey) && !MASTER_LAYER_ACTIONS.has(actionKey)) return false;
+    const target = _effectiveMasterLayerTarget();
+    if (target === 'L1') return false;
+    const iframe = document.getElementById(SLOT_IDS[target])?.querySelector('.stream-panel iframe');
+    if (!iframe) return false;
+    try {
+        iframe.contentWindow?.postMessage(
+            { source: LAYER_MESSAGE_SOURCE, action: actionKey, ...payload }, window.location.origin);
+        return true;
+    } catch {
+        return false; // a nested runtime that has gone away is simply skipped
+    }
+}
+
+// ── Nested status reporting (Stage C route 3) ───────────────────────────────
+// A nested Runtime cannot render its own global shell (see IS_NESTED
+// suppression below), so its status must reach the user through the PARENT's
+// shell instead. Reuses the existing #master-status pathway rather than
+// building a second status system: a small sibling span shows the reported
+// text only for whichever nested Runtime the selector currently targets.
+let _nestedStatusBySlot = {};
+
+function _refreshMasterNestedStatus() {
+    const el = document.getElementById('master-nested-status');
+    if (!el) return;
+    const target = _effectiveMasterLayerTarget();
+    const text = typeof target === 'number' ? _nestedStatusBySlot[target] : undefined;
+    if (typeof target === 'number' && text) {
+        const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), target);
+        el.textContent = `· L2-P${position}: ${text}`;
+        el.hidden = false;
+    } else {
+        el.textContent = '';
+        el.hidden = true;
+    }
+}
+
+/** Nested-side: mirror this Runtime's own status text out to whichever parent hosts it. */
+function _installNestedStatusReporter(statusEl) {
+    if (!IS_NESTED || !statusEl || window.top === window) return;
+    const report = () => {
         try {
-            iframe.contentWindow?.postMessage(
-                { source: LAYER_MESSAGE_SOURCE, action: actionKey }, window.location.origin);
-        } catch { /* a nested runtime that has gone away is simply skipped */ }
-    });
-    return true;
+            window.parent.postMessage(
+                { source: LAYER_MESSAGE_SOURCE, action: 'nestedStatus', text: statusEl.textContent },
+                window.location.origin);
+        } catch { /* parent gone or cross-origin: nothing to report to */ }
+    };
+    if (typeof MutationObserver === 'function') {
+        new MutationObserver(report).observe(statusEl, { childList: true, characterData: true, subtree: true });
+    }
+    report();
 }
 
 /**
@@ -915,6 +1046,12 @@ function _handleRuntimeLaunchRequest(event, data, ctx) {
     updateRenderedPanel(hostPanel, { url: destination, folder: '' });
 }
 
+/** Resolve a message's sending frame to the slot that hosts it, or -1. */
+function _slotForSource(source) {
+    return SLOT_IDS.findIndex((id) =>
+        document.getElementById(id)?.querySelector('.stream-panel iframe')?.contentWindow === source);
+}
+
 function _installLayerScopeReceiver(handlers, ctx) {
     window.addEventListener('message', (event) => {
         if (event.origin !== window.location.origin) return;
@@ -924,8 +1061,16 @@ function _installLayerScopeReceiver(handlers, ctx) {
             _handleRuntimeLaunchRequest(event, data, ctx);
             return;
         }
-        if (data.source === LAYER_MESSAGE_SOURCE && LAYER_SCOPED_ACTIONS.has(data.action)) {
-            handlers[data.action]?.();
+        if (data.source !== LAYER_MESSAGE_SOURCE) return;
+        if (data.action === 'nestedStatus') {
+            const slotIndex = _slotForSource(event.source);
+            if (slotIndex === -1) return;
+            _nestedStatusBySlot[slotIndex] = typeof data.text === 'string' ? data.text : '';
+            _refreshMasterNestedStatus();
+            return;
+        }
+        if (LAYER_SCOPED_ACTIONS.has(data.action) || MASTER_LAYER_ACTIONS.has(data.action)) {
+            handlers[data.action]?.(data);
         }
     });
 }
@@ -956,7 +1101,7 @@ function _renderSaveSessionDropup(dropupEl, statusEl) {
         `;
         item.onclick = () => {
             dropupEl.classList.remove('open');
-            _handleSaveSessionAs(preset.id, statusEl);
+            _doMasterSaveSessionAs(preset.id);
         };
         dropupEl.appendChild(item);
     });
@@ -1010,6 +1155,56 @@ function _installDockReserve(dockEl) {
     }
 }
 
+// Module-level handles set once at boot, so the routed action functions below
+// (shared by button wiring and _installLayerScopeReceiver's forwarded-action
+// handlers) don't need every caller to thread ctx/tripleLayoutEl/layoutBtns/
+// statusEl through explicitly.
+let _ctx = null;
+let _tripleLayoutEl = null;
+let _layoutBtns = null;
+let _statusEl = null;
+
+/**
+ * One place per Master action: check whether the selector currently targets a
+ * specific nested Grid Runtime and forward there; otherwise act locally. Used
+ * by button/menu clicks AND by _installLayerScopeReceiver's own handlers, so a
+ * doubly-nested Runtime falls through correctly with no special-casing.
+ */
+function _doMasterShuffle() {
+    if (_dispatchMasterToLayerTwo('shuffle')) return;
+    const set = _reshuffleOwnFolders(getDatabaseStructure());
+    _renderPanels(set.urls, set.map, _ctx);
+}
+function _doMasterShuffleAll() {
+    if (_dispatchMasterToLayerTwo('shuffleAll')) return;
+    _activeFolder = '';
+    const set = _reshuffleRandomFolders(getDatabaseStructure());
+    _renderPanels(set.urls, set.map, _ctx);
+}
+function _doMasterUndo() {
+    if (_dispatchMasterToLayerTwo('undo')) return;
+    _applyRestoredHistory(undoGridSession(), _ctx);
+}
+function _doMasterRedo() {
+    if (_dispatchMasterToLayerTwo('redo')) return;
+    _applyRestoredHistory(redoGridSession(), _ctx);
+}
+function _doMasterFolder(folderName) {
+    if (_dispatchMasterToLayerTwo('folder', { folder: folderName || '' })) return;
+    _activeFolder = folderName || '';
+    const db = getDatabaseStructure();
+    const set = _activeFolder ? _buildTripleSet(db, _activeFolder) : _reshuffleRandomFolders(db);
+    _renderPanels(set.urls, set.map, _ctx);
+}
+function _doMasterLayout(layoutName) {
+    if (_dispatchMasterToLayerTwo('layout', { layout: layoutName })) return;
+    _applyLayout(layoutName, _tripleLayoutEl, _layoutBtns);
+}
+async function _doMasterSaveSessionAs(presetId) {
+    if (_dispatchMasterToLayerTwo('saveSessionAs', { presetId })) return;
+    await _handleSaveSessionAs(presetId, _statusEl);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     Store.warmCache();
     initBlacklist();
@@ -1033,6 +1228,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const undoBtn         = document.getElementById('btn-master-undo');
     const redoBtn         = document.getElementById('btn-master-redo');
     const saveSessionBtn  = document.getElementById('btn-master-save');
+    const copyDiagnosticsBtn = document.getElementById('btn-master-copy-diagnostics');
     const saveDropupEl    = document.getElementById('master-save-dropup');
     const tripleLayoutEl  = document.getElementById('triple-layout');
     const layoutBtns = {
@@ -1046,7 +1242,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         '4grid':   document.getElementById('btn-layout-4grid'),
     };
 
-    _installDockReserve(orchestrationDock);
+    // ── Runtime Shell Ownership (000-INVARIANTS.md) ─────────────────────────
+    // A Runtime executing inside a Panel does not own the browser viewport,
+    // so it renders no global shell. "Suppressed" means NOT CONSTRUCTED —
+    // never relocated, never merely hidden: a nested Runtime cannot see the
+    // true viewport, so it cannot avoid a collision by moving, only relocate
+    // it (see the retired html.is-nested #orchestration-dock relocation
+    // rule, deleted from index3.html in this same pass). The nodes are
+    // removed outright, before anything below can wire a handler to them.
+    if (IS_NESTED) {
+        masterBarEl?.remove();
+        orchestrationDock?.remove();
+    } else {
+        _installDockReserve(orchestrationDock);
+    }
 
     _bindBookmarkModal();
 
@@ -1103,65 +1312,90 @@ document.addEventListener('DOMContentLoaded', async () => {
         pushUndoCheckpoint: () => pushGridSessionCheckpoint(),
     };
 
-    // 🎬 toggle open/close for the master control bar
-    const closeMasterBar = () => {
-        masterBarEl.classList.remove('open');
-        toggleMasterBtn.classList.remove('active');
-        folderDropupEl.classList.remove('open');
-        layoutMenuEl?.classList.remove('open');
-        generalMenuEl?.classList.remove('open');
-    };
-    toggleMasterBtn.onclick = () => {
-        if (masterBarEl.classList.contains('open')) {
-            closeMasterBar();
-        } else {
-            masterBarEl.classList.add('open');
-            toggleMasterBtn.classList.add('active');
-        }
-    };
-    closeMasterBtn.onclick = closeMasterBar;
+    _ctx = ctx;
+    _tripleLayoutEl = tripleLayoutEl;
+    _layoutBtns = layoutBtns;
+    _statusEl = statusEl;
+    _installNestedStatusReporter(statusEl);
 
-    // 🖥 Layout switcher — wire each button now. The INITIAL layout is applied
-    // after the session loads (below): initGridSession() resolves it from the
-    // source workspace's own saved layout, so it can't be known until then.
-    Object.entries(layoutBtns).forEach(([name, btn]) => {
-        if (btn) btn.onclick = () => _applyLayout(name, tripleLayoutEl, layoutBtns);
-    });
-
-    layoutOverflowBtn.onclick = () => {
-        const open = !layoutMenuEl.classList.contains('open');
-        layoutMenuEl.classList.toggle('open', open);
-        generalMenuEl?.classList.remove('open');
-    };
-    generalOverflowBtn.onclick = () => {
-        const open = !generalMenuEl.classList.contains('open');
-        generalMenuEl.classList.toggle('open', open);
-        layoutMenuEl?.classList.remove('open');
-    };
-    // BREADCRUMBS — WHY .contains() rather than === : the gateway's own icon is
-    // itself an element (a mini-floorplan <span> when it is showing the active
-    // overflow layout), so a genuine mouse/Playwright click on the gateway can
-    // land on that child, never on the button reference itself. A strict `!==`
-    // check would then treat the click that OPENED the menu as an outside click
-    // and immediately close it again on the same event.
-    document.addEventListener('click', (event) => {
-        if (layoutMenuEl?.classList.contains('open') && !layoutMenuEl.contains(event.target) && !layoutOverflowBtn.contains(event.target)) layoutMenuEl.classList.remove('open');
-        if (generalMenuEl?.classList.contains('open') && !generalMenuEl.contains(event.target) && !generalOverflowBtn.contains(event.target)) generalMenuEl.classList.remove('open');
-    });
-
-    // 🌐 Folder dropup
-    folderBtn.onclick = () => {
-        const willOpen = !folderDropupEl.classList.contains('open');
-        if (willOpen) _renderFolderDropup(folderDropupEl, ctx);
-        folderDropupEl.classList.toggle('open', willOpen);
-    };
-    document.addEventListener('click', (e) => {
-        if (folderDropupEl.classList.contains('open')
-            && !folderDropupEl.contains(e.target)
-            && e.target !== folderBtn) {
+    if (!IS_NESTED) {
+        // 🎬 toggle open/close for the master control bar
+        const closeMasterBar = () => {
+            masterBarEl.classList.remove('open');
+            toggleMasterBtn.classList.remove('active');
             folderDropupEl.classList.remove('open');
+            layoutMenuEl?.classList.remove('open');
+            generalMenuEl?.classList.remove('open');
+        };
+        toggleMasterBtn.onclick = () => {
+            if (masterBarEl.classList.contains('open')) {
+                closeMasterBar();
+            } else {
+                masterBarEl.classList.add('open');
+                toggleMasterBtn.classList.add('active');
+            }
+        };
+        closeMasterBtn.onclick = closeMasterBar;
+
+        // 🖥 Layout switcher — wire each button now. The INITIAL layout is
+        // applied after the session loads (below): initGridSession() resolves
+        // it from the source workspace's own saved layout, so it can't be
+        // known until then. Routed through _doMasterLayout so a selector
+        // targeting a specific nested Grid forwards instead of acting locally.
+        Object.entries(layoutBtns).forEach(([name, btn]) => {
+            if (btn) btn.onclick = () => _doMasterLayout(name);
+        });
+
+        layoutOverflowBtn.onclick = () => {
+            const open = !layoutMenuEl.classList.contains('open');
+            layoutMenuEl.classList.toggle('open', open);
+            generalMenuEl?.classList.remove('open');
+        };
+        generalOverflowBtn.onclick = () => {
+            const open = !generalMenuEl.classList.contains('open');
+            generalMenuEl.classList.toggle('open', open);
+            layoutMenuEl?.classList.remove('open');
+        };
+        // BREADCRUMBS — WHY .contains() rather than === : the gateway's own icon is
+        // itself an element (a mini-floorplan <span> when it is showing the active
+        // overflow layout), so a genuine mouse/Playwright click on the gateway can
+        // land on that child, never on the button reference itself. A strict `!==`
+        // check would then treat the click that OPENED the menu as an outside click
+        // and immediately close it again on the same event.
+        document.addEventListener('click', (event) => {
+            if (layoutMenuEl?.classList.contains('open') && !layoutMenuEl.contains(event.target) && !layoutOverflowBtn.contains(event.target)) layoutMenuEl.classList.remove('open');
+            if (generalMenuEl?.classList.contains('open') && !generalMenuEl.contains(event.target) && !generalOverflowBtn.contains(event.target)) generalMenuEl.classList.remove('open');
+        });
+
+        // 🌐 Folder dropup — items route through _doMasterFolder.
+        folderBtn.onclick = () => {
+            const willOpen = !folderDropupEl.classList.contains('open');
+            if (willOpen) _renderFolderDropup(folderDropupEl, _doMasterFolder);
+            folderDropupEl.classList.toggle('open', willOpen);
+        };
+        document.addEventListener('click', (e) => {
+            if (folderDropupEl.classList.contains('open')
+                && !folderDropupEl.contains(e.target)
+                && e.target !== folderBtn) {
+                folderDropupEl.classList.remove('open');
+            }
+        });
+
+        // RM-1 must observe the live Grid document, not a later Settings page.
+        // This is the same generator, renderer, and clipboard transport as
+        // Settings; it makes no Runtime or persistence mutation.
+        if (copyDiagnosticsBtn) {
+            copyDiagnosticsBtn.onclick = async () => {
+                try {
+                    const artifact = await generateDiagnosticArtifact();
+                    await copyDiagnosticArtifact(artifact);
+                    if (statusEl) statusEl.textContent = 'Diagnostics copied';
+                } catch {
+                    if (statusEl) statusEl.textContent = 'Could not copy diagnostics.';
+                }
+            };
         }
-    });
+    }
 
     if (statusEl) statusEl.textContent = 'Loading database…';
     await fetchDatabaseSilently(() => {
@@ -1204,71 +1438,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     _renderPanels(initialSet.urls, initialSet.map, ctx, { skipUndoSnapshot: true });
 
-    // 🎲 Shuffle — reshuffle every panel independently, each from its OWN
-    // currently-assigned folder (same folder it was launched with from index.html)
-    shuffleBtn.onclick = () => {
-        if (_dispatchMasterToLayerTwo('shuffle')) return;
-        const db = getDatabaseStructure();
-        const set = _reshuffleOwnFolders(db);
-        _renderPanels(set.urls, set.map, ctx);
-    };
+    if (!IS_NESTED) {
+        // 🎲 Shuffle / 🎲🎲 Shuffle All — routed through _doMaster* so a
+        // selector targeting a specific nested Grid forwards there instead of
+        // reshuffling this Runtime's own panels.
+        shuffleBtn.onclick = () => _doMasterShuffle();
+        shuffleAllBtn.onclick = () => _doMasterShuffleAll();
 
-    // 🎲🎲 Shuffle All — ignore every slot's assigned folder, pick a brand new
-    // random folder + link for each one independently
-    shuffleAllBtn.onclick = () => {
-        if (_dispatchMasterToLayerTwo('shuffleAll')) return;
-        const db = getDatabaseStructure();
-        _activeFolder = '';
-        const set = _reshuffleRandomFolders(db);
-        _renderPanels(set.urls, set.map, ctx);
-    };
-
-    // ↩ Master Undo — steps back through this SESSION's own history only
-    // (Shuffle, Shuffle All, folder reassignment, Position moves, Copy to
-    // Position). Never touches index.html's Undo — those are two entirely
-    // separate histories.
-    //
-    // Master Undo and each panel's own ↩ read the SAME canonical action list,
-    // differing only in which action they select: master takes the most recent
-    // still-applied action anywhere, a panel takes the most recent still-applied
-    // action affecting itself. Undoing marks the action itself as undone, so
-    // whichever control ran second simply doesn't see it any more — the same
-    // change can never be undone twice.
-    if (undoBtn) {
-        undoBtn.onclick = () => {
-            if (_dispatchMasterToLayerTwo('undo')) return;
-            _applyRestoredHistory(undoGridSession(), ctx);
-        };
-    }
-    if (redoBtn) {
-        redoBtn.onclick = () => {
-            if (_dispatchMasterToLayerTwo('redo')) return;
-            _applyRestoredHistory(redoGridSession(), ctx);
-        };
+        // ↩ Master Undo / ↪ Master Redo — steps back through this SESSION's
+        // own history only (Shuffle, Shuffle All, folder reassignment,
+        // Position moves, Copy to Position). Never touches index.html's Undo
+        // — those are two entirely separate histories.
+        //
+        // Master Undo and each panel's own ↩ read the SAME canonical action
+        // list, differing only in which action they select: master takes the
+        // most recent still-applied action anywhere, a panel takes the most
+        // recent still-applied action affecting itself. Undoing marks the
+        // action itself as undone, so whichever control ran second simply
+        // doesn't see it any more — the same change can never be undone twice.
+        if (undoBtn) undoBtn.onclick = () => _doMasterUndo();
+        if (redoBtn) redoBtn.onclick = () => _doMasterRedo();
     }
     _refreshHistoryButtons();
 
-    // Layer scope: the selector appears only once a Layer 2 runtime exists.
-    document.querySelectorAll('#master-layer-selector .hotswap-layer-btn').forEach((button) => {
-        button.onclick = () => {
-            _masterLayerScope = button.dataset.layer === LAYER_1 ? LAYER_1 : LAYER_2;
-            _refreshMasterLayerSelector();
-        };
-    });
+    // Layer scope: the selector appears only once a Layer 2 Runtime exists,
+    // and is rebuilt (buttons and handlers alike) on every refresh — see
+    // _refreshMasterLayerSelector.
     _refreshMasterLayerSelector();
 
-    // This session can itself be somebody's Layer 2.
+    // This session can itself be somebody's Layer 2 — respond to whatever the
+    // PARENT's own selector targets us with. Handlers call the SAME _doMaster*
+    // functions the local buttons use, so a forwarded action that this session
+    // itself further forwards (double nesting) falls through correctly.
     _installLayerScopeReceiver({
-        shuffle: () => shuffleBtn.click(),
-        shuffleAll: () => shuffleAllBtn.click(),
-        undo: () => { _applyRestoredHistory(undoGridSession(), ctx); },
-        redo: () => { _applyRestoredHistory(redoGridSession(), ctx); },
+        shuffle: () => _doMasterShuffle(),
+        shuffleAll: () => _doMasterShuffleAll(),
+        undo: () => _doMasterUndo(),
+        redo: () => _doMasterRedo(),
         reload: () => { window.location.reload(); },
+        folder: (data) => _doMasterFolder(typeof data.folder === 'string' ? data.folder : ''),
+        layout: (data) => { if (LAYOUT_IDS.includes(data.layout)) _doMasterLayout(data.layout); },
+        saveSessionAs: (data) => {
+            if (getPresets().some((preset) => String(preset.id) === String(data.presetId))) {
+                _doMasterSaveSessionAs(data.presetId);
+            }
+        },
     }, ctx);
 
     // 💾 Save Session As... — the ONLY way this session's changes ever reach
     // a real preset. Nothing else in this file writes to presets.json.
-    if (saveSessionBtn && saveDropupEl) {
+    if (!IS_NESTED && saveSessionBtn && saveDropupEl) {
         saveSessionBtn.onclick = () => {
             const willOpen = !saveDropupEl.classList.contains('open');
             if (willOpen) _renderSaveSessionDropup(saveDropupEl, statusEl);

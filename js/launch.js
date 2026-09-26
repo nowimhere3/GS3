@@ -212,6 +212,17 @@ export const RUNTIME_LAUNCH_MESSAGE_SOURCE = 'gs3-runtime-launch';
 export const LAYER_SCOPED_ACTIONS = new Set(['undo', 'redo', 'shuffle', 'shuffleAll', 'reload']);
 
 /**
+ * Master-only actions that mean something different when aimed at a specific
+ * nested Grid Runtime, and unlike LAYER_SCOPED_ACTIONS carry a payload rather
+ * than being fired as a bare key. These are Master Bar concepts (Folder,
+ * Layout, Save Session As) with no per-panel Hotswap Chrome counterpart, so
+ * they are kept in their own set rather than folded into LAYER_SCOPED_ACTIONS
+ * — a panel's own 🌐 Folder action (assign THIS container's folder) is a
+ * different action entirely and must never be forwarded.
+ */
+export const MASTER_LAYER_ACTIONS = new Set(['folder', 'layout', 'saveSessionAs']);
+
+/**
  * Refresh a rendered panel's toolbar identity strip: the fixed Position it
  * currently occupies, and whether a Layer 2 selector applies.
  *

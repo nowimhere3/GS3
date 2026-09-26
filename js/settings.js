@@ -13,6 +13,9 @@ import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blackl
 import { HOTSWAP_ACTIONS } from './launch.js';
 import { GRID_LAYOUTS, getLayoutIconMarkup } from './grid-layouts.js';
 import {
+    generateDiagnosticArtifact, copyDiagnosticArtifact, downloadDiagnosticArtifact,
+} from './diagnostics.js';
+import {
     getHotswapTrayOrder, setHotswapTrayOrder, getQuickActionOrder, setQuickActionOrder,
     getQuickActionCount, setQuickActionCount, isQuickActionRunwayEnabled,
     setQuickActionRunwayEnabled, getChromeOpacity, setChromeOpacity,
@@ -57,6 +60,7 @@ async function bootSettings() {
     // ── Hotswap Overlay Controls ───────────────────────────────────────────────
     _initHotswapControls();
     _initGhostMode();
+    _initDiagnostics();
     initBlacklist();
     initBlacklistUI();
     renderBlacklistDisplay();
@@ -91,7 +95,7 @@ function _initIngest() {
 
 function _initCollapsibleSections() {
     const screen = document.getElementById('settings-screen');
-    const order = ['grid-layouts', 'github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
+    const order = ['github', 'ingest', 'hotswap', 'grid-layouts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
     const state = { ...(Store.get('settingsSectionState') || {}) };
     const cards = new Map([...screen.querySelectorAll(':scope > .config-card[data-section]')]
         .map((card) => [card.dataset.section, card]));
@@ -127,6 +131,42 @@ function _initCollapsibleSections() {
         };
         apply();
     });
+}
+
+function _initDiagnostics() {
+    const copyBtn = document.getElementById('btn-copy-diagnostics');
+    const downloadBtn = document.getElementById('btn-download-diagnostics');
+    const statusEl = document.getElementById('diagnostics-status');
+    if (!copyBtn || !downloadBtn || !statusEl) return;
+
+    const run = async (destination) => {
+        copyBtn.disabled = true;
+        downloadBtn.disabled = true;
+        statusEl.textContent = 'Generating diagnostics…';
+        statusEl.dataset.state = 'working';
+        try {
+            const artifact = await generateDiagnosticArtifact();
+            if (destination === 'copy') {
+                await copyDiagnosticArtifact(artifact);
+                statusEl.textContent = 'Diagnostics copied';
+            } else {
+                downloadDiagnosticArtifact(artifact);
+                statusEl.textContent = 'Diagnostics downloaded';
+            }
+            statusEl.dataset.state = 'ok';
+        } catch (error) {
+            statusEl.textContent = destination === 'copy'
+                ? 'Could not copy diagnostics. Use Download Diagnostics instead.'
+                : 'Could not download diagnostics.';
+            statusEl.dataset.state = 'error';
+        } finally {
+            copyBtn.disabled = false;
+            downloadBtn.disabled = false;
+        }
+    };
+
+    copyBtn.onclick = () => run('copy');
+    downloadBtn.onclick = () => run('download');
 }
 
 function _initFrameHeightSettings() {
@@ -369,7 +409,7 @@ function _initHotswapControls() {
             row.className = 'hotswap-toggle-row';
             row.dataset.key = id;
             row.innerHTML = `<span class="hotswap-toggle-label">
-                <span class="drag-handle">☰</span>${getLayoutIconMarkup(id)}
+                <span class="drag-handle">☰</span><span class="layout-btn-shell layout-btn">${getLayoutIconMarkup(id)}</span>
                 <span class="layout-icon-title">${definition?.title || id}</span>
             </span>`;
             return row;

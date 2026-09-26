@@ -206,16 +206,16 @@ export function getSessionLayout() {
 }
 
 /**
- * Change the current orientation. Resets the arrangement back to identity —
- * a swap made sense for the PREVIOUS orientation's slot geometry, not
- * necessarily the new one, matching the precedent already established for
- * per-orientation border-drag sizing.
+ * Change the current orientation. Most transitions reset the arrangement to
+ * identity because a swap made sense for the previous geometry, not necessarily
+ * the new one. An explicit mirrored pair may supply a role-preserving
+ * arrangement instead.
  */
-export function setSessionLayout(layoutName) {
+export function setSessionLayout(layoutName, arrangement = IDENTITY_ARRANGEMENT) {
     _layout = layoutName;
-    _arrangement = [...IDENTITY_ARRANGEMENT];
-    // Positions are defined per-layout, and the arrangement has just been reset
-    // to identity, so any recorded Position action now describes geometry that
+    _arrangement = [...arrangement];
+    // Positions are defined per-layout, so any recorded Position action now
+    // describes geometry that
     // no longer exists. Drop them from both the undo and redo pools rather than
     // let a later Undo replay a swap against a layout it was never made in.
     // Content actions are unaffected — a URL is a URL in any layout.

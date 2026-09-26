@@ -6,7 +6,14 @@
     <title>Settings — Stream Loop Launchpad</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230095f6'/><text y='72' x='50' text-anchor='middle' font-size='60' font-weight='bold' fill='%23fff'>G</text></svg>">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* GS3-owned dark scrollbars */
+        html { color-scheme: dark; }
+        * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-color: #666 #1a1a1a; scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        ::-webkit-scrollbar-corner { background: #1a1a1a; }
         body { background: #0b0b0b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; overflow-x: hidden; }
 
         #settings-screen {
@@ -78,6 +85,12 @@
         .git-panel    { border-top: 3px solid #f1502f; }
         .manager-panel { border-top: 3px solid #26a69a; }
         .frame-height-panel { border-top: 3px solid #7c4dff; }
+        .diagnostics-panel { border-top: 3px solid #4f8fc7; }
+        .diagnostics-actions { display: flex; gap: 10px; }
+        .diagnostics-actions .btn { flex: 1; color: #9dccf5; border: 1px solid #315d83; }
+        .diagnostics-status { min-height: 18px; margin-top: 10px; color: #8292a0; font-size: 12px; }
+        .diagnostics-status[data-state="ok"] { color: #75b798; }
+        .diagnostics-status[data-state="error"] { color: #ff8c8c; }
 
         .input-group { margin-bottom: 15px; }
         .input-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; font-weight: bold; }
@@ -322,13 +335,31 @@
             border-radius: 10px;
             padding: 10px var(--hotswap-trailing-inset) 10px 14px;
         }
-        .hotswap-toggle-label { font-size: 13px; color: #ddd; display: flex; align-items: center; gap: 8px; }
+        .hotswap-toggle-label { font-size: 13px; color: #ddd; display: flex; align-items: center; gap: 10px; }
         .hotswap-toggle-emoji { font-size: 15px; }
 
         /* Grid layout mini-floorplan — the SAME visual grammar index3.html's
            Master Bar uses for its layout shortcuts and overflow menu, reused
            here verbatim so a Settings row and its Runtime counterpart are
-           recognizable as the same layout, never a second icon system. */
+           recognizable as the same layout, never a second icon system.
+           The button shell gives the diagram the same bordered control
+           treatment as the Runtime layout buttons. */
+        .layout-btn-shell {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 5px 8px;
+            flex-shrink: 0;
+            box-sizing: border-box;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .hotswap-toggle-row:hover .layout-btn-shell {
+            background: #252525;
+            border-color: #555;
+        }
         .layout-icon { display: grid; width: 26px; height: 20px; gap: 2px; flex-shrink: 0; }
         .layout-icon i { background: #8ab4d8; display: block; border-radius: 1px; font-style: normal; }
         .layout-icon i:nth-child(1) { grid-area: a; }
@@ -512,76 +543,6 @@
         <div class="input-group"><label>New Folder Name</label><input type="text" id="target-folder-input" class="url-input" placeholder="e.g., Imported_Leads_Pool"></div>
     </div>
 
-    <!-- Folder Manager -->
-    <div class="config-card manager-panel" data-section="folders">
-        <div class="section-header">
-            <h3>📂 Folder Manager</h3>
-        </div>
-        <p class="subtitle">Export a folder's URLs as a .txt file, or permanently delete a folder and all its links from the database.</p>
-        <div class="folder-manager-list" id="folder-manager-list">
-            <div class="folder-manager-empty">Connect your GitHub database to manage folders.</div>
-        </div>
-    </div>
-
-    <!-- Frame Height Settings -->
-    <div class="config-card frame-height-panel" data-section="frame-heights">
-        <div class="section-header">
-            <h3>📐 Frame Height Settings</h3>
-        </div>
-        <p class="subtitle">Set the height of each iframe panel before launching. Changes apply on next launch.</p>
-        <div class="frame-height-grid">
-            <div class="frame-height-group">
-                <label>🖥 Landscape Mode Height</label>
-                <div class="fh-desc">Suggested: 100vh (full screen). Try 80vh–120vh.</div>
-                <div class="frame-height-input-row">
-                    <input type="text" class="frame-height-input" id="fh-landscape-input" placeholder="100">
-                    <span class="frame-height-unit">vh</span>
-                </div>
-            </div>
-            <div class="frame-height-group">
-                <label>📱 Portrait Mode Height</label>
-                <div class="fh-desc">Suggested: 50vh (half screen). Try 40vh–70vh.</div>
-                <div class="frame-height-input-row">
-                    <input type="text" class="frame-height-input" id="fh-portrait-input" placeholder="50">
-                    <span class="frame-height-unit">vh</span>
-                </div>
-            </div>
-        </div>
-        <button class="btn-fh-apply" id="btn-fh-apply">✓ Save Heights</button>
-
-        <div class="spacer-toggle-row" id="fh-spacer-top-row">
-            <div>
-                <div class="spacer-toggle-label">Top Spacer Block</div>
-                <div class="spacer-toggle-sub">Adds a blank black block before the first stream</div>
-            </div>
-            <div class="spacer-right">
-                <input type="text" class="spacer-height-input" id="fh-spacer-top-input" placeholder="50">
-                <span class="frame-height-unit">vh</span>
-                <label class="switch" style="margin:0;">
-                    <input type="checkbox" id="fh-spacer-top-toggle">
-                    <span class="slider"></span>
-                </label>
-                <button class="btn-spacer-lock" id="btn-lock-spacer-top" title="Lock — prevents Save Heights from changing this row">🔓</button>
-            </div>
-        </div>
-
-        <div class="spacer-toggle-row" id="fh-spacer-end-row">
-            <div>
-                <div class="spacer-toggle-label">End Spacer Block</div>
-                <div class="spacer-toggle-sub">Adds a blank black block after the last stream so it can scroll fully into view</div>
-            </div>
-            <div class="spacer-right">
-                <input type="text" class="spacer-height-input" id="fh-spacer-input" placeholder="50">
-                <span class="frame-height-unit">vh</span>
-                <label class="switch" style="margin:0;">
-                    <input type="checkbox" id="fh-spacer-toggle">
-                    <span class="slider"></span>
-                </label>
-                <button class="btn-spacer-lock" id="btn-lock-spacer-end" title="Lock — prevents Save Heights from changing this row">🔓</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Hotswap Overlay Controls -->
     <div class="config-card hotswap-panel" data-section="hotswap">
         <div class="section-header">
@@ -703,6 +664,76 @@
         </div>
     </div>
 
+    <!-- Folder Manager -->
+    <div class="config-card manager-panel" data-section="folders">
+        <div class="section-header">
+            <h3>📂 Folder Manager</h3>
+        </div>
+        <p class="subtitle">Export a folder's URLs as a .txt file, or permanently delete a folder and all its links from the database.</p>
+        <div class="folder-manager-list" id="folder-manager-list">
+            <div class="folder-manager-empty">Connect your GitHub database to manage folders.</div>
+        </div>
+    </div>
+
+    <!-- Frame Height Settings -->
+    <div class="config-card frame-height-panel" data-section="frame-heights">
+        <div class="section-header">
+            <h3>📐 Frame Height Settings</h3>
+        </div>
+        <p class="subtitle">Set the height of each iframe panel before launching. Changes apply on next launch.</p>
+        <div class="frame-height-grid">
+            <div class="frame-height-group">
+                <label>🖥 Landscape Mode Height</label>
+                <div class="fh-desc">Suggested: 100vh (full screen). Try 80vh–120vh.</div>
+                <div class="frame-height-input-row">
+                    <input type="text" class="frame-height-input" id="fh-landscape-input" placeholder="100">
+                    <span class="frame-height-unit">vh</span>
+                </div>
+            </div>
+            <div class="frame-height-group">
+                <label>📱 Portrait Mode Height</label>
+                <div class="fh-desc">Suggested: 50vh (half screen). Try 40vh–70vh.</div>
+                <div class="frame-height-input-row">
+                    <input type="text" class="frame-height-input" id="fh-portrait-input" placeholder="50">
+                    <span class="frame-height-unit">vh</span>
+                </div>
+            </div>
+        </div>
+        <button class="btn-fh-apply" id="btn-fh-apply">✓ Save Heights</button>
+
+        <div class="spacer-toggle-row" id="fh-spacer-top-row">
+            <div>
+                <div class="spacer-toggle-label">Top Spacer Block</div>
+                <div class="spacer-toggle-sub">Adds a blank black block before the first stream</div>
+            </div>
+            <div class="spacer-right">
+                <input type="text" class="spacer-height-input" id="fh-spacer-top-input" placeholder="50">
+                <span class="frame-height-unit">vh</span>
+                <label class="switch" style="margin:0;">
+                    <input type="checkbox" id="fh-spacer-top-toggle">
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-spacer-lock" id="btn-lock-spacer-top" title="Lock — prevents Save Heights from changing this row">🔓</button>
+            </div>
+        </div>
+
+        <div class="spacer-toggle-row" id="fh-spacer-end-row">
+            <div>
+                <div class="spacer-toggle-label">End Spacer Block</div>
+                <div class="spacer-toggle-sub">Adds a blank black block after the last stream so it can scroll fully into view</div>
+            </div>
+            <div class="spacer-right">
+                <input type="text" class="spacer-height-input" id="fh-spacer-input" placeholder="50">
+                <span class="frame-height-unit">vh</span>
+                <label class="switch" style="margin:0;">
+                    <input type="checkbox" id="fh-spacer-toggle">
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-spacer-lock" id="btn-lock-spacer-end" title="Lock — prevents Save Heights from changing this row">🔓</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Ghost Mode (other overlays) -->
     <div class="config-card ghost-panel" data-section="ghost">
         <div class="section-header">
@@ -710,6 +741,16 @@
         </div>
         <p class="subtitle">Fade these overlays to the Runway's Resting Opacity until you hover them. The Hotswap toolbar is not listed: it retracts completely when unused, so it has nothing to fade.</p>
         <div class="hotswap-toggle-list" id="ghost-toggle-list" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="config-card diagnostics-panel" data-section="diagnostics">
+        <div class="section-header"><h3>Diagnostics</h3></div>
+        <p class="subtitle">Generate a fresh, redacted RM-1 current-truth snapshot. Diagnostics observe existing state and never repair or change it.</p>
+        <div class="diagnostics-actions">
+            <button type="button" class="btn btn-add" id="btn-copy-diagnostics">Copy Diagnostics</button>
+            <button type="button" class="btn btn-add" id="btn-download-diagnostics">Download Diagnostics</button>
+        </div>
+        <div class="diagnostics-status" id="diagnostics-status" role="status" aria-live="polite"></div>
     </div>
 
     <div class="config-card blacklist-panel" data-section="blacklist">

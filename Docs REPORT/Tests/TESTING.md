@@ -766,6 +766,28 @@ completion, Escape, or a click outside — never only by completing the action.
   click, or an action. This is a real browser limitation — no transparent overlay is introduced
   to paper over it, since that would intercept the customer's own first click into their site.
 
+### 4.24 ★ Stage 2.5 — [L2-P#] addressing, nested labels/Chrome, capability routing, shell suppression
+- **Truthful addressing** — `[L2-P#]` renders one button per outer Position that truthfully
+  hosts an active nested Runtime, never a fixed/future set; nesting a second Runtime adds a
+  second button; moving the hosting Panel (P1 → P2) relabels the SAME target (same slot index)
+  with no reload.
+- **Single-target dispatch, not broadcast** — with two nested Runtimes at once, selecting
+  `L2-P1` and firing a Layer-scoped action reaches ONLY that iframe (verified by a
+  `postMessage` spy on both nested frames); re-targeting `L2-P3` with the same control reaches
+  only the other one.
+- **Folder / Layout / Save Session As routing** — `MASTER_LAYER_ACTIONS` (`folder`, `layout`,
+  `saveSessionAs`) forward with a validated payload to the targeted nested Runtime only; Layout
+  forwarding is also proven by REAL effect (the nested Grid's own `#triple-layout` class
+  changes; the outer Grid's does not).
+- **Nested local labels** — a nested Runtime's own Position labels/tooltips read `L2 · P#` /
+  `Layer 2 · Position #`, distinct from the host's `L2-P#` addressing of the same Runtime from
+  outside; the outer (un-nested) Runtime keeps ordinary `Position #` wording.
+- **Subtle nested Chrome** — nested `.hotswap-toolbar` computed background differs from the
+  outer Runtime's, off the existing `.is-nested` hook.
+- **Nested shell suppression, after routing parity** — a nested Grid Runtime's `#master-bar`
+  and `#orchestration-dock` are `=== null` (not merely hidden), while its own local Chrome and
+  `.resizer`s survive; a standalone (never-nested) Grid still renders exactly one of each.
+
 ---
 
 ## 5. Tier 4 — Data & sync (mock first, real only if credentials are supplied)
@@ -890,8 +912,35 @@ of them has been violated.
 | 13 | `index.html` auto-save wiped a Grid-saved `layout` | §2.3 |
 | 14 | Launch Grid reverted to a plain `<a href>`, dropping `?workspace=` | §4.6 |
 | 15 | The old right-pinned status rule was retired: Stage A uses three-region flow and the measured Dock reserve | §4.7 |
+| 16 | Settings Grid layout rows rendered naked oversized diagrams without button shells | Stage 2.1 |
+| 17 | Settings Grid Layout Shortcuts appeared above Toolbar Shortcuts and Runway | Stage 2.1 |
+| 18 | GS3-owned scrollbars rendered bright white default rails | Stage 2.1 |
 
 ---
+
+## Stage 2.6 targeted coverage
+
+- `test/positions-history.test.js` proves Top2 <-> Bottom2's explicit
+  wide/left-short/right-short arrangement mapping and that unrelated layout
+  pairs do not enter this path.
+- `test/boot-smoke.test.js` drives the visible preset selection, a real nested
+  Runtime Undo/Redo mutation, and Top2 <-> Bottom2 iframe/identity continuity.
+- `test/stabilization.test.js` proves a routine successful database save does
+  not alert and its existing failure alert remains visible.
+
+## Stage 2.6.1 RM-1 Tier 2 coverage
+
+- `test/diagnostics.test.js` proves the structured current-truth snapshot and
+  Markdown projection for Runtime, Positions, Layer/nesting, bounded history,
+  Workspace projection, browser persistence, and preset SHA comparison.
+- The remote preset probe is constrained to one bounded GitHub Contents API
+  GET. The suite proves failure containment and that snapshot generation leaves
+  Store, Runtime Session, history, presets, and SHA state unchanged.
+- Adversarial fixtures cover GitHub PATs, Authorization/Bearer values, JWTs,
+  Google/OAuth-like tokens, signed URL queries/fragments, suspicious path/host
+  segments, and long opaque strings in both structured and rendered output.
+- Freshness, the 40 KB hard boundary, natural output below 16 KB, and identical
+  Copy/Download Markdown transport are permanent regression checks.
 
 ## 9. Reporting format
 

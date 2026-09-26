@@ -51,7 +51,14 @@
         })();
     </script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* GS3-owned dark scrollbars */
+        html { color-scheme: dark; }
+        * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-color: #666 #1a1a1a; scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        ::-webkit-scrollbar-corner { background: #1a1a1a; }
         html, body { width: 100%; height: 100%; overflow: hidden; }
         body { background: #0b0b0b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
 
@@ -132,12 +139,14 @@
         /* Orchestration Dock: its measured width is reserved by the Master Bar. */
         #orchestration-dock { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
 
-        /* When this page is loaded inside another Launchpad session (e.g. via
-           🚀), move the master 🎬+⚙ cluster to the left instead of the right
-           so it doesn't collide with the OUTER session's own 🎬+⚙ — which is
-           always fixed to the true browser viewport's bottom-right corner,
-           regardless of which panel this iframe happens to occupy. */
-        html.is-nested #orchestration-dock { right: auto; left: 18px; }
+        /* BREADCRUMBS — the .float-btn (Dock) relocation workaround that used to
+           live here (`html.is-nested #orchestration-dock { right:auto; left:18px }`)
+           is retired: a nested Runtime no longer CONSTRUCTS its own Dock or
+           Master Bar at all (triple-mode.js, IS_NESTED guard), so there is no
+           longer a second cluster to relocate away from the outer session's.
+           See 000-INVARIANTS.md § Runtime Shell Ownership. The gold border below
+           is purely a leftover-visible cue for the rare case a .float-btn is
+           ever rendered while nested; it no longer does any collision avoidance. */
         html.is-nested .float-btn { border-color: #f0c020; border-width: 2px; }
         html.is-nested .float-btn:hover { border-color: #ffd84a; }
         html.is-nested .float-btn.active { border-color: #f0c020; }
@@ -189,6 +198,12 @@
         .master-btn.layout-btn  { padding: 8px 11px; }
         .master-btn.layout-btn.active { background: #0e1e2e; border-color: #0095f6; }
         #master-status { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #555; font-family: monospace; }
+        /* Nested-status reporting (Stage C route 3): shows the targeted nested
+           Runtime's own reported status text, reusing this one status pathway
+           rather than a second status system. Hidden whenever the selector
+           targets L1 or the target has never reported. */
+        #master-nested-status { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #b39ae0; font-family: monospace; margin-left: 6px; }
+        #master-nested-status[hidden] { display: none; }
 
         /* Mini layout-preview icons for the layout-switcher buttons.
            These are temporary CSS-drawn placeholders — swap in your 56px
@@ -426,6 +441,16 @@
         }
         .stream-panel.chrome-revealed { --hotswap-website-inset: var(--hotswap-toolbar-height); }
 
+        /* Subtle Layer-2 Chrome distinction (011-HOTSWAP-CHROME.md § Subtle
+           nested visual treatment). A graphite/smoky tint, not a color change
+           loud enough to read on its own — the explicit "L2 · P#" text is the
+           primary truth; this is only a peripheral-vision cue, reusing the
+           existing .is-nested state hook rather than inventing a parallel one. */
+        html.is-nested .hotswap-toolbar {
+            background: rgba(26, 24, 18, 0.94);
+            border-bottom-color: #3a331f;
+        }
+
         .hotswap-position-label { white-space: nowrap; }
         /* ── Compact rail geometry ────────────────────────────────────────────
            One row, every control the same height, everything vertically centred.
@@ -633,12 +658,14 @@
         </div>
         <div class="master-region master-status-region">
             <span id="master-status">Not connected</span>
+            <span id="master-nested-status" class="master-nested-status" hidden></span>
         </div>
         <div class="master-region master-layer-region">
-        <div class="hotswap-layer-selector" id="master-layer-selector" hidden>
-            <button class="hotswap-layer-btn" data-layer="L2">L2</button>
-            <button class="hotswap-layer-btn" data-layer="L1">L1</button>
-        </div>
+        <!-- Rebuilt on every refresh by _refreshMasterLayerSelector — one
+             button per outer Position that truthfully hosts an active nested
+             Runtime (`L2-P#`), plus `L1`. Never a fixed pair: see
+             006-TERMINOLOGY.md § L2-P# addressing. -->
+        <div class="hotswap-layer-selector" id="master-layer-selector" hidden></div>
         </div>
         <div class="master-layer-spacer"></div>
         <div class="master-region master-contextual">
@@ -680,6 +707,7 @@
         <div>
             <button class="master-btn save-btn" id="btn-master-save">💾 Save Session As...</button>
         </div>
+        <button type="button" class="master-btn" id="btn-master-copy-diagnostics">Copy Diagnostics</button>
         <button class="master-btn close-btn" id="btn-master-close">🎬 Close</button>
         <a href="index.html" class="master-btn back-btn">⚙ Launchpad</a>
         </div>

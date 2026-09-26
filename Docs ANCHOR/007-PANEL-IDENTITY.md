@@ -115,3 +115,9 @@ of the existing architecture with no additional permutation logic. A future
 layout pair whose area-name bindings do not already align this way would
 need an explicit, deliberate permutation, not an assumed one — see
 999-NEXT.md.
+
+Top2 <-> Bottom2 is that explicit pair: their area names bind the wide,
+left-short, and right-short roles differently. Its transition translates the
+current arrangement between those three roles in both directions. It preserves
+Panel identity and live iframe nodes; all other layout transitions keep their
+existing reset behavior.

@@ -57,6 +57,29 @@ test('initGridSession reaches a supplied layout fallback when no preference exis
     assert.equal(initGridSession('righttall').layout, 'lefttall');
 });
 
+test('routine database save is silent on success and still alerts on failure', async () => {
+    globalThis.localStorage = makeStorage();
+    const alerts = [];
+    globalThis.alert = (message) => alerts.push(message);
+    const { Store } = await import('../js/storage.js');
+    const { setDatabaseStructure } = await import('../js/state.js');
+    const { pushDatabaseToRemote } = await import('../js/sync.js');
+    Store.set('gitToken', 'test-token');
+    Store.set('gitRepo', 'owner/repo');
+    setDatabaseStructure({ Saved: ['https://example.test/item'] });
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ content: { sha: 'saved' } }), {
+        status: 201, headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(await pushDatabaseToRemote('routine save'), true);
+    assert.deepEqual(alerts, [], 'a successful routine save does not interrupt the workflow');
+
+    globalThis.fetch = async () => { throw new Error('network unavailable'); };
+    assert.equal(await pushDatabaseToRemote('routine save'), false);
+    assert.match(alerts.at(-1), /Cloud Synchronization failed: network unavailable/,
+        'the existing visible failure path remains intact');
+});
+
 test('links database larger than 1 MB round-trips exactly through indexed cassettes', async () => {
     globalThis.localStorage = makeStorage();
     globalThis.alert = () => {};

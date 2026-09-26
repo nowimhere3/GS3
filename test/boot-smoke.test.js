@@ -82,6 +82,36 @@ test('workspace UI is data-driven and shows Live Builder plus presets 1-9', asyn
     await page.close();
 });
 
+test('workspace selector projects the canonical selected preset immediately and after reload', async () => {
+    const page = await browser.newPage();
+    const presets = Array.from({ length: 9 }, (_, index) => ({
+        id: index + 1, name: index === 0 ? 'Cleaned Bookmarks' : `Preset ${index + 1}`,
+        panels: [], folderMap: {}, lockState: {}, layout: null, rowCount: 0,
+        streamCount: 0, isEmpty: true, savedAt: null,
+    }));
+    const encode = (value) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
+    await page.addInitScript(() => {
+        localStorage.setItem('git_sync_token', 'test-token');
+        localStorage.setItem('git_sync_repo', 'owner/repo');
+        localStorage.setItem('workspace_active_id', '1');
+    });
+    await page.route('https://api.github.com/**', (route) => route.fulfill({
+        json: { sha: 'preset-labels', encoding: 'base64', content: encode(presets) },
+    }));
+    await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+    const activeLabel = () => page.locator('#workspace-tabs .workspace-tab.active .workspace-tab-name').textContent();
+    assert.match(await activeLabel(), /Cleaned Bookmarks/);
+    await page.locator('#workspace-tabs .workspace-tab').filter({ hasText: 'Preset 2' }).click();
+    assert.match(await activeLabel(), /Preset 2/);
+    await page.locator('#workspace-tabs .workspace-tab').filter({ hasText: 'Preset 5' }).click();
+    assert.match(await activeLabel(), /Preset 5/);
+    await page.locator('#workspace-tabs .workspace-tab').filter({ hasText: 'Cleaned Bookmarks' }).click();
+    assert.match(await activeLabel(), /Cleaned Bookmarks/);
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.match(await activeLabel(), /Cleaned Bookmarks/, 'reload projects the persisted canonical selection');
+    await page.close();
+});
+
 test('legacy remote presets 1-5 normalize to nine without changing remote entries', async () => {
     const page = await browser.newPage();
     const errors = [];
@@ -2345,6 +2375,255 @@ test('a nested Grid Runtime keeps its own internal resizers even when its iframe
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stage 2.5 — explicit L2-P# addressing, nested local labels, subtle nested
+// Chrome, capability routing, and nested global-shell suppression.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The Master conductor's current [L2-P#]/[L1] buttons, in DOM order. */
+const masterLayerButtons = (page) => page.evaluate(() => [
+    ...document.querySelectorAll('#master-layer-selector .hotswap-layer-btn'),
+].map((button) => ({
+    text: button.textContent.trim(),
+    slot: button.dataset.slot === undefined ? null : Number(button.dataset.slot),
+    active: button.classList.contains('active'),
+})));
+
+test('Stage C: [L2-P#] truthfully addresses each nested Runtime by its HOST Position, and tracks a move', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        // Only Position 1 (slot 0) hosts a nested Runtime so far.
+        await assignPanelUrl(page, 0, 'index3.html?workspace=live');
+        await page.waitForFunction(() => document.getElementById('master-layer-selector').hidden === false);
+        assert.deepEqual((await masterLayerButtons(page)).map((b) => b.text), ['L2-P1', 'L1'],
+            'no L2-P2/P3 target exists — nothing hosts a nested Runtime there');
+
+        // Nest a SECOND Runtime at slot 2 (Position 3 in the default Left Tall).
+        await assignPanelUrl(page, 2, 'index3.html?workspace=live');
+        await page.waitForFunction(() => document.querySelectorAll('#master-layer-selector .hotswap-layer-btn').length === 3);
+        assert.deepEqual((await masterLayerButtons(page)).map((b) => b.text), ['L2-P1', 'L2-P3', 'L1'],
+            'exactly the Positions that truthfully host an active nested Runtime, matching the brief\'s own example');
+
+        // Move the Panel hosting the first nested Runtime from P1 to P4 (an
+        // empty slot in Left Tall is never used, so swap with slot 1 = P2
+        // instead, then move again to reach an otherwise-unoccupied Position
+        // isn't necessary — a straight swap already proves the label follows
+        // the PANEL, not the slot).
+        await page.evaluate(() => {
+            const panel = document.querySelectorAll('.stream-panel')[0];
+            panel.querySelector('.btn-hotswap-position').click();
+        });
+        await page.evaluate(() => {
+            const items = [...document.querySelectorAll('.stream-panel')[0].querySelectorAll('.hotswap-position-row .hotswap-position-item')];
+            items.find((item) => item.textContent.includes('Position 2')).click();
+        });
+        await page.waitForFunction(() => {
+            const texts = [...document.querySelectorAll('#master-layer-selector .hotswap-layer-btn')].map((b) => b.textContent.trim());
+            return texts.includes('L2-P2');
+        });
+        const afterMove = await masterLayerButtons(page);
+        assert.deepEqual(afterMove.map((b) => b.text).sort(), ['L1', 'L2-P2', 'L2-P3'].sort(),
+            'L2-P1 became L2-P2 — the SAME nested Runtime, now entered through Position 2 — without recreating anything');
+        assert.equal(afterMove.find((b) => b.text === 'L2-P2').slot, 0, 'still the Runtime hosted by slot 0, only its Position label changed');
+    } finally { await page.close(); }
+});
+
+test('Stage C: the selector targets exactly ONE nested Runtime, never broadcasting to every nested Runtime', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 0, 'index3.html?workspace=live');
+        await assignPanelUrl(page, 2, 'index3.html?workspace=live');
+        await page.waitForFunction(() => document.querySelectorAll('#master-layer-selector .hotswap-layer-btn').length === 3);
+
+        const spy = () => page.evaluate(() => {
+            window.__sent = { 0: [], 2: [] };
+            [0, 2].forEach((slot) => {
+                const iframe = document.querySelectorAll('.stream-panel iframe')[slot];
+                iframe.contentWindow.postMessage = (message) => window.__sent[slot].push(message);
+            });
+        });
+        const sent = () => page.evaluate(() => window.__sent);
+
+        // Target P1 explicitly, then fire a Layer-scoped action.
+        await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-slot="0"]').click());
+        await spy();
+        await page.evaluate(() => document.getElementById('btn-master-shuffle').click());
+        let after = await sent();
+        assert.equal(after[0].length, 1, 'the targeted nested Runtime (P1) received the action');
+        assert.equal(after[2].length, 0, 'the OTHER nested Runtime (P3) received nothing — no broadcast');
+
+        // Re-target P3 and repeat — the SAME control, a different target.
+        await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-slot="2"]').click());
+        await spy();
+        await page.evaluate(() => document.getElementById('btn-master-shuffle').click());
+        after = await sent();
+        assert.equal(after[0].length, 0, 'no longer targeted — P1 receives nothing this time');
+        assert.equal(after[2].length, 1, 'P3 is now the one that receives it');
+    } finally { await page.close(); }
+});
+
+test('Stage C: Folder, Layout and Save Session As route to the targeted nested Runtime only', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 0, 'index3.html?workspace=live');
+        await assignPanelUrl(page, 2, 'index3.html?workspace=live');
+        await page.waitForFunction(() => document.querySelectorAll('#master-layer-selector .hotswap-layer-btn').length === 3);
+        await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-slot="0"]').click());
+
+        const spy = () => page.evaluate(() => {
+            window.__sent = { 0: [], 2: [] };
+            [0, 2].forEach((slot) => {
+                const iframe = document.querySelectorAll('.stream-panel iframe')[slot];
+                iframe.contentWindow.postMessage = (message) => window.__sent[slot].push(message);
+            });
+        });
+        await spy();
+
+        // 💾 Save Session As... a specific preset — payload-carrying, key + data.
+        await page.evaluate(() => document.getElementById('btn-master-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-master-save').click());
+        await page.evaluate(() => [...document.querySelectorAll('.save-session-item')]
+            .find((item) => item.textContent.includes('Preset 3')).click());
+        let after = await page.evaluate(() => window.__sent);
+        assert.deepEqual(after[0], [{ source: 'gs3-layer-scope', action: 'saveSessionAs', presetId: 3 }]);
+        assert.deepEqual(after[2], [], 'the other nested Runtime is untouched');
+
+        // 🌐 Folder — a specific folder name, forwarded rather than reshuffling
+        // this (outer) Runtime's own panels.
+        await spy();
+        await page.evaluate(() => document.getElementById('btn-master-folder').click());
+        await page.evaluate(() => [...document.querySelectorAll('.dropup-item')][0].click()); // "Any Folder"
+        after = await page.evaluate(() => window.__sent);
+        assert.deepEqual(after[0], [{ source: 'gs3-layer-scope', action: 'folder', folder: '' }]);
+        assert.deepEqual(after[2], []);
+
+        // ▦ Layout — forwarded, and provably does NOT touch the outer Grid's
+        // own layout (real effect, not just the message).
+        const outerLayoutBefore = await page.evaluate(() => document.getElementById('triple-layout').className);
+        await spy();
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-vsplit').click());
+        after = await page.evaluate(() => window.__sent);
+        assert.deepEqual(after[0], [{ source: 'gs3-layer-scope', action: 'layout', layout: 'vsplit' }]);
+        assert.deepEqual(after[2], []);
+        const outerLayoutAfter = await page.evaluate(() => document.getElementById('triple-layout').className);
+        assert.equal(outerLayoutAfter, outerLayoutBefore, 'the outer Grid\'s own layout never changed — only the targeted nested Runtime was asked to');
+    } finally { await page.close(); }
+});
+
+test('Stage C: Layout forwarding actually changes the targeted nested Grid, real effect not just the message', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 1, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 1);
+        await nested.waitForFunction(() => document.getElementById('triple-layout') !== null);
+        const nestedBefore = await nested.evaluate(() => document.getElementById('triple-layout').className);
+
+        await page.waitForFunction(() => document.getElementById('master-layer-selector').hidden === false);
+        await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-slot="1"]').click());
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-vsplit').click());
+
+        await nested.waitForFunction(() => document.getElementById('triple-layout').classList.contains('layout-vsplit'));
+        const nestedAfter = await nested.evaluate(() => document.getElementById('triple-layout').className);
+        assert.notEqual(nestedAfter, nestedBefore);
+        assert.match(nestedAfter, /layout-vsplit/);
+
+        const outerLayout = await page.evaluate(() => document.getElementById('triple-layout').className);
+        assert.match(outerLayout, /layout-lefttall/, 'the OUTER Grid stayed on its own default layout');
+    } finally { await page.close(); }
+});
+
+test('Stage C: nested local Position labels read "L2 · P#", distinct from the host conductor\'s "L2-P#" addressing', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 1, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 1);
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel').length >= 1);
+
+        // The OUTER Runtime's own labels are ordinary — it is not nested.
+        const outerLabel = await page.evaluate(() =>
+            document.querySelectorAll('.slot-label')[1].textContent);
+        assert.equal(outerLabel, 'Position 2', 'the outer Runtime is not nested — ordinary wording');
+
+        // The NESTED Runtime's own internal Position 1 label uses the compact
+        // Layer-2-local grammar, and the long-form tooltip spells it out.
+        const nestedLabel = await nested.evaluate(() => document.querySelector('.slot-label').textContent);
+        const nestedTooltip = await nested.evaluate(() => document.querySelector('.slot-label').title);
+        assert.equal(nestedLabel, 'L2 · P1');
+        assert.equal(nestedTooltip, 'Layer 2 · Position 1');
+
+        // Master's addressing for the SAME nested Runtime uses the hyphenated
+        // HOST-Position grammar — a deliberately different vocabulary so the
+        // two concepts (internal Position vs. HOST entrance) are never conflated.
+        await page.waitForFunction(() => document.getElementById('master-layer-selector').hidden === false);
+        const masterText = (await masterLayerButtons(page)).find((b) => b.text.startsWith('L2-')).text;
+        assert.equal(masterText, 'L2-P2');
+    } finally { await page.close(); }
+});
+
+test('Stage C: nested Chrome carries a subtle, distinct visual hook (never only the L2 · P# text)', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 1, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 1);
+        await nested.waitForFunction(() => document.querySelector('.hotswap-toolbar') !== null);
+
+        const outerBg = await page.evaluate(() =>
+            getComputedStyle(document.querySelectorAll('.hotswap-toolbar')[1]).backgroundColor);
+        const nestedBg = await nested.evaluate(() =>
+            getComputedStyle(document.querySelector('.hotswap-toolbar')).backgroundColor);
+        assert.notEqual(nestedBg, outerBg, 'nested top Chrome is visually distinguishable from outer Chrome, even before any text is read');
+
+        const isNestedFlag = await nested.evaluate(() => document.documentElement.classList.contains('is-nested'));
+        assert.equal(isNestedFlag, true, 'the distinction hangs off the existing .is-nested state hook, not a parallel one');
+    } finally { await page.close(); }
+});
+
+test('Stage C: a nested Grid Runtime constructs no global Master Bar or Orchestration Dock, but keeps local Chrome and resizers; a standalone Grid still renders both', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 1, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 1);
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel').length >= 1);
+
+        const nestedShell = await nested.evaluate(() => ({
+            masterBar: document.getElementById('master-bar') === null,
+            dock: document.getElementById('orchestration-dock') === null,
+            hasToolbar: document.querySelector('.hotswap-toolbar') !== null,
+            resizerCount: document.querySelectorAll('.resizer').length,
+        }));
+        assert.equal(nestedShell.masterBar, true, 'not merely hidden — NOT CONSTRUCTED');
+        assert.equal(nestedShell.dock, true, 'not merely hidden — NOT CONSTRUCTED');
+        assert.ok(nestedShell.hasToolbar, 'local Panel Chrome survives suppression');
+        assert.ok(nestedShell.resizerCount > 0, 'the nested Grid\'s own internal resizers survive suppression');
+
+        // The OUTER (viewport-owning) Runtime still has exactly one of each.
+        const outerShell = await page.evaluate(() => ({
+            masterBarCount: document.querySelectorAll('#master-bar').length,
+            dockCount: document.querySelectorAll('#orchestration-dock').length,
+        }));
+        assert.deepEqual(outerShell, { masterBarCount: 1, dockCount: 1 });
+
+        // A standalone (never-nested) Grid renders both too — nesting alone
+        // decides this, not "being a Grid".
+        const standalone = await browser.newPage();
+        try {
+            await standalone.goto(`${ORIGIN}/index3.html`, { waitUntil: 'load' });
+            await standalone.waitForFunction(() => document.querySelectorAll('.stream-panel').length === 4);
+            const standaloneShell = await standalone.evaluate(() => ({
+                masterBar: document.getElementById('master-bar') !== null,
+                dock: document.getElementById('orchestration-dock') !== null,
+            }));
+            assert.deepEqual(standaloneShell, { masterBar: true, dock: true });
+        } finally { await standalone.close(); }
+    } finally { await page.close(); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Chrome lifecycle: autonomous retraction, Deep Cuts dismissal, Position button.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3593,9 +3872,9 @@ test('Part 1-2 Settings major cards collapse persistently and administrative UI 
         return route.fulfill({ status: 404, body: '{}' });
     });
     await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
-    const expected = ['grid-layouts', 'github', 'ingest', 'hotswap', 'folders', 'frame-heights', 'ghost', 'blacklist'];
+    const expected = ['github', 'ingest', 'hotswap', 'grid-layouts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
     assert.deepEqual(await page.locator('#settings-screen > .config-card').evaluateAll((cards) => cards.map((c) => c.dataset.section)), expected);
-    assert.equal(await page.locator('.config-card .section-toggle').count(), 8);
+    assert.equal(await page.locator('.config-card .section-toggle').count(), 9);
     assert.equal(await page.locator('.hotswap-surface .section-toggle, .hotswap-subsection .section-toggle').count(), 0);
     assert.ok((await page.locator('#ingest-folder-select option').allTextContents()).some((text) => text.includes('Alpha')));
     assert.equal(await page.locator('#file-dropzone').count(), 1);
@@ -3631,6 +3910,125 @@ test('Part 1-2 Settings major cards collapse persistently and administrative UI 
     assert.match(await page.locator('#blacklist-display').textContent(), /No domains blacklisted/);
     assert.equal(await page.request.get(`${ORIGIN}/index.html`).then((r) => r.text()).then((html) => html.includes('id="file-dropzone"') || html.includes('id="blacklist-display"')), false);
     await page.close();
+});
+
+test('RM-1 Settings Copy Diagnostics exposes a stale preset SHA boundary without mutation requests', async () => {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    const diagnosticMethods = [];
+    await page.addInitScript(() => {
+        localStorage.setItem('git_sync_token', `github_pat_${'x'.repeat(24)}`);
+        localStorage.setItem('git_sync_repo', 'owner/repo');
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText: async (value) => { window.__diagnosticsCopied = value; } },
+        });
+    });
+    await page.route('https://api.github.com/**', async (route) => {
+        const request = route.request();
+        const path = new URL(request.url()).pathname;
+        if (path.endsWith('/contents/presets.json')) {
+            diagnosticMethods.push(request.method());
+            return route.fulfill({ json: { sha: 'b'.repeat(40) } });
+        }
+        if (path.endsWith('/contents/links-index.json') || path.endsWith('/contents/links.json')) {
+            return route.fulfill({ status: 404, body: '{}' });
+        }
+        return route.fulfill({ status: 404, body: '{}' });
+    });
+    await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+    await page.evaluate(async () => {
+        const { setPresetsSha } = await import('./js/state.js');
+        setPresetsSha('a'.repeat(40));
+    });
+    await page.locator('#btn-copy-diagnostics').click();
+    await page.waitForFunction(() => document.getElementById('diagnostics-status').textContent === 'Diagnostics copied');
+    const markdown = await page.evaluate(() => window.__diagnosticsCopied);
+    assert.match(markdown, /RM-1 · snapshot schema 1/);
+    assert.match(markdown, /WARN Preset Sync: in-memory presets SHA differs from observed remote SHA/);
+    assert.match(markdown, /presets SHA in memory\s+aaaaaaaa/);
+    assert.match(markdown, /remote presets SHA\s+bbbbbbbb/);
+    assert.doesNotMatch(markdown, /github_pat_/);
+    assert.deepEqual(diagnosticMethods, ['GET']);
+    await page.close();
+});
+
+test('RM-1 Grid Copy Diagnostics observes the live Runtime without navigation or mutation', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        const diagnosticMethods = [];
+        await page.evaluate(async () => {
+            const { Store } = await import('./js/storage.js');
+            const { setPresetsSha } = await import('./js/state.js');
+            Store.set('gitToken', `github_pat_${'x'.repeat(24)}`);
+            Store.set('gitRepo', 'owner/repo');
+            setPresetsSha('a'.repeat(40));
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: { writeText: async (value) => { window.__diagnosticsCopied = value; } },
+            });
+        });
+        await page.route('https://api.github.com/**', async (route) => {
+            diagnosticMethods.push(route.request().method());
+            await route.fulfill({ json: { sha: 'b'.repeat(40) } });
+        });
+        const before = await page.evaluate(async () => {
+            const session = await import('./js/grid-session.js');
+            const { getPresetsSha } = await import('./js/state.js');
+            return {
+                href: window.location.href,
+                layout: session.getSessionLayout(),
+                arrangement: session.getSessionArrangement(),
+                panels: session.getSessionPanels(),
+                history: session.getGridHistory(),
+                presetsSha: getPresetsSha(),
+                layer: document.querySelector('#master-layer-selector .hotswap-layer-btn.active')?.textContent || null,
+                storage: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
+                    const key = localStorage.key(index);
+                    return [key, localStorage.getItem(key)];
+                })),
+            };
+        });
+        await armContinuityProbe(page);
+
+        await page.locator('#btn-toggle-master').click();
+        await page.waitForTimeout(200);
+        await page.locator('#btn-master-overflow').click();
+        await page.locator('#btn-master-copy-diagnostics').click();
+        await page.waitForFunction(() => document.getElementById('master-status').textContent === 'Diagnostics copied');
+
+        const markdown = await page.evaluate(() => window.__diagnosticsCopied);
+        const after = await page.evaluate(async () => {
+            const session = await import('./js/grid-session.js');
+            const { getPresetsSha } = await import('./js/state.js');
+            return {
+                href: window.location.href,
+                layout: session.getSessionLayout(),
+                arrangement: session.getSessionArrangement(),
+                panels: session.getSessionPanels(),
+                history: session.getGridHistory(),
+                presetsSha: getPresetsSha(),
+                layer: document.querySelector('#master-layer-selector .hotswap-layer-btn.active')?.textContent || null,
+                storage: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
+                    const key = localStorage.key(index);
+                    return [key, localStorage.getItem(key)];
+                })),
+            };
+        });
+
+        assert.deepEqual(after, before, 'Copy Diagnostics does not mutate Runtime Session, Layer, or persistence');
+        assert.equal(after.href.includes('settings.html'), false, 'Copy Diagnostics does not navigate to Settings');
+        assert.match(markdown, /executor Grid/);
+        assert.match(markdown, /outer Grid layout lefttall/);
+        assert.match(markdown, /P1  panel slot-1/);
+        assert.match(markdown, /presets SHA in memory\s+aaaaaaaa/);
+        assert.match(markdown, /remote presets SHA\s+bbbbbbbb/);
+        assert.doesNotMatch(markdown, /github_pat_|\/test\/fixtures\/canary/);
+        assert.deepEqual(diagnosticMethods, ['GET']);
+        assert.deepEqual(await readContinuityProbe(page), {
+            loads: { A: 0, B: 0, C: 0 }, sameNodes: true, sameParents: true,
+        }, 'Copy Diagnostics does not reload or recreate live iframes');
+    } finally { await page.close(); }
 });
 
 test('Part 1-3 right-side toolbar cluster and Settings trailing grammar stay structural', async () => {
@@ -3770,6 +4168,14 @@ test('Layer identity: typed Workspace survives boot, Copy, Save As, relaunch and
             Store.set('gitToken', 'test-token');
             Store.set('gitRepo', 'owner/repo');
         });
+        // Stage C: Save Session As is now a Layer-scoped routed action, and
+        // slot 0's nested Runtime is the selector's default target the moment
+        // it exists (same "L2 is the active default" rule Shuffle/Undo already
+        // had). This test is about the OUTER session's own Save, so target L1
+        // explicitly first — exactly what a human would click to save the
+        // Runtime they are looking at rather than the nested one.
+        await page.evaluate(() => document
+            .querySelector('#master-layer-selector .hotswap-layer-btn[data-layer="L1"]').click());
         await page.evaluate(() => document.getElementById('btn-master-save').click());
         await Promise.all([
             page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes('/contents/presets.json')),
@@ -4200,6 +4606,78 @@ test('Left Tall <-> Right Tall preserves visual role (tall / top-short / bottom-
     } finally { await page.close(); }
 });
 
+test('Top2 <-> Bottom2 preserves wide, left-short, and right-short roles with zero reload', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        // Establish Top2 through the ordinary layout control; its identity
+        // arrangement gives A/B the two top-short roles and C the bottom-wide role.
+        await page.evaluate(() => document.getElementById('btn-toggle-master').click());
+        await page.waitForTimeout(100);
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-top2').click());
+        await page.waitForFunction(() => document.querySelector('#triple-layout').classList.contains('layout-top2'));
+        const panelsBefore = await page.evaluate(async () => (await import('./js/grid-session.js')).getSessionPanels());
+        const top = { A: await readCanaryRect(page, 'A'), B: await readCanaryRect(page, 'B'), C: await readCanaryRect(page, 'C') };
+        assert.ok(top.C.w > top.A.w && top.C.w > top.B.w, 'C begins in Top2’s wide role');
+        assert.ok(top.A.x < top.B.x, 'A begins in the left-short role');
+
+        await armContinuityProbe(page);
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-bottom2').click());
+        await page.waitForFunction(() => document.querySelector('#triple-layout').classList.contains('layout-bottom2'));
+        await page.waitForTimeout(100);
+        const bottom = { A: await readCanaryRect(page, 'A'), B: await readCanaryRect(page, 'B'), C: await readCanaryRect(page, 'C') };
+        assert.ok(bottom.C.w > bottom.A.w && bottom.C.w > bottom.B.w, 'C remains wide');
+        assert.ok(bottom.A.x < bottom.B.x, 'A remains left-short and B remains right-short');
+        assert.ok(bottom.C.y < bottom.A.y && bottom.C.y < bottom.B.y, 'the wide role mirrors from bottom to top');
+        const probe = await readContinuityProbe(page);
+        assert.ok(probe.sameNodes && probe.sameParents);
+        assert.ok(Object.values(probe.loads).every((count) => count === 0));
+        assert.deepEqual(await page.evaluate(async () => (await import('./js/grid-session.js')).getSessionPanels()), panelsBefore,
+            'panel identity and metadata survive the presentation-only transition');
+
+        await page.evaluate(() => document.getElementById('btn-master-layout-overflow').click());
+        await page.evaluate(() => document.getElementById('btn-layout-top2').click());
+        await page.waitForFunction(() => document.querySelector('#triple-layout').classList.contains('layout-top2'));
+        const restored = { A: await readCanaryRect(page, 'A'), B: await readCanaryRect(page, 'B'), C: await readCanaryRect(page, 'C') };
+        assert.ok(restored.C.w > restored.A.w && restored.C.w > restored.B.w, 'reverse keeps C wide');
+        assert.ok(restored.A.x < restored.B.x, 'reverse keeps A left-short and B right-short');
+        assert.ok(restored.C.y > restored.A.y && restored.C.y > restored.B.y, 'reverse restores the mirrored composition');
+    } finally { await page.close(); }
+});
+
+test('L2 Master Undo and Redo mutate only the selected nested Runtime', async () => {
+    const page = await bootCanaryGrid();
+    try {
+        await assignPanelUrl(page, 0, 'index3.html?workspace=live');
+        const nested = await frameForSlot(page, 0);
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+        await nested.evaluate(() => {
+            const panel = document.querySelectorAll('.stream-panel')[1];
+            panel.querySelector('.btn-hotswap-toggle').click();
+            panel.querySelector('.hotswap-input').value = '/test/fixtures/canary.html?id=NESTED';
+            panel.querySelector('.hotswap-submit-btn').click();
+        });
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel iframe')[1]
+            .getAttribute('data-last-src').endsWith('id=NESTED'));
+        await page.waitForFunction(() => document.querySelector('#master-layer-selector .hotswap-layer-btn[data-slot="0"]'));
+        await page.evaluate(() => document.querySelector('#master-layer-selector .hotswap-layer-btn[data-slot="0"]').click());
+        const outerBefore = await page.evaluate(async () => (await import('./js/grid-session.js')).getSessionPanels());
+
+        await page.evaluate(() => document.getElementById('btn-master-undo').click());
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel iframe')[1]
+            .getAttribute('data-last-src').endsWith('id=B'));
+        assert.deepEqual(await page.evaluate(async () => (await import('./js/grid-session.js')).getSessionPanels()), outerBefore,
+            'forwarded Undo leaves the outer Runtime unchanged');
+
+        await page.evaluate(() => document.getElementById('btn-master-redo').click());
+        await nested.waitForFunction(() => document.querySelectorAll('.stream-panel iframe')[1]
+            .getAttribute('data-last-src').endsWith('id=NESTED'));
+        assert.deepEqual(await page.evaluate(async () => (await import('./js/grid-session.js')).getSessionPanels()), outerBefore,
+            'forwarded Redo also leaves the outer Runtime and its sibling panels unchanged');
+    } finally { await page.close(); }
+});
+
 test('Stage B Settings exposes the canonical Grid layout collection and Solo keeps its own vocabulary', async () => {
     const settings = await browser.newPage();
     try {
@@ -4327,4 +4805,144 @@ test('Bottom Runtime Shell Stage A keeps the Master outside closed and outside t
         });
         assert.deepEqual(zScale, { master: 29000, dock: 30000, nestedControls: 29000 });
     } finally { await page.close(); }
+});
+
+test('Stage 2.1 Settings Grid Layout Order rows render button shells, human titles, and no raw IDs', async () => {
+    const page = await browser.newPage();
+    try {
+        await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+        const rows = await page.locator('#grid-layout-order-list .hotswap-toggle-row').evaluateAll((elements) => {
+            return elements.map((row) => {
+                const handle = row.querySelector('.drag-handle');
+                const shell = row.querySelector('.layout-btn-shell');
+                const icon = shell?.querySelector('.layout-icon');
+                const iconCells = icon ? [...icon.querySelectorAll('i')].length : 0;
+                const title = row.querySelector('.layout-icon-title');
+                return {
+                    key: row.dataset.key,
+                    hasHandle: Boolean(handle && handle.textContent.includes('☰')),
+                    hasShell: Boolean(shell),
+                    hasCanonicalIcon: Boolean(icon && iconCells >= 2),
+                    titleText: title ? title.textContent.trim() : '',
+                };
+            });
+        });
+
+        assert.equal(rows.length, 8, 'all 8 canonical layouts must be represented in Settings');
+        const rawIds = ['top2', 'bottom2', '3col', 'lefttall', 'righttall', 'vsplit', 'hsplit', '4grid'];
+        for (const row of rows) {
+            assert.ok(row.hasHandle, `row ${row.key} must have drag handle`);
+            assert.ok(row.hasShell, `row ${row.key} must have button-shell wrapper`);
+            assert.ok(row.hasCanonicalIcon, `row ${row.key} must contain canonical mini-floorplan markup`);
+            assert.ok(row.titleText.length > 0, `row ${row.key} must have human-readable title`);
+            assert.ok(!rawIds.includes(row.titleText), `raw layout ID ${row.key} must not be the user-facing title`);
+        }
+    } finally {
+        await page.close();
+    }
+});
+
+test('Stage 2.1 Settings section order: Toolbar Shortcuts < Quick Action Runway < Grid Layout Shortcuts', async () => {
+    const page = await browser.newPage();
+    try {
+        await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+        const sectionInfo = await page.evaluate(() => {
+            const toolbarShortcuts = document.getElementById('top-shortcuts-config');
+            const runway = document.getElementById('quick-actions-config');
+            const gridLayouts = document.getElementById('grid-layout-shortcuts-config');
+            const gridCards = document.querySelectorAll('[data-section="grid-layouts"]');
+            const gridConfigs = document.querySelectorAll('#grid-layout-shortcuts-config');
+
+            const toolbarBeforeRunway = Boolean(
+                toolbarShortcuts.compareDocumentPosition(runway) & Node.DOCUMENT_POSITION_FOLLOWING
+            );
+            const runwayBeforeGridLayouts = Boolean(
+                runway.compareDocumentPosition(gridLayouts) & Node.DOCUMENT_POSITION_FOLLOWING
+            );
+
+            return {
+                toolbarBeforeRunway,
+                runwayBeforeGridLayouts,
+                gridCardCount: gridCards.length,
+                gridConfigCount: gridConfigs.length,
+            };
+        });
+
+        assert.ok(sectionInfo.toolbarBeforeRunway, 'Toolbar Shortcuts must precede Quick Action Runway in DOM order');
+        assert.ok(sectionInfo.runwayBeforeGridLayouts, 'Quick Action Runway must precede Grid Layout Shortcuts in DOM order');
+        assert.equal(sectionInfo.gridCardCount, 1, 'exactly one Grid Layout Shortcuts section card exists');
+        assert.equal(sectionInfo.gridConfigCount, 1, 'exactly one Grid Layout Shortcuts config UI exists');
+    } finally {
+        await page.close();
+    }
+});
+
+test('Stage 2.1 Grid Layout Shortcuts behavior survives: 1-4 count, default 2, drag order persists, all 8 layouts', async () => {
+    const page = await browser.newPage();
+    try {
+        await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+        // Verify default count is 2
+        assert.equal(await page.locator('#grid-layout-count-echo').textContent(), '2');
+        assert.ok(await page.locator('#grid-layout-count-row .btn-slot-count[data-count="2"]').evaluate((b) => b.classList.contains('active')));
+
+        // Verify count buttons 1-4 exist and clicking them changes count & echoes
+        for (const count of [1, 3, 4, 2]) {
+            await page.locator(`#grid-layout-count-row .btn-slot-count[data-count="${count}"]`).click();
+            assert.equal(await page.locator('#grid-layout-count-echo').textContent(), String(count));
+            const stored = await page.evaluate(() => localStorage.getItem('grid_layout_slot_count'));
+            assert.equal(stored, String(count));
+            const outsideCount = await page.locator('#grid-layout-order-list .hotswap-toggle-row.outside-cutoff').count();
+            assert.equal(outsideCount, 8 - count);
+        }
+
+        // Verify all 8 layouts represented
+        const layoutKeys = await page.locator('#grid-layout-order-list .hotswap-toggle-row').evaluateAll((rows) => rows.map((r) => r.dataset.key));
+        assert.equal(layoutKeys.length, 8);
+        assert.ok(layoutKeys.includes('righttall') && layoutKeys.includes('lefttall') && layoutKeys.includes('3col'));
+
+        // Verify order persistence via simulated reorder
+        const reordered = ['righttall', '4grid', 'lefttall', '3col', 'vsplit', 'hsplit', 'top2', 'bottom2'];
+        await page.evaluate((order) => {
+            localStorage.setItem('grid_layout_slot_order', JSON.stringify(order));
+        }, reordered);
+        await page.reload({ waitUntil: 'networkidle' });
+        const keysAfterReload = await page.locator('#grid-layout-order-list .hotswap-toggle-row').evaluateAll((rows) => rows.map((r) => r.dataset.key));
+        assert.deepEqual(keysAfterReload, reordered, 'drag/saved order persists across reload');
+    } finally {
+        await page.close();
+    }
+});
+
+test('Stage 2.1 GS3-owned scrollbars receive restrained dark track and gray thumb styling', async () => {
+    const page = await browser.newPage();
+    try {
+        await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
+        const styling = await page.evaluate(() => {
+            const cs = getComputedStyle(document.documentElement);
+            const colorScheme = cs.colorScheme;
+            const scrollbarColor = cs.scrollbarColor;
+
+            const bl = document.getElementById('blacklist-display');
+            const blCs = getComputedStyle(bl);
+
+            return {
+                colorScheme,
+                scrollbarColor,
+                blOverflowY: blCs.overflowY,
+                blScrollbarColor: blCs.scrollbarColor,
+            };
+        });
+
+        assert.equal(styling.colorScheme, 'dark', 'GS3 root specifies color-scheme: dark');
+        assert.ok(
+            styling.scrollbarColor.includes('rgb(102, 102, 102)') || styling.scrollbarColor.includes('#666'),
+            `scrollbarColor thumb should be gray: ${styling.scrollbarColor}`
+        );
+        assert.ok(
+            styling.scrollbarColor.includes('rgb(26, 26, 26)') || styling.scrollbarColor.includes('#1a1a1a'),
+            `scrollbarColor track should be dark charcoal: ${styling.scrollbarColor}`
+        );
+    } finally {
+        await page.close();
+    }
 });

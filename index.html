@@ -78,9 +78,16 @@
             --ghost-opacity: 0.12;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-color: #666 #1a1a1a; scrollbar-width: thin; }
 
         html { color-scheme: dark; }
+
+        /* GS3-owned dark scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        ::-webkit-scrollbar-corner { background: #1a1a1a; }
 
         body {
             background: var(--bg);
