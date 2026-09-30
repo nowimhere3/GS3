@@ -47,10 +47,11 @@ after(async () => {
     crossServer?.kill();
 });
 
-async function bootGrid(firstUrl = '/test/fixtures/canary.html?id=A') {
+async function bootGrid(firstUrl = '/test/fixtures/canary.html?id=A', { order = ['fillPanel'], topCount = 1, viewport = null } = {}) {
     const page = await browser.newPage();
+    if (viewport) await page.setViewportSize(viewport);
     page.setDefaultTimeout(7000);
-    await page.addInitScript(({ firstUrl }) => {
+    await page.addInitScript(({ firstUrl, order, topCount }) => {
         if (window !== window.top) return;
         localStorage.clear();
         localStorage.setItem('loop_matrix_urls', JSON.stringify([
@@ -58,12 +59,12 @@ async function bootGrid(firstUrl = '/test/fixtures/canary.html?id=A') {
             '/test/fixtures/canary.html?id=B',
             '/test/fixtures/canary.html?id=C',
         ]));
-        localStorage.setItem('hotswap_action_order', JSON.stringify(['fillPanel']));
-        localStorage.setItem('hotswap_top_count', '1');
+        localStorage.setItem('hotswap_action_order', JSON.stringify(order));
+        localStorage.setItem('hotswap_top_count', String(topCount));
         localStorage.setItem('hotswap_quick_actions_enabled', 'true');
         localStorage.setItem('hotswap_quick_action_count', '1');
         localStorage.setItem('hotswap_quick_action_order', JSON.stringify(['fillPanel']));
-    }, { firstUrl });
+    }, { firstUrl, order, topCount });
     await page.goto(`${ORIGIN}/index3.html?workspace=live`, { waitUntil: 'load' });
     await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
     await page.waitForTimeout(150);
@@ -356,5 +357,81 @@ test('existing Hotswap registry remains intact and Fill Panel is one non-routed 
         assert.equal(result.oldKeys, true);
         assert.equal(result.layerRouted, false);
         assert.equal(result.masterRouted, false);
+    } finally { await page.close(); }
+});
+
+const topFill = (panel) => panel.locator('.hotswap-top-shortcut[data-action-key="fillPanel"]');
+const runwayFill = (panel) => panel.locator('.hotswap-runway-btn[data-action-key="fillPanel"]');
+
+async function revealCycle(page, panel) {
+    await panel.locator('.hotswap-activation').dispatchEvent('pointerenter');
+    await page.waitForFunction(() => document.querySelector('.stream-panel[data-slot-index="0"]')
+        .classList.contains('chrome-revealed'));
+    await panel.locator('.hotswap-activation').dispatchEvent('pointerleave');
+    await page.waitForFunction(() => !document.querySelector('.stream-panel[data-slot-index="0"]')
+        .classList.contains('chrome-revealed'), null, { timeout: 4000 });
+}
+
+test('capability-absent Fill Panel stays hidden on Top and Runway through hover/layout cycles', async () => {
+    const page = await bootGrid();
+    try {
+        const panel = await firstPanel(page);
+        assert.equal(await topFill(panel).evaluate((n) => n.hidden), true);
+        assert.equal(await runwayFill(panel).evaluate((n) => n.hidden), true);
+        for (let i = 0; i < 2; i++) {
+            await revealCycle(page, panel);
+            assert.equal(await topFill(panel).evaluate((n) => n.hidden), true, 'Top stays hidden');
+            assert.equal(await runwayFill(panel).evaluate((n) => n.hidden), true, 'Runway stays hidden');
+        }
+        await panel.locator('.hotswap-activation').dispatchEvent('pointerenter');
+        await page.setViewportSize({ width: 1000, height: 700 });
+        await page.waitForTimeout(150);
+        assert.equal(await topFill(panel).evaluate((n) => n.hidden), true, 'Top stays hidden after resize');
+    } finally { await page.close(); }
+});
+
+test('overflowed Top shortcuts stay hidden across repeated reveal/layout cycles', async () => {
+    const page = await bootGrid('/test/fixtures/canary.html?id=A', {
+        order: ['toggle', 'folder', 'star', 'reload', 'shuffle', 'delete', 'kill', 'launchpad', 'fillPanel'],
+        topCount: 9,
+        viewport: { width: 700, height: 600 },
+    });
+    try {
+        const panel = await firstPanel(page);
+        const hiddenState = () => panel.locator('.hotswap-top-shortcut')
+            .evaluateAll((nodes) => nodes.map((n) => n.hidden));
+        await panel.locator('.hotswap-activation').dispatchEvent('pointerenter');
+        await page.waitForFunction(() => document.querySelector('.stream-panel[data-slot-index="0"]')
+            .classList.contains('chrome-revealed'));
+        const first = await hiddenState();
+        assert.ok(first.some(Boolean), 'narrow panel must overflow at least one shortcut');
+        assert.ok(first.some((h) => !h), 'at least one shortcut still fits');
+        await revealCycle(page, panel);
+        await panel.locator('.hotswap-activation').dispatchEvent('pointerenter');
+        await page.waitForFunction(() => document.querySelector('.stream-panel[data-slot-index="0"]')
+            .classList.contains('chrome-revealed'));
+        assert.deepEqual(await hiddenState(), first);
+    } finally { await page.close(); }
+});
+
+test('capability appearing after build reveals Runway and re-budgets Top', async () => {
+    const page = await bootGrid();
+    try {
+        const panel = await firstPanel(page);
+        await panel.locator('.hotswap-activation').dispatchEvent('pointerenter');
+        assert.equal(await topFill(panel).evaluate((n) => n.hidden), true);
+        assert.equal(await runwayFill(panel).evaluate((n) => n.hidden), true);
+        const frame = page.frames().find((candidate) => candidate.url().includes('id=A'));
+        await postFromFrame(frame, bridge('CAPABILITY_PRESENT'));
+        await page.waitForFunction(() => {
+            const p = document.querySelector('.stream-panel[data-slot-index="0"]');
+            return [...p.querySelectorAll('[data-action-key="fillPanel"]')].every((b) => !b.hidden);
+        });
+        assert.equal(await topFill(panel).getAttribute('data-capability-hidden'), null);
+        assert.equal(await runwayFill(panel).evaluate((n) => n.hidden), false);
+        await revealCycle(page, panel);
+        await panel.locator('.hotswap-activation').dispatchEvent('pointerenter');
+        assert.equal(await topFill(panel).evaluate((n) => n.hidden), false);
+        await frame.evaluate(() => 0);
     } finally { await page.close(); }
 });

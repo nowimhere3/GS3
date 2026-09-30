@@ -600,12 +600,18 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
      * every one of them. Nothing is written back to preferences: a narrow panel
      * renders fewer, and widening restores them automatically.
      */
-    let lastPhysicalFitCutoff = null;
+    // Two independent reasons hide a Top shortcut: semantic unavailability
+    // (data-capability-hidden, owned by the capability bridge) and responsive
+    // overflow (owned here). Layout only ever touches eligible shortcuts and
+    // re-projects final visibility on EVERY pass, so nothing stays stale.
     function layoutTopShortcuts() {
         const shortcuts = [...topShortcutsEl.children];
         const railWidth = toolbar.clientWidth;
         if (railWidth === 0) return; // retracted; measured again on reveal
-        shortcuts.forEach((button) => { button.hidden = false; });
+        const isEligible = (button) => button.dataset.capabilityHidden !== 'true';
+        shortcuts.forEach((button) => { if (!isEligible(button)) button.hidden = true; });
+        const eligible = shortcuts.filter(isEligible);
+        eligible.forEach((button) => { button.hidden = false; });
         const reserved = positionBtnEl.offsetWidth
             + (layerSelectorEl.hidden ? 0 : layerSelectorEl.offsetWidth)
             + toolbarActionsEl.offsetWidth
@@ -613,16 +619,17 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         const budget = Math.max(0, railWidth - reserved);
         let used = 0;
         let fits = 0;
-        for (const button of shortcuts) {
+        for (const button of eligible) {
             const width = button.getBoundingClientRect().width + (fits > 0 ? 6 : 0);
             if (used + width > budget) break;
             used += width;
             fits += 1;
         }
-        if (fits === lastPhysicalFitCutoff) return;
-        lastPhysicalFitCutoff = fits;
-        shortcuts.forEach((button, i) => { button.hidden = i >= fits; });
-        projectDeepCuts(fits);
+        eligible.forEach((button, i) => { button.hidden = i >= fits; });
+        // Deep Cuts indexes the full configured list, so convert the eligible
+        // fit count into a position within all shortcuts.
+        const covered = fits === 0 ? 0 : shortcuts.indexOf(eligible[fits - 1]) + 1;
+        projectDeepCuts(covered);
     }
 
     // ── Deep Cuts ────────────────────────────────────────────────────────────
@@ -1295,6 +1302,8 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     });
 
     layoutTopShortcuts();
+    // Capability changes re-budget Top width without coupling the bridge to this closure.
+    panel.addEventListener('gs3:fill-capability-changed', () => layoutTopShortcuts());
     if (typeof ResizeObserver === 'function') {
         // Re-measure whenever the panel changes width — a Position swap into a
         // narrower slot, an orientation change, or a border drag.

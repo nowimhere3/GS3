@@ -43,11 +43,15 @@ function _render(panel, state) {
     const active = Boolean(state?.capable && state.active);
     _fillPanelButtons(panel).forEach((button) => {
         button.hidden = !state?.capable;
+        // Semantic marker: responsive layout must never reveal this control.
+        if (state?.capable) delete button.dataset.capabilityHidden;
+        else button.dataset.capabilityHidden = 'true';
         button.textContent = active ? '✕' : '⛶';
         button.title = active ? 'Exit Fill Panel' : 'Fill Panel';
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
     });
+    panel?.dispatchEvent?.(new CustomEvent('gs3:fill-capability-changed'));
 }
 
 function _isBridgeData(data) {
