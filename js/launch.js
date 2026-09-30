@@ -43,6 +43,10 @@ import { isBlacklisted, addToBlacklist } from './blacklist.js';
 import { pushDatabaseToRemote } from './sync.js';
 import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
 import {
+    registerFillPanelCapability, requestFillPanelToggle, resetFillPanelCapability,
+    unregisterFillPanelCapability,
+} from './capability-bridge.js';
+import {
     getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
     getVisibleTopDeepActions, getTopShortcutCount,
     LAYER_1, LAYER_2, CHROME_RETRACT_DELAY_MS,
@@ -79,6 +83,7 @@ export function updateRenderedPanel(panel, { url, folder } = {}) {
         // inside the OLD content can never leak across the replacement.
         const slotIndex = Number(panel.dataset.slotIndex);
         if (Number.isInteger(slotIndex)) beginPanelContent(slotIndex, url);
+        resetFillPanelCapability(panel, { acceptingReports: false });
         iframe.src = url;
         iframe.setAttribute('data-last-src', url);
         if (input) input.value = url;
@@ -164,6 +169,7 @@ export const HOTSWAP_ACTIONS = [
     { key: 'folder',       emoji: '📁',  title: 'Assign a folder for this panel',                        className: 'btn-hotswap-folder',        opensPicker: true },
     { key: 'star',         emoji: '⭐',  title: 'Save to Playlist',                                      className: 'btn-hotswap-star' },
     { key: 'reload',       emoji: '⟳',  title: 'Reload this panel',                                     className: 'btn-hotswap-reload' },
+    { key: 'fillPanel',    emoji: '⛶',  title: 'Fill Panel',                                            className: 'btn-hotswap-fill-panel' },
     { key: 'shuffle',      emoji: '🎲',  title: "Shuffle from this panel's assigned folder",             className: 'btn-hotswap-shuffle' },
     { key: 'shuffleAll',   emoji: '🎲🎲', title: 'Shuffle All — random URL from any folder',              className: 'btn-hotswap-shuffle-all' },
     { key: 'delete',       emoji: '❌',  title: "Delete this URL from its folder and load a replacement", className: 'btn-hotswap-delete' },
@@ -327,6 +333,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // defensively — cross-origin content records an opaque marker instead.
     iframe.addEventListener('load', () => {
         notePanelLoad(index, _readFrameUrl(iframe));
+        resetFillPanelCapability(panel, { acceptingReports: true });
         if (typeof ctx.onPanelNavigated === 'function') ctx.onPanelNavigated(index);
     });
 
@@ -378,6 +385,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
             <button class="btn-hotswap-star" title="Save to Playlist">☆</button>
             <button class="btn-hotswap-toggle" title="Edit URL">🌐</button>
             <button class="btn-hotswap-reload" title="Reload this panel">⟳</button>
+            <button class="btn-hotswap-fill-panel" title="Fill Panel" hidden>⛶</button>
             <button class="btn-hotswap-shuffle" title="Shuffle from this panel's assigned folder">🎲</button>
             <button class="btn-hotswap-shuffle-all" title="Shuffle All — random URL from any folder">🎲🎲</button>
             <button class="btn-hotswap-delete" title="Delete this URL from its folder and load a replacement">❌</button>
@@ -403,6 +411,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     const submitBtn      = overlay.querySelector('.hotswap-submit-btn');
     const starBtn        = overlay.querySelector('.btn-hotswap-star');
     const reloadBtn      = overlay.querySelector('.btn-hotswap-reload');
+    const fillPanelBtn   = overlay.querySelector('.btn-hotswap-fill-panel');
     const shuffleBtn     = overlay.querySelector('.btn-hotswap-shuffle');
     const shuffleAllBtn  = overlay.querySelector('.btn-hotswap-shuffle-all');
     const deleteBtn      = overlay.querySelector('.btn-hotswap-delete');
@@ -944,8 +953,17 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         // stack collapses back to that entry. Two loads follow (about:blank,
         // then the URL) and neither is user navigation.
         beginPanelContent(index, savedSrc, 2);
+        resetFillPanelCapability(panel, { acceptingReports: false });
         iframe.src = 'about:blank';
         setTimeout(() => { iframe.src = savedSrc; }, 80);
+    };
+
+    // Fill Panel is leaf-content-local. Mirrors delegate here, and this one
+    // canonical action waits for the child to confirm state before presentation
+    // changes. It never enters Layer 2 or Master routing.
+    fillPanelBtn.onclick = (e) => {
+        e.stopPropagation();
+        requestFillPanelToggle(panel);
     };
 
     // ☠ Kill — remove panel from session (no DB changes)
@@ -955,6 +973,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         panel.style.opacity    = '0';
         panel.style.transform  = 'scaleY(0.8)';
         setTimeout(() => {
+            unregisterFillPanelCapability(panel);
             panel.remove();
             const remaining = ctx.feedContainerEl?.querySelectorAll('.stream-panel').length ?? 0;
             if (ctx.statusEl) ctx.statusEl.textContent = `${remaining} streams`;
@@ -1291,6 +1310,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // panel rebuilt mid-session by a master Shuffle may well have some.
     syncHistoryButtons();
     updatePanelActionAvailability(panel);
+    registerFillPanelCapability(panel);
 
     return panel;
 }
@@ -1331,7 +1351,11 @@ export function launchMatrix(urls, ctx) {
     // Switch screens
     if (ctx.setupScreenEl)   ctx.setupScreenEl.style.display  = 'none';
     if (ctx.loopScreenEl)    ctx.loopScreenEl.style.display   = 'block';
-    if (ctx.feedContainerEl) ctx.feedContainerEl.innerHTML    = '';
+    if (ctx.feedContainerEl) {
+        ctx.feedContainerEl.querySelectorAll('.stream-panel')
+            .forEach((panel) => unregisterFillPanelCapability(panel));
+        ctx.feedContainerEl.innerHTML = '';
+    }
 
     // Top spacer
     if (heights.spacerTopOn) {

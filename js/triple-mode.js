@@ -39,6 +39,7 @@ import {
     navigateBack, navigateForward,
 } from './panel-navigation.js';
 import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
+import { unregisterFillPanelCapability } from './capability-bridge.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
 const LAYOUT_IDS = GRID_LAYOUT_IDS;
@@ -778,7 +779,10 @@ function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
         const slot = document.getElementById(id);
         // Clean existing content but keep label
         const existing = slot.querySelector('.stream-panel');
-        if (existing) existing.remove();
+        if (existing) {
+            unregisterFillPanelCapability(existing);
+            existing.remove();
+        }
 
         const panel = buildStreamPanel(
             getPanelRenderUrl(getSessionPanels()[index]) || 'https://example.com',

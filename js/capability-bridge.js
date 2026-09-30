@@ -1,0 +1,199 @@
+/**
+ * Ephemeral, panel-local capability bridge state.
+ *
+ * Capability reports are advisory presentation facts from the document that
+ * currently owns a live iframe WindowProxy. They are never persisted and never
+ * participate in Runtime Session, navigation, layout, or content identity.
+ */
+
+export const CAPABILITY_BRIDGE_SOURCE = 'gs3-capability-bridge';
+export const CAPABILITY_BRIDGE_VERSION = 1;
+export const FILL_PANEL_CAPABILITY = 'FILL_PANEL';
+export const FILL_PANEL_ACK_TIMEOUT_MS = 1500;
+
+// Slot index -> state for the panel currently registered in that live slot.
+const _slotCapabilityState = new Map();
+let _listenerInstalled = false;
+
+function _slotKey(panel) {
+    const value = Number(panel?.dataset?.slotIndex);
+    return Number.isInteger(value) ? value : null;
+}
+
+function _stateForPanel(panel) {
+    const key = _slotKey(panel);
+    const state = key === null ? null : _slotCapabilityState.get(key);
+    return state?.panel === panel ? state : null;
+}
+
+function _clearPending(state) {
+    if (!state) return;
+    clearTimeout(state.ackTimer);
+    state.ackTimer = null;
+    state.pendingActive = null;
+}
+
+function _fillPanelButtons(panel) {
+    return panel?.querySelectorAll?.(
+        '.btn-hotswap-fill-panel, .hotswap-mirror-btn[data-action-key="fillPanel"]',
+    ) || [];
+}
+
+function _render(panel, state) {
+    const active = Boolean(state?.capable && state.active);
+    _fillPanelButtons(panel).forEach((button) => {
+        button.hidden = !state?.capable;
+        button.textContent = active ? '✕' : '⛶';
+        button.title = active ? 'Exit Fill Panel' : 'Fill Panel';
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+    });
+}
+
+function _isBridgeData(data) {
+    return Boolean(data) && typeof data === 'object' && !Array.isArray(data)
+        && data.source === CAPABILITY_BRIDGE_SOURCE
+        && data.version === CAPABILITY_BRIDGE_VERSION
+        && data.capability === FILL_PANEL_CAPABILITY;
+}
+
+export function findPanelForSourceWindow(sourceWindow) {
+    if (!sourceWindow || typeof document === 'undefined') return null;
+    for (const panel of document.querySelectorAll('.stream-panel')) {
+        const iframe = panel.querySelector('iframe');
+        if (iframe?.contentWindow === sourceWindow) return panel;
+    }
+    return null;
+}
+
+export function handleCapabilityBridgeMessage(event) {
+    const data = event?.data;
+    if (!_isBridgeData(data)) return false;
+    if (!['CAPABILITY_PRESENT', 'FILL_PANEL_ACTIVE'].includes(data.type)) return false;
+    if (data.type === 'FILL_PANEL_ACTIVE' && typeof data.active !== 'boolean') return false;
+
+    const panel = findPanelForSourceWindow(event.source);
+    if (!panel) return false;
+    const state = _stateForPanel(panel);
+    if (!state || !state.acceptingReports) return false;
+
+    if (data.type === 'CAPABILITY_PRESENT') {
+        state.capable = true;
+    } else {
+        // Active-state reports are meaningful only after this generation has
+        // truthfully announced that the capability exists.
+        if (!state.capable) return false;
+        state.active = data.active;
+        if (state.pendingActive === data.active) _clearPending(state);
+    }
+    _render(panel, state);
+    return true;
+}
+
+export function ensureCapabilityBridge() {
+    if (!_listenerInstalled && typeof window !== 'undefined') {
+        window.addEventListener('message', handleCapabilityBridgeMessage);
+        _listenerInstalled = true;
+    }
+}
+
+export function registerFillPanelCapability(panel) {
+    ensureCapabilityBridge();
+    const key = _slotKey(panel);
+    if (key === null) return null;
+    const previous = _slotCapabilityState.get(key);
+    _clearPending(previous);
+    const state = {
+        panel,
+        generation: (previous?.generation || 0) + 1,
+        capable: false,
+        active: false,
+        acceptingReports: false,
+        pendingActive: null,
+        ackTimer: null,
+    };
+    _slotCapabilityState.set(key, state);
+    _render(panel, state);
+    return state.generation;
+}
+
+export function resetFillPanelCapability(panel, { acceptingReports = true } = {}) {
+    const key = _slotKey(panel);
+    if (key === null) return null;
+    const previous = _stateForPanel(panel);
+    _clearPending(previous);
+    const state = {
+        panel,
+        generation: (previous?.generation || 0) + 1,
+        capable: false,
+        active: false,
+        acceptingReports: Boolean(acceptingReports),
+        pendingActive: null,
+        ackTimer: null,
+    };
+    _slotCapabilityState.set(key, state);
+    _render(panel, state);
+    return state.generation;
+}
+
+export function unregisterFillPanelCapability(panel) {
+    const key = _slotKey(panel);
+    const state = _stateForPanel(panel);
+    if (key === null || !state) return false;
+    _clearPending(state);
+    _slotCapabilityState.delete(key);
+    return true;
+}
+
+function _postToPanel(panel, type) {
+    const iframe = panel?.querySelector?.('iframe');
+    if (!iframe?.contentWindow) return false;
+    iframe.contentWindow.postMessage({
+        source: CAPABILITY_BRIDGE_SOURCE,
+        version: CAPABILITY_BRIDGE_VERSION,
+        type,
+        capability: FILL_PANEL_CAPABILITY,
+    }, '*');
+    return true;
+}
+
+export function queryFillPanelCapability(panel) {
+    try { return _postToPanel(panel, 'QUERY_CAPABILITY'); }
+    catch { return false; }
+}
+
+export function requestFillPanelToggle(panel) {
+    const state = _stateForPanel(panel);
+    if (!state?.capable) return false;
+    const expectedActive = !state.active;
+    const type = expectedActive ? 'FILL_PANEL' : 'EXIT_FILL_PANEL';
+    try {
+        if (!_postToPanel(panel, type)) return false;
+    } catch {
+        return false;
+    }
+
+    _clearPending(state);
+    state.pendingActive = expectedActive;
+    const generation = state.generation;
+    state.ackTimer = setTimeout(() => {
+        const current = _stateForPanel(panel);
+        if (current !== state || current.generation !== generation
+            || current.pendingActive !== expectedActive) return;
+        _clearPending(current);
+        console.warn(`[Capability Bridge] ${type} was not acknowledged within ${FILL_PANEL_ACK_TIMEOUT_MS}ms.`);
+    }, FILL_PANEL_ACK_TIMEOUT_MS);
+    return true;
+}
+
+/** Read-only diagnostics/test projection. */
+export function getFillPanelCapabilityState(panel) {
+    const state = _stateForPanel(panel);
+    return state ? {
+        generation: state.generation,
+        capable: state.capable,
+        active: state.active,
+        acceptingReports: state.acceptingReports,
+        pendingActive: state.pendingActive,
+    } : null;
+}

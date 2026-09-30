@@ -1228,7 +1228,7 @@
             flex-wrap: wrap;
         }
 
-        .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-kill,
+        .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-fill-panel, .btn-hotswap-kill,
         .btn-purge, .btn-hotswap-position, .btn-hotswap-copy-position,
         .btn-hotswap-folder, .btn-hotswap-launchpad,
         .btn-hotswap-undo, .btn-hotswap-redo {
@@ -1385,6 +1385,14 @@
         .btn-hotswap-reload.spinning {
             transform: rotate(360deg);
             transition: transform 0.4s ease;
+        }
+        .btn-hotswap-fill-panel[hidden],
+        .hotswap-mirror-btn[data-action-key="fillPanel"][hidden] { display: none !important; }
+        .btn-hotswap-fill-panel.active,
+        .hotswap-mirror-btn[data-action-key="fillPanel"].active {
+            background: #7f1d1d;
+            border-color: #ef4444;
+            color: #fff;
         }
 
         .hotswap-url-row {

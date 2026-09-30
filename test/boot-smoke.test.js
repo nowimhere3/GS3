@@ -2036,7 +2036,8 @@ test('Settings drives all three collections and the runway-only opacity pair', a
             `${listId} does not duplicate the Position-owned actions`);
     }
     // The unified Top/Deep rows own intentional visibility.
-    assert.equal(await page.locator('#top-order-list input[type="checkbox"]').count(), 10);
+    assert.equal(await page.locator('#top-order-list input[type="checkbox"]').count(), 11,
+        'the authorized Fill Panel action joins the canonical configurable collection');
 
     // Runway: 1-8 in two rows of four. Top Shortcuts: 1-6, its own ceiling.
     assert.deepEqual(await page.locator('#slot-count-row .btn-slot-count').allTextContents(),
