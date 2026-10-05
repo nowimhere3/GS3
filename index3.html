@@ -398,6 +398,7 @@
 
         /* 📁 Folder-picker, 📍 Move-to-Position and 📋 Copy-to-Position expandable lists */
         .hotswap-folder-row, .hotswap-position-row, .hotswap-copy-row { display: none; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+        .hotswap-folder-row { max-height: min(256px, calc(100% - 16px)); }
         .hotswap-folder-row.open, .hotswap-position-row.open, .hotswap-copy-row.open { display: flex; }
         .hotswap-folder-item, .hotswap-position-item { background: #181818; border: 1px solid #333; border-radius: 8px; padding: 6px 10px; font-size: 12px; color: #ccc; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.12s; }
         .hotswap-folder-item:hover, .hotswap-position-item:hover { background: #242424; color: #fff; }
