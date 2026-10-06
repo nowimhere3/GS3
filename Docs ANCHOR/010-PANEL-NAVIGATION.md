@@ -375,6 +375,25 @@ and Save Session act on.
 Where a user browsed inside that content
 belongs to the navigation layer, not to the session.
 
+## Observed Current URL
+
+A cooperating child (the GS3 Live URL Reporter userscript) can report
+`CURRENT_URL` over the capability bridge envelope.
+
+`js/current-url-observation.js` holds it as `observedCurrentUrl`:
+ephemeral, per panel, never persisted, never written into `data-last-src`.
+
+`assignedUrl` stays what GS3 loaded. ⟳ Reload and Save act on it,
+and an assignment or Reload clears the observation.
+
+The landing page is not drift: a report equal to the assigned URL,
+its presentation form, or the anchor leaves `observedCurrentUrl` null.
+
+Reports are fenced by this document's content generation.
+They are refused until GS3's own loads for the generation have come to rest,
+so a late report from an old document cannot describe new content.
+A child that has no reporter is never messaged.
+
 ## Nested Runtime launch handoff
 
 Ordinary in-content iframe navigation does not mutate Runtime Session. An

@@ -47,6 +47,7 @@ import {
     registerFillPanelCapability, requestFillPanelToggle, resetFillPanelCapability,
     unregisterFillPanelCapability, refreshFillPanelPresentation, exitFillEmbed,
 } from './capability-bridge.js';
+import { registerCurrentUrlObservation, noteCurrentUrlPanelLoad } from './current-url-observation.js';
 import {
     getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
     getVisibleTopDeepActions, getTopShortcutCount,
@@ -336,6 +337,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // defensively — cross-origin content records an opaque marker instead.
     iframe.addEventListener('load', () => {
         notePanelLoad(index, _readFrameUrl(iframe));
+        noteCurrentUrlPanelLoad(panel); // after notePanelLoad: needs this load's pending-count result
         resetFillPanelCapability(panel, { acceptingReports: true });
         if (typeof ctx.onPanelNavigated === 'function') ctx.onPanelNavigated(index);
     });
@@ -1323,6 +1325,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     syncHistoryButtons();
     updatePanelActionAvailability(panel);
     registerFillPanelCapability(panel);
+    registerCurrentUrlObservation(panel);
 
     return panel;
 }
