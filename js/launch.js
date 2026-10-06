@@ -42,6 +42,7 @@ import { getDatabaseStructure, setDatabaseStructure, getDatabaseSha, setDatabase
 import { isBlacklisted, addToBlacklist } from './blacklist.js';
 import { pushDatabaseToRemote } from './sync.js';
 import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
+import { getPresentationUrl } from './presentation-url.js';
 import {
     registerFillPanelCapability, requestFillPanelToggle, resetFillPanelCapability,
     unregisterFillPanelCapability,
@@ -84,7 +85,7 @@ export function updateRenderedPanel(panel, { url, folder } = {}) {
         const slotIndex = Number(panel.dataset.slotIndex);
         if (Number.isInteger(slotIndex)) beginPanelContent(slotIndex, url);
         resetFillPanelCapability(panel, { acceptingReports: false });
-        iframe.src = url;
+        iframe.src = getPresentationUrl(url); // presentation only; data-last-src below stays the assigned URL
         iframe.setAttribute('data-last-src', url);
         if (input) input.value = url;
         refreshPanelLayerScope(panel); // this content may have created or removed Layer 2
@@ -123,7 +124,7 @@ export function updatePanelActionAvailability(panel) {
 export function navigatePanelTo(panel, url) {
     const iframe = panel?.querySelector('iframe');
     if (!iframe) return false;
-    iframe.src = url;
+    iframe.src = getPresentationUrl(url);
     return true;
 }
 
@@ -317,10 +318,10 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
 
     // ── iframe ───────────────────────────────────────────────────────────────
     const iframe = document.createElement('iframe');
-    iframe.src       = url;
+    iframe.src       = getPresentationUrl(url);
     iframe.className = 'post-iframe';
     iframe.allow     = 'autoplay; fullscreen';
-    iframe.sandbox   = 'allow-same-origin allow-scripts allow-forms allow-popups';
+    iframe.sandbox   = 'allow-same-origin allow-scripts allow-forms';
     iframe.setAttribute('data-last-src', url);
     iframe.setAttribute('data-source-folder', launchFolder || '');
 
@@ -962,7 +963,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         beginPanelContent(index, savedSrc, 2);
         resetFillPanelCapability(panel, { acceptingReports: false });
         iframe.src = 'about:blank';
-        setTimeout(() => { iframe.src = savedSrc; }, 80);
+        setTimeout(() => { iframe.src = getPresentationUrl(savedSrc); }, 80);
     };
 
     // Fill Panel is leaf-content-local. Mirrors delegate here, and this one
