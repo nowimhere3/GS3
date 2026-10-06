@@ -1,0 +1,134 @@
+[
+ {
+  "candidate": "baseline",
+  "dnr": {
+   "stage": "installed",
+   "name": "baseline",
+   "accepted": true,
+   "ruleCount": 1
+  },
+  "serverSawEcho": {
+   "dest": "iframe",
+   "mode": "navigate",
+   "site": "cross-site"
+  },
+  "xhamsterRequest": {
+   "dest": "iframe",
+   "mode": "navigate",
+   "isFrame": true
+  },
+  "xhamsterResponses": [
+   {
+    "status": 302,
+    "url": "/videos/small-titted-babe-enjoys-a-rough-bbc-gangbang-329801",
+    "type": "document"
+   },
+   {
+    "status": 200,
+    "url": "/embed/3298012",
+    "type": "document"
+   }
+  ],
+  "finalPanelUrl": "/embed/3298012",
+  "fullPage": false
+ },
+ {
+  "candidate": "A remove",
+  "dnr": {
+   "stage": "installed",
+   "name": "A remove",
+   "accepted": true,
+   "ruleCount": 2
+  },
+  "serverSawEcho": {
+   "dest": "(absent)",
+   "mode": "navigate",
+   "site": "cross-site"
+  },
+  "xhamsterRequest": {
+   "dest": "(absent)",
+   "mode": "navigate",
+   "isFrame": true
+  },
+  "xhamsterResponses": [
+   {
+    "status": 200,
+    "url": "/videos/small-titted-babe-enjoys-a-rough-bbc-gangbang-329801",
+    "type": "document"
+   },
+   {
+    "status": 200,
+    "url": "/embed/3298012",
+    "type": "document"
+   }
+  ],
+  "finalPanelUrl": "/embed/3298012",
+  "fullPage": false
+ },
+ {
+  "candidate": "B set document",
+  "dnr": {
+   "stage": "installed",
+   "name": "B set document",
+   "accepted": true,
+   "ruleCount": 2
+  },
+  "serverSawEcho": {
+   "dest": "document",
+   "mode": "navigate",
+   "site": "cross-site"
+  },
+  "xhamsterRequest": {
+   "dest": "document",
+   "mode": "navigate",
+   "isFrame": true
+  },
+  "xhamsterResponses": [
+   {
+    "status": 200,
+    "url": "/videos/small-titted-babe-enjoys-a-rough-bbc-gangbang-329801",
+    "type": "document"
+   },
+   {
+    "status": 200,
+    "url": "/embed/3298012",
+    "type": "document"
+   }
+  ],
+  "finalPanelUrl": "/embed/3298012",
+  "fullPage": false
+ },
+ {
+  "candidate": "C set frame",
+  "dnr": {
+   "stage": "installed",
+   "name": "C set frame",
+   "accepted": true,
+   "ruleCount": 2
+  },
+  "serverSawEcho": {
+   "dest": "frame",
+   "mode": "navigate",
+   "site": "cross-site"
+  },
+  "xhamsterRequest": {
+   "dest": "frame",
+   "mode": "navigate",
+   "isFrame": true
+  },
+  "xhamsterResponses": [
+   {
+    "status": 200,
+    "url": "/videos/small-titted-babe-enjoys-a-rough-bbc-gangbang-329801",
+    "type": "document"
+   },
+   {
+    "status": 200,
+    "url": "/embed/3298012",
+    "type": "document"
+   }
+  ],
+  "finalPanelUrl": "/embed/3298012",
+  "fullPage": false
+ }
+]

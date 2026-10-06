@@ -62,27 +62,6 @@ const _hostOf = (u) => u.hostname.toLowerCase().replace(/^www\./, '');
 // optional `www.`), IDs are charset-checked before being placed in the output, and only
 // the ID reaches the embed URL — the source query string and hash are discarded.
 const FILL_EMBED_RULES = [
-    // xcamladyx.com publishes this player URL in its watch-page getEmbed().
-    // Both real specimens played in the shielded GS3 Panel before enabling this rule.
-    (u, h) => {
-        if (u.hostname !== 'xcamladyx.com') return null;
-        const m = u.pathname.match(/^\/videos\/([1-9]\d*)\/[^/]+\/?$/);
-        return m ? `https://xcamladyx.com/embed/${m[1]}` : null;
-    },
-    // stream-leak.com's embed page publishes getEmbed() and canonical metadata.
-    // CDN remote_control URLs are expiring media links, not canonical video pages.
-    (u, h) => {
-        if (u.hostname !== 'stream-leak.com') return null;
-        const m = u.pathname.match(/^\/videos\/([1-9]\d*)\/[^/]+\/?$/);
-        return m ? `https://stream-leak.com/embed/${m[1]}` : null;
-    },
-    // Webpussi is a classic KVS HTML5 embed, published by getEmbed() on video pages.
-    // Only the observed www host is enabled; slug redirects do not change the ID.
-    (u, h) => {
-        if (u.hostname !== 'www.webpussi.com') return null;
-        const m = u.pathname.match(/^\/videos\/([1-9]\d*)\/[^/]+\/?$/);
-        return m ? `https://www.webpussi.com/embed/${m[1]}` : null;
-    },
     // xvideos.com / xvideos.red / de.xvideos.com   /video.<id>/<slug>   or the legacy   /video<digits>/<slug>
     (u, h) => {
         if (h !== 'xvideos.com' && h !== 'xvideos.red' && h !== 'de.xvideos.com') return null;

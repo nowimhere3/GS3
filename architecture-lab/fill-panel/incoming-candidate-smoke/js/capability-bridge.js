@@ -49,10 +49,8 @@ function _embedUrl(panel) {
 
 function _removeEmbed(state) {
     if (!state?.embedFrame) return false;
-    if (state.embedViewport) state.embedViewport.remove();
-    else state.embedFrame.remove();
+    state.embedFrame.remove();
     state.embedFrame = null;
-    state.embedViewport = null;
     state.embedActive = false;
     return true;
 }
@@ -68,22 +66,7 @@ function _showEmbed(panel, state, url) {
     frame.style.cssText = 'position:absolute;left:0;top:var(--hotswap-website-inset,0px);'
         + 'width:100%;height:calc(100% - var(--hotswap-website-inset,0px));border:0;background:#000;z-index:1;';
     frame.src = url;
-    // SpankBang's published embed CSS gives the player 90vh and its separate
-    // promo/footer 10vh (measured on multiple videos and viewport sizes).
-    // A parent-owned viewport makes those 90vh fill the Panel, clipping only
-    // the promo below it. No child-document CSS or cross-origin DOM access.
-    // One extra pixel covers fractional layout rounding at the clipping edge.
-    if (new URL(url).hostname === 'spankbang.com') {
-        const viewport = document.createElement('div');
-        viewport.className = 'gs3-fill-viewport';
-        viewport.style.cssText = frame.style.cssText + 'overflow:hidden;';
-        frame.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:calc(111.111112% + 1px);border:0;background:#000;';
-        viewport.appendChild(frame);
-        panel.appendChild(viewport);
-        state.embedViewport = viewport;
-    } else {
-        panel.appendChild(frame);
-    }
+    panel.appendChild(frame);
     state.embedFrame = frame;
     state.embedActive = true;
 }

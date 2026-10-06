@@ -1,0 +1,42 @@
+[
+ {
+  "site": "cloudbate",
+  "policy": "CURRENT",
+  "loadedUrl": "",
+  "bodyText": "www.cloudbate.com refused to connect.",
+  "title": "www.cloudbate.com",
+  "bodyChars": 37,
+  "hasVideo": 0,
+  "clickLog": [
+   "center",
+   "center"
+  ],
+  "finalUrl": "",
+  "sameFrameNav": false,
+  "topUrlChanged": false,
+  "playing": false,
+  "popupCount": 0,
+  "popupUrls": [],
+  "blockedMessages": []
+ },
+ {
+  "site": "cloudbate",
+  "policy": "R0",
+  "loadedUrl": "",
+  "bodyText": "www.cloudbate.com refused to connect.",
+  "title": "www.cloudbate.com",
+  "bodyChars": 37,
+  "hasVideo": 0,
+  "clickLog": [
+   "center",
+   "center"
+  ],
+  "finalUrl": "",
+  "sameFrameNav": false,
+  "topUrlChanged": false,
+  "playing": false,
+  "popupCount": 0,
+  "popupUrls": [],
+  "blockedMessages": []
+ }
+]

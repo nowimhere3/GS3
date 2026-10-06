@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>runtime canary</title>
+<script>
+window.__canaryStartedAt = performance.timeOrigin;
+window.__canaryTicks = 0;
+setInterval(() => { window.__canaryTicks += 1; }, 25);
+</script>

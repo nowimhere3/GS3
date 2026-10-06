@@ -1,0 +1,42 @@
+[
+  {
+    "file": "links.json",
+    "unchanged": true
+  },
+  {
+    "file": "presets.json",
+    "unchanged": true
+  },
+  {
+    "file": "js/presentation-url.js",
+    "unchanged": true
+  },
+  {
+    "file": "js/capability-bridge.js",
+    "unchanged": true
+  },
+  {
+    "file": "js/launch.js",
+    "unchanged": true
+  },
+  {
+    "file": "test/fill-embed.test.js",
+    "unchanged": true
+  },
+  {
+    "file": "test/fill-visibility.test.js",
+    "unchanged": false
+  },
+  {
+    "file": "test/settings-boot.test.js",
+    "unchanged": true
+  },
+  {
+    "file": "test/fill-provider-expansion.test.js",
+    "unchanged": true
+  },
+  {
+    "file": "Docs ANCHOR/009-AUTOMATIONS.md",
+    "unchanged": false
+  }
+]

@@ -1,0 +1,1 @@
+{"name":"A+B","candidates":[{"action":{"type":"modifyHeaders","requestHeaders":[{"header":"Sec-Fetch-Dest","operation":"set","value":"document"}]},"condition":{"requestDomains":["xhamster.com"],"resourceTypes":["sub_frame"]}},{"action":{"type":"block"},"condition":{"regexFilter":"^https://(xhamster\\.com)/embed/","resourceTypes":["sub_frame"]}}]}

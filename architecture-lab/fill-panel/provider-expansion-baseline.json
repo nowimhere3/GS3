@@ -1,0 +1,9 @@
+{
+  "links.json": "ea5428efef62300a98030f65e32aee1118a23cdd5b58107457ecf3be19aab047",
+  "js/presentation-url.js": "6a7200933a080eabdc94d165bf36fe727d6f1508fc9545d0a813e640022f8a12",
+  "js/capability-bridge.js": "9f481cf3d6f46b1eae7bd79119637585041ddf8f14f6f0578c9c80c13c18e814",
+  "js/launch.js": "18ab39ba257eb3f89f8341eefcd560b8b0c7303b6ff9088ef95c963513f61f19",
+  "test/fill-embed.test.js": "881858ab44fb246a9ea59f4b170c66d33adccc21c4773421fa74919006d75077",
+  "test/fill-visibility.test.js": "f176eb6b3765b1dc0667ee31757a6dfa0aa9b5066a579b6adb30f40d72ef4ea9",
+  "test/settings-boot.test.js": "dffc8d504791964fce50cc70e3edb072d7126c44af16cdba741734ab70ea96b3"
+}

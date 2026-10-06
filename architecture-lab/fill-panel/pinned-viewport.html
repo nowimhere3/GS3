@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GS3 Pinned-Viewport Chaturbate Lab</title>
+<style>
+  body { font: 13px/1.4 system-ui, sans-serif; background: #15151a; color: #ddd; margin: 12px; }
+  h1 { font-size: 16px; margin: 0 0 6px; }
+  fieldset { border: 1px solid #444; margin: 8px 0; padding: 6px 10px; }
+  legend { color: #9cf; }
+  button, input, select, textarea { font: inherit; }
+  button { cursor: pointer; }
+  input[type=number] { width: 64px; }
+  input[type=text] { width: 320px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+  .panels { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  .lab-panel { border: 1px solid #555; padding: 6px; background: #1d1d24; }
+  .lab-panel h2 { font-size: 13px; margin: 0 0 4px; }
+  /* The GS3-style Panel: manually resizable, clips, black. */
+  .panel {
+    position: relative; width: 640px; height: 360px; min-width: 120px; min-height: 80px;
+    resize: both; overflow: hidden; background: #000; border: 2px solid #3a3;
+  }
+  .panel iframe { border: 0; background: #fff; display: block; width: 100%; height: 100%; }
+  .overlay { position: absolute; inset: 0; z-index: 5; cursor: crosshair; background: rgba(0,120,255,.12); }
+  .overlay .sel { position: absolute; border: 2px solid #ff0; background: rgba(255,255,0,.15); pointer-events: none; }
+  .overlay .hint { position: absolute; left: 6px; top: 6px; background: #000c; color: #ff0; padding: 2px 6px; pointer-events: none; }
+  .geo { position: absolute; z-index: 4; border: 2px dashed #f0f; pointer-events: none; }
+  .status { font-family: monospace; font-size: 11px; color: #9c9; min-height: 1.4em; }
+  .log { font-family: monospace; font-size: 11px; max-height: 90px; overflow: auto; background: #0008; padding: 4px; white-space: pre-wrap; }
+  .chk { display: grid; grid-template-columns: auto repeat(5, auto); gap: 2px 8px; font-size: 12px; align-items: center; }
+  .chk .hd { color: #9cf; }
+  .drop { border: 2px dashed #888; padding: 8px; margin: 6px 0; color: #aaa; }
+  textarea { width: 100%; height: 60px; background: #111; color: #ddd; border: 1px solid #444; }
+</style>
+</head>
+<body>
+<h1>Pinned-Viewport Provider Crop Lab (disposable)</h1>
+<div>Question: with the iframe's internal layout viewport pinned at V, does one measured player rect R stay valid across rooms while the outer Panel resizes freely?</div>
+
+<fieldset>
+  <legend>Global</legend>
+  <div class="row">
+    V width <input id="vw" type="number" value="1920"> V height <input id="vh" type="number" value="1080">
+    <span>(applies on next Pin Viewport)</span>
+    <label><input id="dbg" type="checkbox"> Show debug geometry (R outline)</label>
+    <button id="copy">Copy Results</button>
+  </div>
+  <div class="row">
+    Start URL <input id="startUrl" type="text" value="https://chaturbate.com/followed-cams/">
+    <button id="loadAll">Load in both panels</button>
+    <button id="addPanel">Add panel</button>
+  </div>
+  <div class="drop" id="drop">DROP ROOM LINK HERE (optional kill-test: drag a broadcaster link from Followed Cams onto this box)</div>
+  <div class="status" id="dropOut"></div>
+</fieldset>
+
+<div class="panels" id="panels"></div>
+
+<fieldset>
+  <legend>Cross-panel / layout results</legend>
+  <div class="row">
+    wide layout <select id="g_wide"></select>
+    portrait <select id="g_portrait"></select>
+    square <select id="g_square"></select>
+    multiple Panels
+    <select id="g_multi"><option value="">?</option><option>good</option><option>degraded</option><option>failed</option></select>
+    visual quality
+    <select id="g_quality"><option value="">?</option><option>good</option><option>acceptable</option><option>poor</option></select>
+  </div>
+  <div>Unexpected banners / layout changes / notes:</div>
+  <textarea id="g_notes"></textarea>
+  <div class="row">
+    Back to Followed Cams still works after Exit?
+    <select id="g_back"><option value="">?</option><option>yes</option><option>no</option></select>
+    Overall verdict <select id="g_verdict"><option value="">?</option><option>PASS</option><option>FAIL</option></select>
+  </div>
+</fieldset>
+<div class="log" id="log"></div>
+
+<script>
+'use strict';
+const DEFAULT_URL = 'https://chaturbate.com/followed-cams/';
+const ROOMS = ['A', 'B', 'C', 'D'];
+const CHECKS = ['player aligned correctly', 'controls work', 'stream continued', 'resize stayed aligned', 'Exit restored room'];
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+const log = (msg) => { logEl.textContent = `${new Date().toLocaleTimeString()} ${msg}\n` + logEl.textContent.slice(0, 6000); };
+for (const id of ['g_wide', 'g_portrait', 'g_square']) {
+  $(id).innerHTML = '<option value="">?</option><option>good</option><option>shifted</option><option>failed</option>';
+}
+
+/** Pure fill math (also used by the local smoke test). */
+function computeFill(P, R) {
+  const scale = Math.min(P.w / R.w, P.h / R.h);
+  return { scale, tx: (P.w - R.w * scale) / 2 - R.x * scale, ty: (P.h - R.h * scale) / 2 - R.y * scale };
+}
+/** Whole-V "fit" view used while pinned but not filled, and during calibration. */
+function computeFit(P, V) { return computeFill(P, { x: 0, y: 0, w: V.w, h: V.h }); }
+window.__lab = { computeFill, computeFit };
+
+const panels = [];
+let panelCounter = 0;
+
+function createPanel() {
+  const id = ++panelCounter;
+  const st = {
+    id, V: null, R: null, pinned: false, filled: false, snapshot: null, ro: null, lastP: { w: 0, h: 0 },
+  };
+  const root = document.createElement('div');
+  root.className = 'lab-panel';
+  root.innerHTML = `
+    <h2>Panel ${id}</h2>
+    <div class="row">
+      <input type="text" class="url" value="${$('startUrl').value}">
+      <button data-a="load">Load</button>
+    </div>
+    <div class="row">
+      <button data-a="pin">Pin Viewport</button>
+      <button data-a="cal">Calibrate Player</button>
+      <button data-a="fill">Fill</button>
+      <button data-a="exit">Exit</button>
+      <button data-a="unpin" title="Diagnostic only: Exit already restores normal">Unpin (diag)</button>
+      <button data-a="reset">Reset Calibration</button>
+      <button data-a="size">Size: 300x200 | 640x360 | 1600x900 | …</button>
+    </div>
+    <div class="panel"><iframe allow="autoplay; fullscreen" allowfullscreen
+      sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe></div>
+    <div class="status"></div>
+    <div class="chk"></div>
+    <div class="row">Resize verdict / controls / playback / Exit notes: <input type="text" class="note" style="width:260px"></div>`;
+  const panel = root.querySelector('.panel');
+  const iframe = root.querySelector('iframe');
+  const statusEl = root.querySelector('.status');
+  iframe.src = $('startUrl').value;
+
+  // Human checklist grid.
+  const chk = root.querySelector('.chk');
+  chk.innerHTML = '<span></span>' + CHECKS.map((c) => `<span class="hd">${c}</span>`).join('');
+  st.checks = {};
+  for (const room of ROOMS) {
+    chk.insertAdjacentHTML('beforeend', `<b>Room ${room}</b>`);
+    for (const c of CHECKS) {
+      const key = `${room}|${c}`;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.addEventListener('change', () => { st.checks[key] = cb.checked; });
+      chk.appendChild(cb);
+    }
+  }
+
+  const P = () => ({ w: panel.clientWidth, h: panel.clientHeight });
+  const setStatus = () => {
+    statusEl.textContent = `pinned=${st.pinned} filled=${st.filled} V=${st.V ? st.V.w + 'x' + st.V.h : '-'} `
+      + `R=${st.R ? [st.R.x, st.R.y, st.R.w, st.R.h].map(Math.round).join(',') : '-'} P=${P().w}x${P().h}`;
+  };
+
+  function applyTransform(t) {
+    iframe.style.transformOrigin = '0 0';
+    iframe.style.transform = `translate(${t.tx}px, ${t.ty}px) scale(${t.scale})`;
+  }
+  function updateGeo() {
+    panel.querySelectorAll('.geo').forEach((g) => g.remove());
+    if (!$('dbg').checked || !st.pinned || !st.R) return;
+    // Outline R in whatever view is current, using the current iframe transform.
+    const t = st.filled ? computeFill(P(), st.R) : computeFit(P(), st.V);
+    const g = document.createElement('div');
+    g.className = 'geo';
+    g.style.cssText = `left:${st.R.x * t.scale + t.tx}px;top:${st.R.y * t.scale + t.ty}px;`
+      + `width:${st.R.w * t.scale}px;height:${st.R.h * t.scale}px`;
+    panel.appendChild(g);
+  }
+  // Recompute presentation from state. V is never touched here.
+  function render(reason) {
+    if (!st.pinned) { setStatus(); return; }
+    const p = P();
+    st.lastP = p;
+    const t = st.filled ? computeFill(p, st.R) : computeFit(p, st.V);
+    applyTransform(t);
+    updateGeo();
+    setStatus();
+    if (st.filled) {
+      log(`P${id} ${reason} ` + JSON.stringify({
+        V: st.V, R: st.R, panel: p, scale: +t.scale.toFixed(4), tx: +t.tx.toFixed(1), ty: +t.ty.toFixed(1),
+      }));
+    }
+  }
+
+  function pin() {
+    if (st.pinned) {
+      // Re-pin with new V values only when not filled.
+      if (st.filled) { log(`P${id}: Exit before changing V`); return; }
+    } else {
+      st.snapshot = { style: iframe.getAttribute('style') };
+    }
+    st.V = { w: +$('vw').value, h: +$('vh').value };
+    iframe.style.position = 'absolute';
+    iframe.style.left = '0';
+    iframe.style.top = '0';
+    iframe.style.width = st.V.w + 'px';
+    iframe.style.height = st.V.h + 'px';
+    iframe.style.maxWidth = 'none';
+    st.pinned = true;
+    render('pin');
+    log(`P${id} pinned V=${st.V.w}x${st.V.h} (fit view; R is in V-space)`);
+  }
+  function unpin() {
+    st.filled = false;
+    if (st.snapshot) {
+      if (st.snapshot.style === null) iframe.removeAttribute('style');
+      else iframe.setAttribute('style', st.snapshot.style);
+    }
+    st.pinned = false;
+    st.snapshot = null;
+    panel.querySelectorAll('.geo').forEach((g) => g.remove());
+    setStatus();
+    log(`P${id} unpinned (iframe back to original box; src untouched)`);
+  }
+
+  function calibrate() {
+    if (panel.querySelector('.overlay')) return;
+    if (st.filled) exit();
+    // Calibration needs the whole V visible; unless the human pinned manually
+    // (diagnostic), return to NORMAL when done.
+    const pinnedByCal = !st.pinned;
+    if (pinnedByCal) pin();
+    const finish = () => { if (pinnedByCal) unpin(); };
+    // Show the whole V (fit view). Pointer coordinates are Panel px; convert to V-space.
+    const ov = document.createElement('div');
+    ov.className = 'overlay';
+    ov.innerHTML = '<div class="hint">Drag around the player/video, then release</div>';
+    panel.appendChild(ov);
+    const fit = computeFit(P(), st.V);
+    const toV = (e) => {
+      const b = panel.getBoundingClientRect();
+      // Panel has a border; clientLeft/Top are its size, and children position from the padding box.
+      return { x: (e.clientX - b.left - panel.clientLeft - fit.tx) / fit.scale,
+               y: (e.clientY - b.top - panel.clientTop - fit.ty) / fit.scale };
+    };
+    let a = null;
+    let sel = null;
+    ov.addEventListener('pointerdown', (e) => {
+      a = toV(e);
+      sel = document.createElement('div');
+      sel.className = 'sel';
+      ov.appendChild(sel);
+      ov.setPointerCapture(e.pointerId);
+    });
+    ov.addEventListener('pointermove', (e) => {
+      if (!a) return;
+      const b = toV(e);
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+      sel.style.cssText = `left:${x * fit.scale + fit.tx}px;top:${y * fit.scale + fit.ty}px;`
+        + `width:${w * fit.scale}px;height:${h * fit.scale}px`;
+    });
+    ov.addEventListener('pointerup', (e) => {
+      if (!a) return;
+      const b = toV(e);
+      const R = {
+        x: Math.max(0, Math.min(a.x, b.x)), y: Math.max(0, Math.min(a.y, b.y)),
+        w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y),
+      };
+      R.w = Math.min(R.w, st.V.w - R.x);
+      R.h = Math.min(R.h, st.V.h - R.y);
+      ov.remove(); // overlay must never keep intercepting the iframe
+      if (R.w < 20 || R.h < 20) { finish(); log(`P${id} calibration ignored (too small)`); return; }
+      st.R = R;
+      // Share R across panels: the whole point is ONE calibration for many rooms.
+      for (const other of panels) if (other !== api
+        && (!other.state.V || (other.state.V.w === st.V.w && other.state.V.h === st.V.h))) other.setR(R, st.V);
+      log(`P${id} R (V-space) = ${JSON.stringify({ x: Math.round(R.x), y: Math.round(R.y), w: Math.round(R.w), h: Math.round(R.h) })}`);
+      render('calibrated');
+      finish();
+    });
+  }
+
+  function fill() {
+    if (!st.R) { log(`P${id}: calibrate first`); return; }
+    if (st.filled) return;
+    if (st.pinned) unpin(); // drop any diagnostic pin so the snapshot is the true NORMAL state
+    pin();                  // snapshots the NORMAL presentation, then pins to V
+    st.filled = true;
+    render('fill');
+  }
+  function exit() {
+    if (!st.filled) return;
+    unpin(); // restore the pre-Fill snapshot; same iframe/document, src untouched. One child reflow is expected.
+    log(`P${id} exit fill -> NORMAL (R kept; Fill again reuses it)`);
+  }
+  function reset() { if (st.filled) exit(); st.R = null; log(`P${id} calibration reset`); }
+
+  const sizes = [[300, 200], [640, 360], [1600, 900], [360, 640], [1000, 300], [500, 500]];
+  let sizeIdx = 1;
+  const actions = {
+    load: () => { iframe.src = root.querySelector('.url').value; log(`P${id} load ${iframe.src}`); },
+    pin, unpin, cal: calibrate, fill, exit, reset,
+    size: () => {
+      sizeIdx = (sizeIdx + 1) % sizes.length;
+      panel.style.width = sizes[sizeIdx][0] + 'px';
+      panel.style.height = sizes[sizeIdx][1] + 'px';
+    },
+  };
+  root.addEventListener('click', (e) => {
+    const a = e.target?.dataset?.a;
+    if (a && actions[a]) actions[a]();
+  });
+  root.querySelector('[data-a=size]').textContent = 'Cycle preset size';
+
+  st.ro = new ResizeObserver(() => {
+    const p = P();
+    if (p.w === st.lastP.w && p.h === st.lastP.h) return;
+    render('resize');
+  });
+  st.ro.observe(panel);
+
+  const api = {
+    state: st, root, panel, iframe, actions, render,
+    setR(R, V) { st.R = { ...R }; if (V && !st.V) st.V = { ...V }; render('R shared'); },
+    result() {
+      const rooms = {};
+      for (const room of ROOMS) {
+        rooms[room] = {};
+        for (const c of CHECKS) rooms[room][c] = !!st.checks[`${room}|${c}`];
+      }
+      return { panel: id, V: st.V, R: st.R, lastPanelSize: st.lastP, rooms, note: root.querySelector('.note').value };
+    },
+  };
+  panels.push(api);
+  $('panels').appendChild(root);
+  return api;
+}
+
+$('addPanel').onclick = createPanel;
+$('dbg').onchange = () => panels.forEach((p) => p.render('debug toggle'));
+$('loadAll').onclick = () => panels.forEach((p) => {
+  p.root.querySelector('.url').value = $('startUrl').value;
+  p.actions.load();
+});
+
+// Optional kill-test: cross-site iframe -> parent drag/drop.
+const drop = $('drop');
+drop.addEventListener('dragover', (e) => e.preventDefault());
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const out = { uriList: e.dataTransfer.getData('text/uri-list'), text: e.dataTransfer.getData('text/plain') };
+  $('dropOut').textContent = 'drop: ' + JSON.stringify(out);
+  log('drop ' + JSON.stringify(out));
+});
+
+$('copy').onclick = async () => {
+  const out = {
+    lab: 'pinned-viewport', at: new Date().toISOString(),
+    panels: panels.map((p) => p.result()),
+    layouts: { wide: $('g_wide').value, portrait: $('g_portrait').value, square: $('g_square').value },
+    multiplePanels: $('g_multi').value, visualQuality: $('g_quality').value,
+    backToFollowedCams: $('g_back').value, verdict: $('g_verdict').value, notes: $('g_notes').value,
+    dropTest: $('dropOut').textContent,
+  };
+  const text = JSON.stringify(out, null, 2);
+  try { await navigator.clipboard.writeText(text); log('results copied'); }
+  catch { window.prompt('Copy results:', text); }
+};
+
+createPanel();
+createPanel();
+</script>
+</body>
+</html>

@@ -1,0 +1,294 @@
+[
+  {
+    "host": "cumcams.cc",
+    "specimen": 0,
+    "canonical": "https://cumcams.cc/video/190505100/play",
+    "candidate": "https://cumcams.cc/video/190505100/play",
+    "labOnlyResolver": true,
+    "extensionStandin": false,
+    "popups": 0,
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing."
+    ],
+    "requests": [
+      "https://cumcams.cc/api/video/190505100/related/older",
+      "https://cumcams.cc/api/video/190505100",
+      "https://cumcams.cc/api/video/190505100/related/older",
+      "https://cumcams.cc/api/video/190505100"
+    ],
+    "apiResponses": [
+      {
+        "url": "https://cumcams.cc/api/video/190505100",
+        "status": 200,
+        "text": "wrong_token"
+      },
+      {
+        "url": "https://cumcams.cc/api/video/190505100",
+        "status": 200,
+        "text": "wrong_token"
+      }
+    ],
+    "normal": {
+      "title": "iris_vega webcam show on 2026-07-17 23:40 on CumCams free",
+      "text": "Upload\niris_vega show recorded at 2026-07-17 23:40\nPlay video\n#feet\n#findom\n#mistress\n#pantyhose\n#ass\niris_vega\n2026-07-17 23:40\n58 views\niris_vega's video\niris_vega\n\n2026-07-11 04:12\n\n51 views\n\niris_vega\n\n2026-05-16 23:03\n\n51 views\n\niris_vega\n\n2026-04-19 17:54\n\n96 views\n\niris_vega\n\n2026-04-13 22:34",
+      "iframes": [],
+      "videos": 0,
+      "play": true,
+      "links": []
+    },
+    "frames": [
+      "https://cumcams.cc/video/190505100/play"
+    ],
+    "underlyingAutoplay": [],
+    "normalPlayAttempts": [
+      {
+        "frame": "https://cumcams.cc/video/190505100/play",
+        "selector": ".age__btn",
+        "clicked": true
+      },
+      {
+        "frame": "https://cumcams.cc/video/190505100/play",
+        "selector": "#play_button",
+        "clicked": true
+      }
+    ],
+    "underlyingBeforeFill": [],
+    "normalAfterClick": {
+      "title": "iris_vega webcam show on 2026-07-17 23:40 on CumCams free",
+      "text": "Upload\niris_vega show recorded at 2026-07-17 23:40\nwrong_token\n#feet\n#findom\n#mistress\n#pantyhose\n#ass\niris_vega\n2026-07-17 23:40\n58 views\niris_vega's video\niris_vega\n\n2026-07-11 04:12\n\n51 views\n\niris_vega\n\n2026-05-16 23:03\n\n51 views\n\niris_vega\n\n2026-04-19 17:54\n\n96 views\n\niris_vega\n\n2026-04-13 22:3",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "executorBefore": {
+      "src": "https://cumcams.cc/video/190505100/play",
+      "identity": "https://cumcams.cc/video/190505100/play",
+      "session": "https://cumcams.cc/video/190505100/play",
+      "capability": {
+        "generation": 2,
+        "capable": false,
+        "active": false,
+        "acceptingReports": true,
+        "pendingActive": null,
+        "embedAvailable": true,
+        "embedActive": false
+      },
+      "mapped": "https://cumcams.cc/video/190505100/play",
+      "immediateOverlays": 1
+    },
+    "embed": {
+      "title": "iris_vega webcam show on 2026-07-17 23:40 on CumCams free",
+      "text": "Upload\niris_vega show recorded at 2026-07-17 23:40\nPlay video\n#findom\n#pantyhose\n#mistress\n#feet\n#ass\niris_vega\n2026-07-17 23:40\n58 views\niris_vega's video\niris_vega\n\n2026-07-11 04:12\n\n51 views\n\niris_vega\n\n2026-05-16 23:03\n\n51 views\n\niris_vega\n\n2026-04-19 17:54\n\n96 views\n\niris_vega\n\n2026-04-13 22:34",
+      "iframes": [],
+      "videos": 0,
+      "play": true,
+      "links": []
+    },
+    "fillFrames": [
+      "https://cumcams.cc/video/190505100/play"
+    ],
+    "beforePlay": [],
+    "fillPlayAttempts": [
+      {
+        "frame": "https://cumcams.cc/video/190505100/play",
+        "selector": ".age__btn",
+        "clicked": true
+      },
+      {
+        "frame": "https://cumcams.cc/video/190505100/play",
+        "selector": "#play_button",
+        "clicked": true
+      }
+    ],
+    "afterPlay": [],
+    "playing": false,
+    "audio": false,
+    "underlyingDuring": [],
+    "doubleAudio": false,
+    "controls": [],
+    "geometry": [
+      {
+        "size": {
+          "width": 1200,
+          "height": 700
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 595,
+          "height": 698
+        }
+      },
+      {
+        "size": {
+          "width": 900,
+          "height": 600
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 898,
+          "height": 238
+        }
+      }
+    ],
+    "exit": {
+      "noOverlay": true,
+      "sameFrame": true,
+      "sameSrc": true,
+      "sameIdentity": true,
+      "sameSession": true,
+      "shield": "allow-same-origin allow-scripts allow-forms",
+      "fillVisible": true
+    },
+    "topStayed": true
+  },
+  {
+    "host": "cumcams.cc",
+    "specimen": 1,
+    "canonical": "https://cumcams.cc/video/189616780/play",
+    "candidate": "https://cumcams.cc/video/189616780/play",
+    "labOnlyResolver": true,
+    "extensionStandin": false,
+    "popups": 0,
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing."
+    ],
+    "requests": [
+      "https://cumcams.cc/api/video/189616780/related/older",
+      "https://cumcams.cc/api/video/189616780",
+      "https://cumcams.cc/api/video/189616780/related/older",
+      "https://cumcams.cc/api/video/189616780"
+    ],
+    "apiResponses": [
+      {
+        "url": "https://cumcams.cc/api/video/189616780",
+        "status": 200,
+        "text": "wrong_token"
+      },
+      {
+        "url": "https://cumcams.cc/api/video/189616780",
+        "status": 200,
+        "text": "wrong_token"
+      }
+    ],
+    "normal": {
+      "title": "iris_vega webcam show on 2026-07-11 04:12 on CumCams free",
+      "text": "Upload\niris_vega show recorded at 2026-07-11 04:12\nPlay video\niris_vega\n2026-07-11 04:12\n51 views\niris_vega's video\niris_vega\n\n2026-05-16 23:03\n\n51 views\n\niris_vega\n\n2026-04-19 17:54\n\n96 views\n\niris_vega\n\n2026-04-13 22:34\n\n19 views\n\niris_vega\n\n2026-04-11 17:35\n\n30 views\n\niris_vega\n\n2026-04-05 16:16\n",
+      "iframes": [],
+      "videos": 0,
+      "play": true,
+      "links": []
+    },
+    "frames": [
+      "https://cumcams.cc/video/189616780/play"
+    ],
+    "underlyingAutoplay": [],
+    "normalPlayAttempts": [
+      {
+        "frame": "https://cumcams.cc/video/189616780/play",
+        "selector": ".age__btn",
+        "clicked": true
+      },
+      {
+        "frame": "https://cumcams.cc/video/189616780/play",
+        "selector": "#play_button",
+        "clicked": true
+      }
+    ],
+    "underlyingBeforeFill": [],
+    "normalAfterClick": {
+      "title": "iris_vega webcam show on 2026-07-11 04:12 on CumCams free",
+      "text": "Upload\niris_vega show recorded at 2026-07-11 04:12\nwrong_token\niris_vega\n2026-07-11 04:12\n51 views\niris_vega's video\niris_vega\n\n2026-05-16 23:03\n\n51 views\n\niris_vega\n\n2026-04-19 17:54\n\n96 views\n\niris_vega\n\n2026-04-13 22:34\n\n19 views\n\niris_vega\n\n2026-04-11 17:35\n\n30 views\n\niris_vega\n\n2026-04-05 16:16",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "executorBefore": {
+      "src": "https://cumcams.cc/video/189616780/play",
+      "identity": "https://cumcams.cc/video/189616780/play",
+      "session": "https://cumcams.cc/video/189616780/play",
+      "capability": {
+        "generation": 2,
+        "capable": false,
+        "active": false,
+        "acceptingReports": true,
+        "pendingActive": null,
+        "embedAvailable": true,
+        "embedActive": false
+      },
+      "mapped": "https://cumcams.cc/video/189616780/play",
+      "immediateOverlays": 1
+    },
+    "embed": {
+      "title": "iris_vega webcam show on 2026-07-11 04:12 on CumCams free",
+      "text": "Upload\niris_vega show recorded at 2026-07-11 04:12\nPlay video\niris_vega\n2026-07-11 04:12\n51 views\niris_vega's video\niris_vega\n\n2026-05-16 23:03\n\n51 views\n\niris_vega\n\n2026-04-19 17:54\n\n96 views\n\niris_vega\n\n2026-04-13 22:34\n\n19 views\n\niris_vega\n\n2026-04-11 17:35\n\n30 views\n\niris_vega\n\n2026-04-05 16:16\n",
+      "iframes": [],
+      "videos": 0,
+      "play": true,
+      "links": []
+    },
+    "fillFrames": [
+      "https://cumcams.cc/video/189616780/play"
+    ],
+    "beforePlay": [],
+    "fillPlayAttempts": [
+      {
+        "frame": "https://cumcams.cc/video/189616780/play",
+        "selector": ".age__btn",
+        "clicked": true
+      },
+      {
+        "frame": "https://cumcams.cc/video/189616780/play",
+        "selector": "#play_button",
+        "clicked": true
+      }
+    ],
+    "afterPlay": [],
+    "playing": false,
+    "audio": false,
+    "underlyingDuring": [],
+    "doubleAudio": false,
+    "controls": [],
+    "geometry": [
+      {
+        "size": {
+          "width": 1200,
+          "height": 700
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 595,
+          "height": 698
+        }
+      },
+      {
+        "size": {
+          "width": 900,
+          "height": 600
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 898,
+          "height": 238
+        }
+      }
+    ],
+    "exit": {
+      "noOverlay": true,
+      "sameFrame": true,
+      "sameSrc": true,
+      "sameIdentity": true,
+      "sameSession": true,
+      "shield": "allow-same-origin allow-scripts allow-forms",
+      "fillVisible": true
+    },
+    "topStayed": true
+  }
+]

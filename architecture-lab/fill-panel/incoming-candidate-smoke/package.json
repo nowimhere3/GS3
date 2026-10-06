@@ -1,0 +1,12 @@
+{
+  "name": "gs3-stream-loop-launchpad",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:smoke": "node --test test/boot-smoke.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0"
+  }
+}

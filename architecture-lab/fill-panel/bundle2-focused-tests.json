@@ -1,0 +1,7 @@
+{
+  "command": "node --test test/fill-embed.test.js test/fill-provider-expansion.test.js test/fill-provider-bundle2.test.js test/fill-visibility.test.js test/capability-bridge.test.js test/settings-boot.test.js",
+  "tests": 31,
+  "pass": 31,
+  "fail": 0,
+  "skipped": 0
+}

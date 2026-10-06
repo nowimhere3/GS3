@@ -1,0 +1,159 @@
+{
+  "notes": {
+    "chrome": "Chrome/152.0.7977.83",
+    "profile": "temp non-default --user-data-dir"
+  },
+  "results": [
+    {
+      "id": "0",
+      "name": "landing at assigned is not a wander (Observed null)",
+      "pass": true,
+      "evidence": {
+        "gen": [
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": "1",
+      "name": "cross-origin navigation A->B observed",
+      "pass": true,
+      "evidence": {
+        "assigned": "http://a.test/search/deepthroat?top",
+        "current": "http://a.test/video-zz81k2/another_slug?x=1",
+        "gen": 1
+      }
+    },
+    {
+      "id": "2",
+      "name": "second navigation B->C (cross-site, process swap) updates Current",
+      "pass": true,
+      "evidence": {
+        "current": "http://b.test/"
+      }
+    },
+    {
+      "id": "4",
+      "name": "assignedUrl / data-last-src untouched by browsing",
+      "pass": true,
+      "evidence": {
+        "assigned": "http://a.test/search/deepthroat?top",
+        "dataLastSrc": "http://a.test/search/deepthroat?top",
+        "gen": 1
+      }
+    },
+    {
+      "id": "3a",
+      "name": "Panel 2 unaffected by Panel 1 navigation",
+      "pass": true,
+      "evidence": {
+        "slot2": null
+      }
+    },
+    {
+      "id": "3b",
+      "name": "Panel 2 navigation does not touch Panel 1",
+      "pass": true,
+      "evidence": {
+        "slot1": "http://b.test/",
+        "slot2": "http://b.test/search/deepthroat?top"
+      }
+    },
+    {
+      "id": "8",
+      "name": "cross-origin children are OOPIF targets and were captured",
+      "pass": true,
+      "evidence": {
+        "iframeSessions": 2,
+        "sessions": [
+          "page",
+          "iframe",
+          "iframe"
+        ]
+      }
+    },
+    {
+      "id": "7",
+      "name": "provider independence: a.test, b.test, c.test all observed by the same mechanism",
+      "pass": true,
+      "evidence": {
+        "hosts": [
+          "a.test",
+          "b.test",
+          "c.test"
+        ],
+        "current": "http://c.test/"
+      }
+    },
+    {
+      "id": "B1",
+      "name": "bonus: pushState + hash change observed (same-document)",
+      "pass": true,
+      "evidence": {
+        "kind": "sameDocument",
+        "current": "http://a.test/spa/pushed#route2"
+      }
+    },
+    {
+      "id": "M",
+      "name": "child window.name = \"gs3-panel-slot-2\" does not mis-attribute (mapping uses host-owned iframe element)",
+      "pass": true,
+      "evidence": {
+        "slot1": "http://a.test/video-hj1/x",
+        "slot2": "http://a.test/spa/pushed#route2"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Refresh reloads Assigned, clears Current, advances generation",
+      "pass": true,
+      "evidence": {
+        "iframeUrl": "http://a.test/hijack",
+        "currentRightAfter": null,
+        "currentAfterLoad": null,
+        "gen": "2->3"
+      }
+    },
+    {
+      "id": "6",
+      "name": "slow event for old generation does not contaminate new generation",
+      "pass": true,
+      "evidence": {
+        "currentAfter": null,
+        "staleDropped": 1,
+        "recvDrops": 2
+      }
+    },
+    {
+      "id": "9",
+      "name": "companion killed: GS3 Shuffle/Refresh still work, Current = null",
+      "pass": true,
+      "evidence": {
+        "receiverConnected": false,
+        "shuffleAndRefreshWorked": true,
+        "pageErrors": []
+      }
+    },
+    {
+      "id": "R",
+      "name": "companion restart re-attaches and recovers Current (snapshot) without GS3 changes",
+      "pass": true,
+      "evidence": {
+        "current": "http://b.test/video-zz81k2/another_slug?x=1",
+        "gen": 6
+      }
+    },
+    {
+      "id": "10",
+      "name": "extra DevTools-style CDP client attached: bridge keeps observing (no forced disconnect)",
+      "pass": true,
+      "evidence": {
+        "devtoolsClientEvents": 18,
+        "bridgeConnected": true,
+        "note": "simulated F12 client; real headed F12 not exercised"
+      }
+    }
+  ],
+  "pageErrors": []
+}

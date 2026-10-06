@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "GS3 Sec-Fetch-Dest seam LAB (temporary, lab only)",
+  "version": "0.0.1",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" }
+}
