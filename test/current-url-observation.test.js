@@ -73,11 +73,16 @@ after(async () => {
     server?.kill();
 });
 
-async function bootGrid({ reporter = false } = {}) {
+async function bootGrid({ reporter = false, providerFixtures = false } = {}) {
     const page = await browser.newPage();
     page.setDefaultTimeout(7000);
     page.__errors = [];
     page.on('pageerror', (error) => page.__errors.push(String(error)));
+    if (providerFixtures) {
+        const body = await readFile('test/fixtures/canary.html', 'utf8');
+        await page.route((url) => ['www.cloudbate.com', 'www.xvideos.com'].includes(url.hostname),
+            (route) => route.fulfill({ contentType: 'text/html', body }));
+    }
     await page.addInitScript(() => {
         if (window !== window.top) return;
         localStorage.clear();
@@ -376,6 +381,143 @@ test('end to end: live reporter drift A -> B -> C is observed while assignedUrl 
         o = await waitFor(page, 0, (x) => x.observedCurrentUrl === `${CANARY}?id=F` && x.documentId !== documentId);
         assert.equal(o.assignedUrl, '/test/fixtures/canary.html?id=A');
         assert.equal((await snapshotCanonical(page)).urls[0], '/test/fixtures/canary.html?id=A');
+        assert.deepEqual(page.__errors, []);
+    } finally { await page.close(); }
+});
+
+test('observation/Fill dependency initializes safely from either module entry point', async () => {
+    for (const first of ['capability-bridge', 'current-url-observation']) {
+        const page = await browser.newPage();
+        try {
+            await page.goto(`${CANARY}?id=imports`);
+            const result = await page.evaluate(async ({ origin, first }) => {
+                await import(`${origin}/js/${first}.js`);
+                const fill = await import(`${origin}/js/capability-bridge.js`);
+                const observation = await import(`${origin}/js/current-url-observation.js`);
+                const panel = document.createElement('div');
+                panel.dataset.slotIndex = '0';
+                observation.registerCurrentUrlObservation(panel);
+                fill.registerFillPanelCapability(panel);
+                fill.refreshFillPanelPresentation(panel);
+                return {
+                    current: observation.getCurrentUrlObservation(panel).observedCurrentUrl,
+                    available: fill.getFillPanelCapabilityState(panel).embedAvailable,
+                };
+            }, { origin: ORIGIN, first });
+            assert.deepEqual(result, { current: null, available: false }, first);
+        } finally { await page.close(); }
+    }
+});
+
+async function snapshotFillIdentity(page) {
+    const canonical = await snapshotCanonical(page);
+    const panel = await page.evaluate(async (selector) => {
+        const panel = document.querySelector(selector);
+        const iframe = panel.querySelector('iframe');
+        const navigation = await import('./js/panel-navigation.js');
+        return {
+            assigned: iframe.getAttribute('data-last-src'),
+            src: iframe.getAttribute('src'),
+            navigation: navigation.getPanelNavigationState(0),
+        };
+    }, panelSelector(0));
+    return { ...canonical, ...panel };
+}
+
+async function clickFill(page) {
+    await page.locator(`${panelSelector(0)} .btn-hotswap-fill-panel`).evaluate((button) => button.click());
+}
+
+test('Cloudbate reporter SPA drift fills Current B while identity stays A; Exit and Refresh preserve assignment', async () => {
+    const page = await bootGrid({ reporter: true, providerFixtures: true });
+    const assigned = 'https://www.cloudbate.com/video/101/assigned/';
+    const current = 'https://www.cloudbate.com/video/202/current/';
+    try {
+        const generation = (await observe(page)).generation;
+        await assign(page, 0, assigned);
+        await waitFor(page, 0, (o) => o.accepting && o.documentId && o.generation > generation);
+        assert.equal((await observe(page)).observedCurrentUrl, null);
+        const before = await snapshotFillIdentity(page);
+        const child = await frameOf(page);
+        await page.evaluate((selector) => {
+            window.__fillRenders = 0;
+            document.querySelector(selector).addEventListener('gs3:fill-capability-changed', () => window.__fillRenders++);
+        }, panelSelector(0));
+        await child.evaluate((url) => history.pushState({}, '', url), current);
+        const observation = await waitFor(page, 0, (o) => o.observedCurrentUrl === current);
+        assert.equal(observation.assignedUrl, assigned);
+        assert.equal(await page.evaluate(() => window.__fillRenders), 1, 'SPA report re-derives Fill without a load');
+        const button = page.locator(`${panelSelector(0)} .btn-hotswap-fill-panel`);
+        assert.equal(await button.evaluate((b) => b.hidden), false);
+
+        // A fresh sequence with the same URL must not rerender.
+        await postFrom(child, report(current, observation.documentId, observation.seq + 1));
+        assert.equal(await page.evaluate(() => window.__fillRenders), 1);
+        assert.deepEqual(await snapshotFillIdentity(page), before);
+
+        const observedBeforeFill = await observe(page);
+        await clickFill(page);
+        assert.equal(await page.locator(`${panelSelector(0)} .gs3-fill-embed`).getAttribute('src'), `${current}?play=true`);
+        assert.deepEqual(await observe(page), observedBeforeFill, 'Fill does not mutate Current observation');
+        assert.deepEqual(await snapshotFillIdentity(page), before, 'Fill does not mutate assignment/session/storage/navigation');
+        assert.equal(await button.getAttribute('aria-pressed'), 'true');
+        await clickFill(page);
+        assert.equal(await page.locator('.gs3-fill-embed').count(), 0);
+        assert.equal(await page.locator(`${panelSelector(0)} iframe`).count(), 1);
+        assert.deepEqual(await observe(page), observedBeforeFill);
+        assert.deepEqual(await snapshotFillIdentity(page), before, 'Exit removes only the Fill presentation');
+
+        await page.locator(`${panelSelector(0)} .btn-hotswap-reload`).evaluate((b) => b.click());
+        assert.equal((await observe(page)).observedCurrentUrl, null);
+        const refreshed = await waitFor(page, 0, (o) => o.accepting && o.generation > observation.generation);
+        assert.equal(refreshed.assignedUrl, assigned);
+        assert.equal(refreshed.observedCurrentUrl, null);
+        assert.equal((await frameOf(page)).url(), `${assigned}?play=true`);
+        assert.deepEqual(await snapshotCanonical(page), {
+            storage: before.storage, panels: before.panels, urls: before.urls,
+        });
+        assert.deepEqual(page.__errors, []);
+    } finally { await page.close(); }
+});
+
+test('Fill validates Current capability before Assigned fallback, and SPA availability follows Current', async () => {
+    const page = await bootGrid({ reporter: true, providerFixtures: true });
+    try {
+        const assigned = 'https://www.xvideos.com/video.assigned/slug';
+        const current = 'https://www.xvideos.com/video.current/slug';
+        const unsupported = 'https://www.xvideos.com/tags/category';
+        const generation = (await observe(page)).generation;
+        await assign(page, 0, assigned);
+        await waitFor(page, 0, (o) => o.accepting && o.documentId && o.generation > generation);
+        const before = await snapshotFillIdentity(page);
+        const child = await frameOf(page);
+        for (const [url, expected] of [
+            [current, 'https://www.xvideos.com/embedframe/current'],
+            [unsupported, 'https://www.xvideos.com/embedframe/assigned'],
+        ]) {
+            await child.evaluate((url) => history.pushState({}, '', url), url);
+            await waitFor(page, 0, (o) => o.observedCurrentUrl === url);
+            await clickFill(page);
+            assert.equal(await page.locator('.gs3-fill-embed').getAttribute('src'), expected);
+            await clickFill(page);
+            assert.deepEqual(await snapshotFillIdentity(page), before);
+        }
+
+        // Unsupported assignment: only Current capability can reveal Fill.
+        await assign(page, 0, unsupported);
+        await waitFor(page, 0, (o) => o.accepting && o.generation > generation + 1);
+        const newChild = await frameOf(page);
+        const button = page.locator(`${panelSelector(0)} .btn-hotswap-fill-panel`);
+        assert.equal(await button.evaluate((b) => b.hidden), true);
+        await newChild.evaluate((url) => history.pushState({}, '', url), current);
+        await waitFor(page, 0, (o) => o.observedCurrentUrl === current);
+        assert.equal(await button.evaluate((b) => b.hidden), false);
+        await clickFill(page);
+        assert.equal(await page.locator('.gs3-fill-embed').getAttribute('src'), 'https://www.xvideos.com/embedframe/current');
+        await clickFill(page);
+        await newChild.evaluate((url) => history.pushState({}, '', url), unsupported);
+        await waitFor(page, 0, (o) => o.observedCurrentUrl === null);
+        assert.equal(await button.evaluate((b) => b.hidden), true);
         assert.deepEqual(page.__errors, []);
     } finally { await page.close(); }
 });

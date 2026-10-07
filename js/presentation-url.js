@@ -20,7 +20,7 @@
  *
  * A second, separate capability lives here too — FILL_EMBED:
  *
- *   assignedUrl -> getFillPresentationUrl() -> provider-native embed/player URL | null
+ *   Current/Assigned candidate -> getFillPresentationUrl() -> embed/player URL | null
  *
  * It is used ONLY by the Fill Panel action (js/capability-bridge.js) to show a
  * temporary overlay; it never changes what the Panel is assigned. The transformations
@@ -33,7 +33,9 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const CLOUDBATE_VIDEO_PATH = /^\/video\/\d+(?:\/|$)/;
+const CLOUDBATE_VIDEO_PATH = /^\/video\/(\d+)(?:\/|$)/;
+const isCloudbateVideo = (u) => (u.hostname === 'cloudbate.com' || u.hostname.endsWith('.cloudbate.com'))
+    && CLOUDBATE_VIDEO_PATH.test(u.pathname);
 
 /**
  * @param {string} url — the assigned URL
@@ -44,9 +46,7 @@ export function getPresentationUrl(url) {
     let u;
     try { u = new URL(url); } catch { return url; }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return url;
-    const host = u.hostname.toLowerCase();
-    const isCloudbate = host === 'cloudbate.com' || host.endsWith('.cloudbate.com');
-    if (isCloudbate && CLOUDBATE_VIDEO_PATH.test(u.pathname)) {
+    if (isCloudbateVideo(u)) {
         u.searchParams.set('play', 'true');
         return u.toString();
     }
@@ -56,12 +56,19 @@ export function getPresentationUrl(url) {
 // ── FILL_EMBED ────────────────────────────────────────────────────────────────
 
 const ID = '[A-Za-z0-9_-]+';
+const VALID_ID = new RegExp(`^${ID}$`);
 const _hostOf = (u) => u.hostname.toLowerCase().replace(/^www\./, '');
 
-// provider -> (URL object) => embed URL | null.  Hosts are matched exactly (after an
-// optional `www.`), IDs are charset-checked before being placed in the output, and only
-// the ID reaches the embed URL — the source query string and hash are discarded.
+// provider -> (URL object) => embed URL | null. Cloudbate reuses the normal
+// presentation host/path rules and preserves query/hash. Other providers match
+// explicit hosts/families and charset-check IDs; only the ID reaches their embed URL.
 const FILL_EMBED_RULES = [
+    // The normal Cloudbate presentation also plays in a temporary Fill overlay.
+    (u) => {
+        if (!isCloudbateVideo(u) || !/[1-9]/.test(u.pathname.match(CLOUDBATE_VIDEO_PATH)[1])) return null;
+        u.searchParams.set('play', 'true');
+        return u.toString();
+    },
     // xcamladyx.com publishes this player URL in its watch-page getEmbed().
     // Both real specimens played in the shielded GS3 Panel before enabling this rule.
     (u, h) => {
@@ -99,7 +106,7 @@ const FILL_EMBED_RULES = [
     (u, h) => {
         if (h !== 'pornhub.com' || u.pathname !== '/view_video.php') return null;
         const k = u.searchParams.get('viewkey');
-        return k && new RegExp(`^${ID}$`).test(k) ? `https://www.pornhub.com/embed/${k}` : null;
+        return k && VALID_ID.test(k) ? `https://www.pornhub.com/embed/${k}` : null;
     },
     // spankbang.com   /<id>/video/<slug>
     (u, h) => {
@@ -134,7 +141,7 @@ const FILL_EMBED_RULES = [
 ];
 
 /**
- * @param {string} url — the ASSIGNED (canonical) URL of a Panel
+ * @param {string} url — a Current or Assigned candidate URL of a Panel
  * @returns {string|null} provider-native embed/player URL for Fill, or null when this
  *          URL is not a recognised video page of a supported provider.
  */

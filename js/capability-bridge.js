@@ -7,6 +7,9 @@
  */
 
 import { getFillPresentationUrl } from './presentation-url.js';
+// Intentional cycle: observation uses our wire envelope/panel lookup. Both modules
+// access each other's exports only inside functions, after module initialization.
+import { getCurrentUrlObservation } from './current-url-observation.js';
 
 export const CAPABILITY_BRIDGE_SOURCE = 'gs3-capability-bridge';
 export const CAPABILITY_BRIDGE_VERSION = 1;
@@ -36,7 +39,7 @@ function _clearPending(state) {
 }
 
 // ── FILL_EMBED ───────────────────────────────────────────────────────────────
-// A Panel whose ASSIGNED URL is a recognised video page of a supported provider can
+// A Panel whose Current or Assigned URL is a recognised supported video page can
 // Fill without any cooperating document: GS3 overlays that provider's own embed/player
 // on top of the untouched Panel iframe and removes the overlay on Exit. Nothing here
 // writes assignedUrl, data-last-src, the Runtime Session, history or the iframe's src.
@@ -44,7 +47,8 @@ const EMBED_SANDBOX = 'allow-same-origin allow-scripts allow-forms'; // Popout S
 
 function _embedUrl(panel) {
     const assigned = panel?.querySelector?.('iframe')?.getAttribute('data-last-src');
-    return getFillPresentationUrl(assigned);
+    return getFillPresentationUrl(getCurrentUrlObservation(panel)?.observedCurrentUrl)
+        ?? getFillPresentationUrl(assigned);
 }
 
 function _removeEmbed(state) {
@@ -213,8 +217,7 @@ export function unregisterFillPanelCapability(panel) {
 }
 
 /**
- * The assigned URL changed after the capability state was reset (launch.js sets
- * `data-last-src` right after resetting): re-derive whether Fill is available.
+ * Current observation or assignment changed: re-derive whether Fill is available.
  */
 export function refreshFillPanelPresentation(panel) {
     const state = _stateForPanel(panel);
@@ -249,7 +252,7 @@ export function queryFillPanelCapability(panel) {
 export function requestFillPanelToggle(panel) {
     const state = _stateForPanel(panel);
     if (!state) return false;
-    // FILL_EMBED lane: provider-native player for a recognised assigned URL. Exits first if active.
+    // FILL_EMBED lane: Current-capable, then Assigned-capable. Exits first if active.
     if (state.embedActive) { _removeEmbed(state); _render(panel, state); return true; }
     const embedUrl = state.active ? null : _embedUrl(panel); // a live document-level Fill keeps its own toggle
     if (embedUrl) { _showEmbed(panel, state, embedUrl); _render(panel, state); return true; }

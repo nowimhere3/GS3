@@ -12,11 +12,11 @@
  *
  * Observation is a fact about one live document, not policy. It is never
  * persisted and never participates in Runtime Session, navigation history,
- * layout, Fill, or content identity.
+ * layout, or content identity. Fill may read it as a presentation candidate.
  *
  * Why a sibling of capability-bridge.js rather than part of it: the Fill state
  * there is reset on every iframe load and owns overlays; observation follows a
- * different lifetime. They share only the wire envelope and panel lookup.
+ * different lifetime. Fill reads this observation without adopting its URL.
  *
  * ── Fencing ─────────────────────────────────────────────────────────────────
  * Panel identity is the reporting WindowProxy (`event.source`), never a URL.
@@ -37,6 +37,7 @@
 
 import {
     CAPABILITY_BRIDGE_SOURCE, CAPABILITY_BRIDGE_VERSION, findPanelForSourceWindow,
+    refreshFillPanelPresentation,
 } from './capability-bridge.js';
 import { getPanelNavigationState } from './panel-navigation.js';
 import { getPresentationUrl } from './presentation-url.js';
@@ -148,7 +149,11 @@ export function handleCurrentUrlMessage(event) {
     }
     state.documentId = data.documentId;
     state.seq = data.seq;
-    state.observedCurrentUrl = _isLanding(panel, data.url, navigation.anchor) ? null : data.url;
+    const observed = _isLanding(panel, data.url, navigation.anchor) ? null : data.url;
+    if (state.observedCurrentUrl !== observed) {
+        state.observedCurrentUrl = observed;
+        refreshFillPanelPresentation(panel); // also covers SPA reports without an iframe load
+    }
     return true;
 }
 
@@ -208,7 +213,7 @@ export function noteCurrentUrlPanelLoad(panel) {
     }
 }
 
-/** Read-only diagnostics/test projection. Never a source of truth for policy. */
+/** Read-only observation projection; consumers validate presentation capability. */
 export function getCurrentUrlObservation(panel) {
     const slot = _slotKey(panel);
     const state = _stateForPanel(panel);

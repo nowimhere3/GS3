@@ -4,6 +4,11 @@ import { getFillPresentationUrl, getPresentationUrl } from '../js/presentation-u
 
 // Synthetic ids on purpose: the adapters are pattern-based, not corpus-based.
 const CASES = [
+    ['Cloudbate canonical', 'https://www.cloudbate.com/video/123/slug/', 'https://www.cloudbate.com/video/123/slug/?play=true'],
+    ['Cloudbate no slug', 'https://cloudbate.com/video/123', 'https://cloudbate.com/video/123?play=true'],
+    ['Cloudbate subdomain', 'https://m.cloudbate.com/video/123/', 'https://m.cloudbate.com/video/123/?play=true'],
+    ['Cloudbate already playable', 'https://www.cloudbate.com/video/123/slug/?play=true', 'https://www.cloudbate.com/video/123/slug/?play=true'],
+    ['Cloudbate existing params', 'https://www.cloudbate.com/video/123/slug/?x=1&play=false#t', 'https://www.cloudbate.com/video/123/slug/?x=1&play=true#t'],
     ['xvideos.com', 'https://www.xvideos.com/video.zq9x81k/some_slug', 'https://www.xvideos.com/embedframe/zq9x81k'],
     ['xvideos.com (no www, query+hash)', 'https://xvideos.com/video.AB12cd/s?pl=9&x=1#t=5', 'https://www.xvideos.com/embedframe/AB12cd'],
     ['xvideos.red', 'https://www.xvideos.red/video.q7w8e9r/slug', 'https://www.xvideos.com/embedframe/q7w8e9r'],
@@ -29,6 +34,10 @@ const CASES = [
 ];
 
 const REJECT = [
+    'https://www.cloudbate.com/', 'https://www.cloudbate.com/search?q=x',
+    'https://www.cloudbate.com/video/abc/slug/', 'https://www.cloudbate.com/video/0/slug/',
+    'https://www.cloudbate.com/video/123abc/slug/', 'https://www.cloudbate.com/video/-123/slug/',
+    'https://notcloudbate.com/video/123/slug/', 'https://cloudbate.com.evil.net/video/123/slug/',
     'https://www.xvideos.com/', 'https://www.xvideos.com/tags/anything', 'https://www.xvideos.com/video.ab<c/x',
     'https://www.xnxx.com/', 'https://www.xnxx.com/search/anything?top', 'https://www.xnxx.com/porn-maker/someone', 'https://www.xnxx.com/video-',
     'https://www.pornhub.com/', 'https://www.pornhub.com/video/search?search=x', 'https://www.pornhub.com/view_video.php',
@@ -54,8 +63,8 @@ const REJECT = [
     'https://www.wxx.wtf/', 'https://www.wxx.wtf/videos/', 'http://www.wxx.wtf/search/blondiekayy/', 'https://www.wxx.wtf/embed/96805', 'https://www.wxx.wtf/videos/abc/slug/',
     'https://www.wxx.wtf/categories/', 'https://wxx.wtf.evil.example/videos/96805/x/', 'https://notwxx.wtf/videos/96805/x/', 'https://evil.com/?u=https://www.wxx.wtf/videos/96805/x/',
     'https://sub.wxx.wtf/videos/96805/x/', 'https://www.camhub.world/embed/445721',
-    // other providers and Cloudbate are not FILL_EMBED
-    'https://xhamster.com/videos/some-slug-3298012', 'https://www.cloudbate.com/video/1136214/x/', 'https://www.youtube.com/watch?v=abc',
+    // other providers are not FILL_EMBED
+    'https://xhamster.com/videos/some-slug-3298012', 'https://www.youtube.com/watch?v=abc',
     // malformed / non-http
     'not a url', '', 'about:blank', 'javascript:alert(1)', 'ftp://www.xvideos.com/video.abc/x', 'index.html', undefined, null, 42,
 ];
@@ -76,6 +85,12 @@ test('FILL_EMBED is pure and idempotent on its inputs', () => {
 });
 
 test('the presentation adapter for Cloudbate is unchanged by the FILL_EMBED family', () => {
+    for (const [, input, expected] of CASES.filter(([name]) => name.startsWith('Cloudbate'))) {
+        assert.equal(getPresentationUrl(input), expected);
+        assert.equal(getFillPresentationUrl(expected), expected, 'Cloudbate Fill output is idempotent');
+    }
+    // Normal presentation's existing numeric path semantics remain unchanged.
+    assert.equal(getPresentationUrl('https://www.cloudbate.com/video/0/'), 'https://www.cloudbate.com/video/0/?play=true');
     assert.equal(getPresentationUrl('https://www.cloudbate.com/video/123/slug/'), 'https://www.cloudbate.com/video/123/slug/?play=true');
     assert.equal(getPresentationUrl('https://www.cloudbate.com/'), 'https://www.cloudbate.com/');
     assert.equal(getPresentationUrl('https://www.xvideos.com/video.abc/x'), 'https://www.xvideos.com/video.abc/x');
