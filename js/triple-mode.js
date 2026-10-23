@@ -40,6 +40,7 @@ import {
 } from './panel-navigation.js';
 import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
 import { unregisterFillPanelCapability } from './capability-bridge.js';
+import { createToolbarDisclosure } from './toolbar-disclosure.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
 const LAYOUT_IDS = GRID_LAYOUT_IDS;
@@ -1402,8 +1403,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     _installNestedStatusReporter(statusEl);
 
     if (!IS_NESTED) {
+        const disclosure = createToolbarDisclosure(masterBarEl);
+        disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         // 🎬 toggle open/close for the master control bar
         const closeMasterBar = () => {
+            disclosure.closeAll();
             masterBarEl.classList.remove('open');
             toggleMasterBtn.classList.remove('active');
             folderDropupEl.classList.remove('open');

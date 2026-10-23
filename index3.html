@@ -176,9 +176,18 @@
         html.ghost-master #master-bar.open { opacity: var(--ghost-opacity, 0.12); }
         html.ghost-master #master-bar.open:hover { opacity: 1; }
         #master-bar.open { transform: translateY(0); }
-        .master-shell-content { width: 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .master-region { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
-        .master-structural { flex: 0 1 auto; }
+        .master-shell-content { width: 100%; display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+        .master-region { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: nowrap; }
+        .master-structural { flex: 0 0 auto; }
+        .tool-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .tool-group[data-dir="left"] { flex-direction: row-reverse; }
+        .tool-group-body { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; scrollbar-width: none; border-left: 1px solid #444; padding-left: 8px; }
+        .tool-group-body[hidden] { display: none; }
+        .tool-group[data-dir="left"] .tool-group-body { border-left: 0; padding-left: 0; border-right: 1px solid #444; padding-right: 8px; }
+        .tool-group-trigger { gap: 4px; }
+        #master-bar .master-history-btn { width: 28px; height: 28px; padding: 0; border-radius: 10px; font-size: 14px; justify-content: center; background: #1a1620; border: 1px solid #4a3a6a; color: #b39ae0; }
+        #master-bar .master-history-btn:hover:not(:disabled) { background: #262030; color: #fff; }
+        #master-bar .master-history-btn:disabled { opacity: 0.32; cursor: default; }
         .master-status-region { flex: 1 1 140px; justify-content: center; min-width: 0; }
         /* The Layer target is the conductor's routing control — neither a
            layout shortcut, a Dock action, nor a history action — so it gets
@@ -188,9 +197,9 @@
            equally-growing gaps instead of drifting toward either edge. */
         .master-layer-region { flex: 0 0 auto; }
         .master-layer-spacer { flex: 1 1 0; }
-        .master-contextual { flex: 0 1 auto; justify-content: flex-end; }
+        .master-contextual { flex: 0 0 auto; justify-content: flex-end; }
         .master-dropup-anchor { position: relative; }
-        .master-layout-shortcuts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .master-layout-shortcuts { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
         .layout-gateway, .overflow-gateway { min-width: 42px; justify-content: center; font-size: 18px; }
         .layout-gateway.has-overflow-active { color: #4ab0f5; border-color: #0095f6; }
         .master-menu { position: absolute; bottom: calc(100% + 8px); display: none; flex-wrap: wrap; gap: 8px; padding: 10px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); z-index: 30001; max-width: min(620px, calc(100% - 32px)); }
@@ -675,10 +684,15 @@
     <div id="master-bar" class="master-dropup-anchor">
         <div class="master-shell-content">
         <div class="master-region master-structural">
-        <button class="master-btn shuffle-btn"   id="btn-master-shuffle">🎲 Shuffle</button>
-        <button class="master-btn shuffall-btn"  id="btn-master-shuffle-all">🎲🎲 Shuffle All</button>
-        <button class="master-btn undo-btn" id="btn-master-undo" disabled title="Undo the last change to this session">↩ Undo</button>
-        <button class="master-btn redo-btn" id="btn-master-redo" disabled title="Redo the last change to this session">↪ Redo</button>
+        <div class="tool-group" id="master-shuffle-group" data-dir="right" data-open="false">
+            <button type="button" class="master-btn shuffle-btn tool-group-trigger" id="btn-master-shuffle-toggle" aria-label="Shuffle controls" aria-expanded="false" aria-controls="master-shuffle-body"><span aria-hidden="true">🎲</span><span aria-hidden="true">▸</span></button>
+            <div class="tool-group-body" id="master-shuffle-body" hidden>
+                <button class="master-btn shuffle-btn" id="btn-master-shuffle">Shuffle</button>
+                <button class="master-btn shuffall-btn" id="btn-master-shuffle-all">Shuffle All</button>
+            </div>
+        </div>
+        <button class="master-btn master-history-btn" id="btn-master-undo" disabled title="Undo" aria-label="Undo">↩</button>
+        <button class="master-btn master-history-btn" id="btn-master-redo" disabled title="Redo" aria-label="Redo">↪</button>
         </div>
         <div class="master-region master-status-region">
             <span id="master-status">Not connected</span>

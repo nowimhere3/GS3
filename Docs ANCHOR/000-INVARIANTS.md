@@ -17,7 +17,10 @@ other surface may guess that width. Status participates in shell layout and
 never owns an independent viewport edge.
 
 Stage B keeps Grid's Shuffle, Shuffle All, Undo, and Redo structurally
-reachable. Grid layout shortcuts are a preference over the canonical eight
+reachable. Shuffle and Shuffle All are reachable within one inline disclosure
+click; Undo and Redo remain directly visible. Disclosure changes presentation
+only: it never writes preferences, checkpoints history, or changes media.
+Grid layout shortcuts are a preference over the canonical eight
 layout vocabulary (1-4 visible, default 2); visible slots never reshuffle
 merely because another layout becomes active. Layout overflow and general
 control overflow are separate gateways, and the layout gateway stays DOM- and

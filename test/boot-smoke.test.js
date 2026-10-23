@@ -4878,9 +4878,20 @@ test('Bottom Runtime Shell Stage A keeps the Master outside closed and outside t
             bar: rect(bar),
             reserve: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gs3-dock-reserve')),
             content: rect(bar.querySelector('.master-shell-content')),
+            // Inline disclosures use a scrollable single row at narrow widths.
+            // Compare painted control bounds, clipped by that row, not the
+            // offscreen scroll content's unpainted layout rectangles.
             controls: [...bar.querySelectorAll('.master-btn, #master-status')]
                 .filter((el) => getComputedStyle(el).display !== 'none')
-                .map(rect),
+                .map((el) => {
+                    const bounds = rect(el);
+                    const shell = bar.querySelector('.master-shell-content');
+                    if (!shell.contains(el)) return bounds;
+                    const clip = rect(shell);
+                    return { ...bounds, left: Math.max(bounds.left, clip.left), right: Math.min(bounds.right, clip.right),
+                        top: Math.max(bounds.top, clip.top), bottom: Math.min(bounds.bottom, clip.bottom) };
+                })
+                .filter((bounds) => bounds.right > bounds.left && bounds.bottom > bounds.top),
         };
     });
 
