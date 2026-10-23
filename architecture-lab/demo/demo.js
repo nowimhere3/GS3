@@ -1,7 +1,7 @@
 import { MediaRuntime } from '../runtime/media-runtime.js';
-import { FakeProvider } from './fake-provider.js';
-import { UrlProvider } from './url-provider.js';
-import { LocalFolderProvider } from './local-folder-provider.js';
+import { FakeProvider } from '../providers/fake-provider.js';
+import { UrlProvider } from '../providers/url-provider.js';
+import { LocalFolderProvider } from '../providers/local-folder-provider.js';
 
 const out = document.getElementById('out');
 const providerLabel = document.getElementById('providerLabel');

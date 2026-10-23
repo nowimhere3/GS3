@@ -1,0 +1,12 @@
+{
+  "links.json": "ea5428efef62300a98030f65e32aee1118a23cdd5b58107457ecf3be19aab047",
+  "presets.json": "b407f1c06a97316f8174f3587adbac06382d7f20146ac8fcfd02b6fab63def63",
+  "js/presentation-url.js": "5c86b07bf4fe6f5b2da990d9495c7c7e656c583c638cc726b631da9b576806b6",
+  "js/capability-bridge.js": "0333f9999266500a8b8716916986aa0213e328300bd46ba72ff9b8b86b5cb6ba",
+  "js/launch.js": "18ab39ba257eb3f89f8341eefcd560b8b0c7303b6ff9088ef95c963513f61f19",
+  "test/fill-embed.test.js": "881858ab44fb246a9ea59f4b170c66d33adccc21c4773421fa74919006d75077",
+  "test/fill-visibility.test.js": "6f573293e72c26183f9b9989bb7dfbd98681340f84b04d2b1144c2cccc26d1db",
+  "test/settings-boot.test.js": "dffc8d504791964fce50cc70e3edb072d7126c44af16cdba741734ab70ea96b3",
+  "test/fill-provider-expansion.test.js": "fb747fdae21572a097218ba917ef234644f97e70c40a7924334a1282e794126e",
+  "Docs ANCHOR/009-AUTOMATIONS.md": "c29c4579620cda430419e9afc441afc7f3c926fb2ae4e836ad4b098a566d5452"
+}

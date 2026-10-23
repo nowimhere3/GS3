@@ -1,0 +1,33 @@
+// Focused check of the production candidate on the REAL index3.html (served from the working tree).
+import { chromium } from 'playwright';
+const O = 'http://localhost:8080';
+const browser = await chromium.launch({ headless: true });
+const ctx = await browser.newContext();
+const page = await ctx.newPage();
+const pops = []; ctx.on('page', (p) => { if (p !== page) pops.push(p); });
+const msgs = []; page.on('console', (m) => msgs.push(m.text()));
+await page.route(/^https?:\/\/(?!localhost:8080).*/, (r) => r.fulfill({ status: 204, body: '' }));
+// popup canary served same-origin: a Panel page that tries window.open + target=_blank on load of a click
+await page.route(`${O}/test/fixtures/popup-canary.html`, (r) => r.fulfill({ contentType: 'text/html', body: `<!doctype html><title>pc</title><form id=f method=get action="/test/fixtures/canary.html"><input name=q></form><a id=a target=_blank href="/test/fixtures/canary.html?id=blank">x</a><script>window.__ticks=0;setInterval(()=>window.__ticks++,25);window.__same=(()=>{try{return !!parent.document}catch{return false}})();</script>` }));
+await page.addInitScript(() => { if (window === window.top) localStorage.setItem('loop_matrix_urls', JSON.stringify(['/test/fixtures/popup-canary.html', '/test/fixtures/canary.html?id=B', '/test/fixtures/canary.html?id=C'])); });
+await page.goto(`${O}/index3.html`, { waitUntil: 'load' });
+await page.waitForFunction(() => document.querySelectorAll('.stream-panel iframe').length === 4);
+await page.waitForTimeout(500);
+const attrs = await page.evaluate(() => [...document.querySelectorAll('.stream-panel iframe')].map((f) => ({ sandbox: f.getAttribute('sandbox'), allow: f.getAttribute('allow') })));
+const tokens = attrs[0].sandbox.split(/\s+/);
+const has = (t) => tokens.includes(t);
+console.log('all 4 iframes identical:', new Set(attrs.map((a) => a.sandbox + '|' + a.allow)).size === 1);
+console.log('sandbox =', JSON.stringify(attrs[0].sandbox), '| allow =', JSON.stringify(attrs[0].allow));
+console.log('allow-scripts', has('allow-scripts'), '| allow-same-origin', has('allow-same-origin'), '| allow-forms', has('allow-forms'));
+console.log('ABSENT -> allow-popups', !has('allow-popups'), '| allow-popups-to-escape-sandbox', !has('allow-popups-to-escape-sandbox'), '| allow-top-navigation', !has('allow-top-navigation'), '| allow-top-navigation-by-user-activation', !has('allow-top-navigation-by-user-activation'));
+const f = page.frames().find((x) => x.url().includes('popup-canary'));
+console.log('scripts run (ticks advancing):', (await f.evaluate(() => window.__ticks)) > 2, '| same-origin parent access:', await f.evaluate(() => window.__same));
+await f.evaluate(() => { document.getElementById('a').click(); try { window.open('/test/fixtures/canary.html?id=wo'); } catch {} });
+await page.waitForTimeout(800);
+console.log('popups opened by Panel content (window.open + target=_blank):', pops.length, '| Chrome blocked messages:', msgs.filter((m) => /Blocked opening/.test(m)).length);
+await f.evaluate(() => document.getElementById('f').requestSubmit());
+await page.waitForTimeout(800);
+const f2 = page.frames().find((x) => x !== page.mainFrame() && x.url().includes('canary.html') && x.url().includes('q='));
+console.log('form submit navigated the Panel frame itself:', !!f2, f2 ? f2.url().replace(O, '') : '');
+console.log('top page unchanged:', page.url() === `${O}/index3.html`);
+await browser.close();

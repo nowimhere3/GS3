@@ -1,0 +1,222 @@
+[
+  {
+    "host": "camwhoreshd.com",
+    "specimen": 0,
+    "canonical": "https://www.camwhoreshd.com/videos/1892550/neli-elinek-armpits-4-0f973bf750cd54bd/",
+    "candidate": "https://www.camwhores.lol/embed/16296779",
+    "labOnlyResolver": true,
+    "extensionStandin": false,
+    "popups": 0,
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing."
+    ],
+    "requests": [
+      "https://www.camwhores.lol/embed/16296779"
+    ],
+    "apiResponses": [],
+    "normal": {
+      "title": "www.camwhoreshd.com",
+      "text": "www.camwhoreshd.com refused to connect.",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "frames": [
+      ""
+    ],
+    "underlyingAutoplay": [],
+    "normalPlayAttempts": [],
+    "underlyingBeforeFill": [],
+    "normalAfterClick": {
+      "title": "www.camwhoreshd.com",
+      "text": "www.camwhoreshd.com refused to connect.",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "executorBefore": {
+      "src": "https://www.camwhoreshd.com/videos/1892550/neli-elinek-armpits-4-0f973bf750cd54bd/",
+      "identity": "https://www.camwhoreshd.com/videos/1892550/neli-elinek-armpits-4-0f973bf750cd54bd/",
+      "session": "https://www.camwhoreshd.com/videos/1892550/neli-elinek-armpits-4-0f973bf750cd54bd/",
+      "capability": {
+        "generation": 2,
+        "capable": false,
+        "active": false,
+        "acceptingReports": true,
+        "pendingActive": null,
+        "embedAvailable": true,
+        "embedActive": false
+      },
+      "mapped": "https://www.camwhores.lol/embed/16296779",
+      "immediateOverlays": 1
+    },
+    "embed": {
+      "title": "404 / Page not found",
+      "text": "404 / Page not found",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "fillFrames": [
+      "https://www.camwhores.lol/embed/16296779"
+    ],
+    "beforePlay": [],
+    "fillPlayAttempts": [],
+    "afterPlay": [],
+    "playing": false,
+    "audio": false,
+    "underlyingDuring": [],
+    "doubleAudio": false,
+    "controls": [],
+    "geometry": [
+      {
+        "size": {
+          "width": 1200,
+          "height": 700
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 595,
+          "height": 698
+        }
+      },
+      {
+        "size": {
+          "width": 900,
+          "height": 600
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 898,
+          "height": 238
+        }
+      }
+    ],
+    "exit": {
+      "noOverlay": true,
+      "sameFrame": true,
+      "sameSrc": true,
+      "sameIdentity": true,
+      "sameSession": true,
+      "shield": "allow-same-origin allow-scripts allow-forms",
+      "fillVisible": true
+    },
+    "topStayed": true
+  },
+  {
+    "host": "camwhoreshd.com",
+    "specimen": 1,
+    "canonical": "https://www.camwhoreshd.com/videos/1946972/neli-elinek-123-26fa0aea70d3fc63/",
+    "candidate": "https://www.camwhores.lol/embed/16330489",
+    "labOnlyResolver": true,
+    "extensionStandin": false,
+    "popups": 0,
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing."
+    ],
+    "requests": [
+      "https://www.camwhores.lol/embed/16330489"
+    ],
+    "apiResponses": [],
+    "normal": {
+      "title": "www.camwhoreshd.com",
+      "text": "www.camwhoreshd.com refused to connect.",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "frames": [
+      ""
+    ],
+    "underlyingAutoplay": [],
+    "normalPlayAttempts": [],
+    "underlyingBeforeFill": [],
+    "normalAfterClick": {
+      "title": "www.camwhoreshd.com",
+      "text": "www.camwhoreshd.com refused to connect.",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "executorBefore": {
+      "src": "https://www.camwhoreshd.com/videos/1946972/neli-elinek-123-26fa0aea70d3fc63/",
+      "identity": "https://www.camwhoreshd.com/videos/1946972/neli-elinek-123-26fa0aea70d3fc63/",
+      "session": "https://www.camwhoreshd.com/videos/1946972/neli-elinek-123-26fa0aea70d3fc63/",
+      "capability": {
+        "generation": 2,
+        "capable": false,
+        "active": false,
+        "acceptingReports": true,
+        "pendingActive": null,
+        "embedAvailable": true,
+        "embedActive": false
+      },
+      "mapped": "https://www.camwhores.lol/embed/16330489",
+      "immediateOverlays": 1
+    },
+    "embed": {
+      "title": "404 / Page not found",
+      "text": "404 / Page not found",
+      "iframes": [],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "fillFrames": [
+      "https://www.camwhores.lol/embed/16330489"
+    ],
+    "beforePlay": [],
+    "fillPlayAttempts": [],
+    "afterPlay": [],
+    "playing": false,
+    "audio": false,
+    "underlyingDuring": [],
+    "doubleAudio": false,
+    "controls": [],
+    "geometry": [
+      {
+        "size": {
+          "width": 1200,
+          "height": 700
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 595,
+          "height": 698
+        }
+      },
+      {
+        "size": {
+          "width": 900,
+          "height": 600
+        },
+        "box": {
+          "x": 1,
+          "y": 1,
+          "width": 898,
+          "height": 238
+        }
+      }
+    ],
+    "exit": {
+      "noOverlay": true,
+      "sameFrame": true,
+      "sameSrc": true,
+      "sameIdentity": true,
+      "sameSession": true,
+      "shield": "allow-same-origin allow-scripts allow-forms",
+      "fillVisible": true
+    },
+    "topStayed": true
+  }
+]

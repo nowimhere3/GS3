@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triple Screen Mode - Goonerscroll</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230095f6'/><text y='72' x='50' text-anchor='middle' font-size='65' font-family='Arial'>🎬</text></svg>">
+    <script>
+        // Detect if this page is running nested inside another Launchpad
+        // iframe (e.g. via 🚀), and how many levels deep. Same-origin, so
+        // walking window.parent is safe. Runs synchronously before <style>
+        // so classes are set before first paint.
+        (function () {
+            var depth = 0;
+            var win = window;
+            while (win !== win.top) { depth += 1; win = win.parent; }
+            if (depth >= 1) document.documentElement.classList.add('is-nested');
+            if (depth === 1) document.documentElement.classList.add('layer-2');
+
+            // Ghost Mode / Hotswap Chrome opacity — reads raw localStorage
+            // directly (the Store module isn't loaded yet at this point).
+            //
+            // BREADCRUMBS — WAS: one opacity value, with hover hardcoded to 1.
+            // IS: exactly TWO customer-facing values, RESTING and HOVER, shared
+            // by every Chrome surface.
+            // WHY: the top toolbar and the Quick Action runway are one control
+            // surface split across two edges, not two features. Giving each its
+            // own resting/hover pair would be four settings to keep in sync for
+            // a distinction the user never asked for. The resting key name is
+            // deliberately unchanged so existing preferences survive.
+            try {
+                var readPct = function (key, fallback) {
+                    var raw = localStorage.getItem(key);
+                    var pct = raw !== null ? parseFloat(raw) : fallback;
+                    if (isNaN(pct)) pct = fallback;
+                    return Math.max(0, Math.min(100, pct));
+                };
+                var restingPct = readPct('hotswap_ghost_opacity', 12);
+                var hoverPct = readPct('hotswap_hover_opacity', 100);
+                document.documentElement.style.setProperty('--ghost-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-resting-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-hover-opacity', hoverPct / 100);
+
+                var targetsRaw = localStorage.getItem('hotswap_ghost_targets');
+                var targets = targetsRaw ? JSON.parse(targetsRaw) : {};
+                if (targets.trigger) document.documentElement.classList.add('ghost-trigger');
+                if (targets.master)  document.documentElement.classList.add('ghost-master');
+                if (targets.stream)  document.documentElement.classList.add('ghost-stream');
+                if (targets.solo)    document.documentElement.classList.add('ghost-solo');
+            } catch (e) { /* Ghost Mode just won't apply this load */ }
+        })();
+    </script>
+    <style>
+        /* GS3-owned dark scrollbars */
+        html { color-scheme: dark; }
+        * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-color: #666 #1a1a1a; scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        ::-webkit-scrollbar-corner { background: #1a1a1a; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        body { background: #0b0b0b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+
+        #triple-layout {
+            width: 100vw; height: 100vh;
+            display: grid;
+        }
+        /* Layout variants — toggled via JS by swapping the class on #triple-layout.
+           Screen area names (screen1/screen2/screen3) are fixed to the slot divs
+           below, so switching layouts never touches the panels/iframes themselves.
+           Each layout reserves a thin 6px track (named vres/hres/vres1/vres2) between
+           adjacent panels — that's where the draggable resizer handles live. */
+        #triple-layout.layout-top2 {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 vres screen2" "hres hres hres" "screen3 screen3 screen3";
+        }
+        #triple-layout.layout-bottom2 {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 screen1 screen1" "hres hres hres" "screen2 vres screen3";
+        }
+        #triple-layout.layout-3col {
+            grid-template-columns: 1fr 6px 1fr 6px 1fr;
+            grid-template-rows: 1fr;
+            grid-template-areas: "screen1 vres1 screen2 vres2 screen3";
+        }
+        #triple-layout.layout-lefttall {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 vres screen2" "screen1 vres hres" "screen1 vres screen3";
+        }
+        #triple-layout.layout-righttall {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen2 vres screen1" "hres vres screen1" "screen3 vres screen1";
+        }
+        #triple-layout.layout-vsplit {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr;
+            grid-template-areas: "screen1 vres screen2";
+        }
+        #triple-layout.layout-hsplit {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1" "hres" "screen2";
+        }
+        #triple-layout.layout-4grid {
+            grid-template-columns: 1fr 6px 1fr;
+            grid-template-rows: 1fr 6px 1fr;
+            grid-template-areas: "screen1 vres screen2" "hresL vres hresR" "screen3 vres screen4";
+        }
+        .stream-slot { position: relative; border: 1px solid #1d1d1d; overflow: hidden; background: #000; }
+        #screen-1-slot { grid-area: screen1; }
+        #screen-2-slot { grid-area: screen2; }
+        #screen-3-slot { grid-area: screen3; }
+        #screen-4-slot { grid-area: screen4; }
+        /* Badges the FIXED PHYSICAL Position this slot is currently rendering
+           in — triple-mode.js rewrites it on every arrangement/layout change, so
+           a given physical place always shows the same Position number. */
+        .slot-label { position: absolute; left: 8px; top: 8px; z-index: 9998; background: rgba(0,0,0,0.6); border: 1px solid #333; color: #555; border-radius: 8px; font-size: 11px; padding: 3px 8px; }
+        .stream-panel { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
+        .post-iframe  { width: 100%; height: 100%; border: none; display: block; }
+
+        /* Draggable border resizers — injected/positioned via JS per layout */
+        .resizer { background: #1d1d1d; position: relative; z-index: 50; transition: background 0.15s; }
+        .resizer:hover, .resizer.active { background: #0095f6; }
+        .resizer-v { cursor: col-resize; }
+        .resizer-h { cursor: row-resize; }
+        .resizer-v::after { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
+        .resizer-h::after { content: ''; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+        .resizer-junc {
+            grid-column: 2;
+            grid-row: 2;
+            cursor: all-scroll;
+            position: relative;
+            z-index: 60;
+        }
+        .resizer-junc::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            bottom: -4px;
+            left: -4px;
+            right: -4px;
+        }
+
+        /* Full-viewport overlay shown only while actively dragging — prevents
+           iframes from swallowing mousemove/mouseup events mid-drag. */
+        #resizer-drag-overlay { display: none; position: fixed; inset: 0; z-index: 40000; }
+        #resizer-drag-overlay.active { display: block; }
+
+        /* Orchestration Dock: its measured width is reserved by the Master Bar. */
+        #orchestration-dock { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
+
+        /* BREADCRUMBS — the .float-btn (Dock) relocation workaround that used to
+           live here (`html.is-nested #orchestration-dock { right:auto; left:18px }`)
+           is retired: a nested Runtime no longer CONSTRUCTS its own Dock or
+           Master Bar at all (triple-mode.js, IS_NESTED guard), so there is no
+           longer a second cluster to relocate away from the outer session's.
+           See 000-INVARIANTS.md § Runtime Shell Ownership. The gold border below
+           is purely a leftover-visible cue for the rare case a .float-btn is
+           ever rendered while nested; it no longer does any collision avoidance. */
+        html.is-nested .float-btn { border-color: #f0c020; border-width: 2px; }
+        html.is-nested .float-btn:hover { border-color: #ffd84a; }
+        html.is-nested .float-btn.active { border-color: #f0c020; }
+        .float-btn { background: rgba(0,0,0,0.82); border: 1px solid #444; border-radius: 10px; color: #ccc; font-size: 18px; cursor: pointer; padding: 10px 14px; backdrop-filter: blur(8px); transition: background 0.15s, border-color 0.15s, color 0.15s; user-select: none; line-height: 1; text-decoration: none; display: flex; align-items: center; }
+        .float-btn:hover { background: rgba(0,0,0,0.95); color: #fff; border-color: #666; }
+        .float-btn.active { background: rgba(0,95,200,0.85); border-color: #0095f6; color: #fff; }
+
+        /* Master control bar: CLOSED always means its full rendered height is
+           below the viewport. Its right padding reserves the measured Dock. */
+        #master-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 29000; box-sizing: border-box; background: rgba(10,10,10,0.96); border-top: 1px solid #2d2d2d; backdrop-filter: blur(12px); padding: 14px calc(20px + var(--gs3-dock-reserve, 140px)) 14px 20px; transform: translateY(100%); transition: transform 0.25s ease, opacity 0.15s ease; }
+
+        html.ghost-master #master-bar.open { opacity: var(--ghost-opacity, 0.12); }
+        html.ghost-master #master-bar.open:hover { opacity: 1; }
+        #master-bar.open { transform: translateY(0); }
+        .master-shell-content { width: 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .master-region { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+        .master-structural { flex: 0 1 auto; }
+        .master-status-region { flex: 1 1 140px; justify-content: center; min-width: 0; }
+        /* The Layer target is the conductor's routing control — neither a
+           layout shortcut, a Dock action, nor a history action — so it gets
+           its own central region rather than living inside the right-side
+           working cluster. A matching flex:1 spacer on its far side balances
+           the status region's own flex:1 grow, so the target sits between two
+           equally-growing gaps instead of drifting toward either edge. */
+        .master-layer-region { flex: 0 0 auto; }
+        .master-layer-spacer { flex: 1 1 0; }
+        .master-contextual { flex: 0 1 auto; justify-content: flex-end; }
+        .master-dropup-anchor { position: relative; }
+        .master-layout-shortcuts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .layout-gateway, .overflow-gateway { min-width: 42px; justify-content: center; font-size: 18px; }
+        .layout-gateway.has-overflow-active { color: #4ab0f5; border-color: #0095f6; }
+        .master-menu { position: absolute; bottom: calc(100% + 8px); display: none; flex-wrap: wrap; gap: 8px; padding: 10px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); z-index: 30001; max-width: min(620px, calc(100% - 32px)); }
+        .master-menu.open { display: flex; }
+        #master-layout-menu { right: calc(20px + var(--gs3-dock-reserve, 140px)); }
+        #master-general-menu { right: calc(62px + var(--gs3-dock-reserve, 140px)); }
+        .master-menu .master-btn { flex: 0 0 auto; }
+        .master-btn { border: 1px solid #333; padding: 9px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px; background: #1a1a1a; color: #eee; transition: background 0.15s, border-color 0.15s; white-space: nowrap; flex-shrink: 0; text-decoration: none; display: inline-flex; align-items: center; }
+        .master-btn:hover { background: #252525; border-color: #555; }
+        .master-btn.folder-btn  { background: #0e1e2e; border-color: #0095f6; color: #4ab0f5; }
+        .master-btn.shuffle-btn { background: #0e1e0e; border-color: #3a7a3a; color: #4caf50; }
+        .master-btn.shuffall-btn{ background: #0e1828; border-color: #2d5073; color: #6eb4f1; }
+        .master-btn.undo-btn    { background: #2a2210; border-color: #6a4a1a; color: #d4a94a; }
+        .master-btn.undo-btn:hover:not(:disabled) { background: #3a2e14; }
+        .master-btn.undo-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .master-btn.save-btn    { background: #241a38; border-color: #9d6dff; color: #c9b3ff; }
+        .master-btn.save-btn:hover { background: #2e2246; }
+        .master-btn.close-btn   { background: #1a1a2a; border-color: #0095f6; color: #0095f6; }
+        .master-btn.back-btn    { background: #1a1a1a; border-color: #555; color: #999; }
+        .master-btn.layout-btn  { padding: 8px 11px; }
+        .master-btn.layout-btn.active { background: #0e1e2e; border-color: #0095f6; }
+        #master-status { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #555; font-family: monospace; }
+        /* Nested-status reporting (Stage C route 3): shows the targeted nested
+           Runtime's own reported status text, reusing this one status pathway
+           rather than a second status system. Hidden whenever the selector
+           targets L1 or the target has never reported. */
+        #master-nested-status { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #b39ae0; font-family: monospace; margin-left: 6px; }
+        #master-nested-status[hidden] { display: none; }
+
+        /* Mini layout-preview icons for the layout-switcher buttons.
+           These are temporary CSS-drawn placeholders — swap in your 56px
+           custom emoji images here whenever you have them (e.g. replace the
+           <span class="layout-icon ..."> block with an <img>). */
+        .layout-icon { display: grid; width: 26px; height: 20px; gap: 2px; flex-shrink: 0; }
+        .layout-icon i { background: #8ab4d8; display: block; border-radius: 1px; font-style: normal; }
+        .master-btn.layout-btn.active .layout-icon i { background: #4ab0f5; }
+        .layout-icon i:nth-child(1) { grid-area: a; }
+        .layout-icon i:nth-child(2) { grid-area: b; }
+        .layout-icon i:nth-child(3) { grid-area: c; }
+        .layout-icon i:nth-child(4) { grid-area: d; }
+        .li-top2      { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c c"; }
+        .li-bottom2   { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a a" "b c"; }
+        .li-3col      { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b c"; }
+        .li-lefttall  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "a c"; }
+        .li-righttall { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "b a" "c a"; }
+        .li-vsplit    { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b"; }
+        .li-hsplit    { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a" "b"; }
+        .li-4grid     { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c d"; }
+
+        /* Master dropups are anchored above their own bar controls, so wrapped
+           Master rows never require a guessed bar-height clearance. */
+        #master-folder-dropup { position: absolute; bottom: calc(100% + 8px); left: 20px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 320px; overflow-y: auto; z-index: 30001; min-width: 220px; display: none; }
+        #master-folder-dropup.open { display: block; }
+        .dropup-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #222; font-size: 13px; color: #ddd; transition: background 0.1s; display: flex; justify-content: space-between; align-items: center; }
+        .dropup-item:hover { background: #1e2a3a; color: #4ab0f5; }
+        .dropup-item:last-child { border-bottom: none; }
+        .dropup-item.selected { background: #0e1e2e; color: #4ab0f5; font-weight: bold; }
+        .dropup-count { font-size: 11px; color: #555; margin-left: 8px; }
+
+        /* Save Session As drop-up */
+        #master-save-dropup { position: absolute; bottom: calc(100% + 8px); right: calc(20px + var(--gs3-dock-reserve, 140px)); background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); max-height: 360px; overflow-y: auto; z-index: 30001; min-width: 240px; display: none; }
+        #master-save-dropup.open { display: block; }
+        .save-session-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #222; transition: background 0.1s; }
+        .save-session-item:hover { background: #241a38; }
+        .save-session-item:last-child { border-bottom: none; }
+        .save-session-item.current { background: #1e1530; }
+        .save-session-item-main { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #ddd; font-weight: bold; }
+        .save-session-current-badge { font-size: 10px; color: #c9b3ff; background: #33245a; border-radius: 6px; padding: 2px 6px; font-weight: normal; }
+        .save-session-item-meta, .save-session-item-saved { font-size: 11px; color: #777; margin-top: 2px; }
+
+        /* Per-panel hotswap trigger */
+        /* BREADCRUMBS — WAS: `position:absolute; top:16px; right:16px` plus
+           overlay-era padding, from when this button floated in the panel's
+           corner. Inside the flex rail that took it out of flow and pushed it
+           16px DOWN, which is what made it protrude below the toolbar.
+           IS: an ordinary compact flex child, vertically centred like its
+           neighbours.
+           WHY: every unnecessary toolbar pixel is website height taken away
+           while Chrome is open — the rail was not too short, the button was
+           carrying spacing for a layout that no longer exists. */
+        .hotswap-trigger {
+            position: static; padding: 0; margin: 0;
+            width: 26px; height: 22px;
+            background: rgba(0,0,0,0.72); border: 1px solid #4a4a4a; color: #ccc;
+            border-radius: 8px; font-size: 12px; font-weight: bold; letter-spacing: 1px;
+            line-height: 1; cursor: pointer; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        /* BREADCRUMBS — the Ghost hover rule must end here. A trailing comma
+           groups the trigger with `.hotswap-overlay`, lending the button the
+           tray's absolute geometry and making the whole toolbar jump. */
+        html.ghost-trigger .hotswap-trigger:hover { opacity: var(--chrome-hover-opacity, 1); }
+
+        /* Per-panel overlay */
+        .hotswap-overlay { position: absolute; top: var(--hotswap-toolbar-height); right: 8px; background: rgba(0,0,0,0.92); border: 1px solid #333; border-radius: 14px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; z-index: 10000; backdrop-filter: blur(10px); min-width: 190px; opacity: 0; pointer-events: none; transform: translateX(12px) scale(0.95); transform-origin: top right; transition: opacity 0.15s ease, transform 0.15s ease; }
+        .hotswap-overlay.open { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
+        .hotswap-icon-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+
+        /* Layer 2 (running one level nested) — every panel's own ··· trigger
+           and Quick Action shortcuts move to the top-left with a yellow
+           border, since the OUTER layer's own per-panel ··· always lives at
+           top-right for that same panel. Positioned just below the "Position N"
+           slot-label (which sits at top:8px) so they don't overlap it. The
+           overlay pops out to the right instead of the left, since the
+           trigger itself is now on the left. */
+
+        /* Small square icon buttons */
+        .btn-hotswap-toggle, .btn-hotswap-star, .btn-hotswap-reload, .btn-hotswap-fill-panel, .btn-hotswap-kill,
+        .btn-purge, .btn-hotswap-position, .btn-hotswap-copy-position,
+        .btn-hotswap-folder, .btn-hotswap-launchpad,
+        .btn-hotswap-undo, .btn-hotswap-redo {
+            border-radius: 10px;
+            width: 28px;
+            height: 28px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.15s, color 0.15s, transform 0.15s;
+        }
+
+        /* 🌐 URL toggle button */
+        .btn-hotswap-toggle { background: #222; border: 1px solid #444; color: #aaa; font-weight: bold; }
+        .btn-hotswap-toggle:hover { background: #333; color: #fff; }
+        .btn-hotswap-toggle.active { background: #0095f6; border-color: #0095f6; color: #fff; }
+
+        /* 📍 Move to Position button */
+        .btn-hotswap-position { background: #0a1a1a; border: 1px solid #1a6a5a; color: #4ad4c4; }
+        .btn-hotswap-position:hover { background: #0d2a28; }
+        .btn-hotswap-position.active { background: #0f9080; border-color: #0f9080; color: #fff; }
+
+        /* 📋 Copy to Position button */
+        .btn-hotswap-copy-position { background: #0a141a; border: 1px solid #1a4a6a; color: #4aa8d4; }
+        .btn-hotswap-copy-position:hover { background: #0d2028; }
+        .btn-hotswap-copy-position.active { background: #0f6f90; border-color: #0f6f90; color: #fff; }
+
+        /* ↩ / ↪ Panel Undo & Redo — availability-driven, so :disabled matters */
+        .btn-hotswap-undo, .btn-hotswap-redo { background: #1a1620; border: 1px solid #4a3a6a; color: #b39ae0; font-weight: bold; }
+        .btn-hotswap-undo:hover:not(:disabled), .btn-hotswap-redo:hover:not(:disabled) { background: #262030; color: #fff; }
+        .btn-hotswap-undo:disabled, .btn-hotswap-redo:disabled { opacity: 0.32; cursor: default; }
+
+        /* 📁 Folder-assign button */
+        .btn-hotswap-folder { background: #241a0a; border: 1px solid #6a4a1a; color: #d4a94a; }
+        .btn-hotswap-folder:hover { background: #2e2210; }
+        .btn-hotswap-folder.active { background: #a67a1f; border-color: #a67a1f; color: #fff; }
+
+        /* 🚀 Load Launchpad button */
+        .btn-hotswap-launchpad { background: #3a1f0a; border: 1px solid #a85a1a; color: #ff8c42; }
+        .btn-hotswap-launchpad:hover { background: #4a2810; }
+
+        /* Quick Action shortcuts — always visible below the ··· trigger */
+        /* BREADCRUMBS — RETIRED: the Layer-2 "flip Chrome to the opposite
+           corner" rules lived here, together with the corner-anchored "..."
+           trigger and its shortcut column. Hotswap Chrome replaced all of it
+           with one toolbar plus one runway and an explicit, highlighted
+           [L2][L1] selector, so there is no longer anything to flip — scope is
+           stated instead of implied by placement. Noted so the absence reads as
+           a decision rather than an oversight. */
+
+        /* Shuffle / Shuffle All / Delete pill buttons */
+        .btn-hotswap-shuffle { background: #1a2a1a; border: 1px solid #3a6b3a; color: #4caf50; border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer; white-space: nowrap; flex: 1; transition: background 0.15s; }
+        .btn-hotswap-shuffle:hover { background: #223322; }
+        .btn-hotswap-shuffle:active { transform: rotate(15deg) scale(0.95); }
+
+        .btn-hotswap-shuffle-all { background: #0d2038; border: 1px solid #2f6fb3; color: #6db8ff; border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer; white-space: nowrap; flex: 1; transition: background 0.15s; }
+        .btn-hotswap-shuffle-all:hover { background: #123058; }
+
+        /* Purge button (icon-only) */
+        .btn-purge { background: #331417; color: #ed4956; border: 1px solid #4a1a1e; }
+        .btn-purge:hover { background: #ed4956; color: #fff; }
+
+        .btn-hotswap-delete { background: #1a1a1a; border: 1px solid #555; color: #ccc; border-radius: 10px; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
+        .btn-hotswap-delete:hover { background: #333; color: #fff; }
+
+        /* Kill button */
+        .btn-hotswap-kill { background: #1a0808; border: 1px solid #5a2020; color: #888; }
+        .btn-hotswap-kill:hover { background: #3a0a0a; color: #ed4956; }
+
+        /* Star button */
+        .btn-hotswap-star { background: #1a1a0a; border: 1px solid #5a5a00; color: #f0c040; }
+        .btn-hotswap-star:hover { background: #2a2a00; transform: scale(1.15); }
+        .btn-hotswap-star.saved { color: #ffd700; background: #2a2200; border-color: #ffd700; }
+
+        /* Reload button */
+        .btn-hotswap-reload { background: #0a1a2a; border: 1px solid #1a5a8a; color: #4a9fd4; }
+        .btn-hotswap-reload:hover { background: #0d2a3a; }
+        .btn-hotswap-reload.spinning { transform: rotate(360deg); transition: transform 0.4s ease; }
+        .btn-hotswap-fill-panel[hidden],
+        .hotswap-mirror-btn[data-action-key="fillPanel"][hidden] { display: none !important; }
+        .btn-hotswap-fill-panel.active,
+        .hotswap-mirror-btn[data-action-key="fillPanel"].active {
+            background: #7f1d1d;
+            border-color: #ef4444;
+            color: #fff;
+        }
+
+        .hotswap-url-row { display:none; gap:4px; align-items:center; }
+        .hotswap-url-row.open { display:flex; }
+        .hotswap-input { flex:1; background:#1a1a1a; border:1px solid #444; border-radius:12px; padding:4px 9px; color:#fff; font-size:11px; outline:none; min-width:140px; }
+        .hotswap-input:focus { border-color:#0095f6; }
+        .hotswap-submit-btn { background:#0095f6; color:#fff; border:none; border-radius:50%; width:20px; height:20px; font-size:10px; font-weight:bold; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+
+        /* 📁 Folder-picker, 📍 Move-to-Position and 📋 Copy-to-Position expandable lists */
+        .hotswap-folder-row, .hotswap-position-row, .hotswap-copy-row { display: none; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+        .hotswap-folder-row { max-height: min(256px, calc(100% - 16px)); }
+        .hotswap-folder-row.open, .hotswap-position-row.open, .hotswap-copy-row.open { display: flex; }
+        .hotswap-folder-item, .hotswap-position-item { background: #181818; border: 1px solid #333; border-radius: 8px; padding: 6px 10px; font-size: 12px; color: #ccc; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.12s; }
+        .hotswap-folder-item:hover, .hotswap-position-item:hover { background: #242424; color: #fff; }
+        /* The panel's OWN Position is always listed — disabled — so the fixed
+           numbering the user sees is the layout's complete numbering. */
+        .hotswap-position-item.current { opacity: 0.45; cursor: default; }
+        .hotswap-position-item.current:hover { background: #181818; color: #ccc; }
+        .hotswap-position-note { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .hotswap-folder-count { color: #666; font-size: 11px; }
+
+
+        /* ── HOTSWAP CHROME ───────────────────────────────────────────────────
+           BREADCRUMBS — WAS: corner-anchored overlay chrome ("···" top-right,
+           tray beside it, shortcut column beneath, Layer 2 flipped to the
+           opposite corner).
+           IS: a retractable top toolbar that INSETS the content, plus a right
+           runway overlay that starts below a top-right safe zone.
+           WHY: an arbitrary website already owns its own corners. GS3 keeps the
+           panel border and the sliver immediately inside it; the site keeps
+           everything else whenever Chrome is not in use. */
+        .stream-panel {
+            display: flex;
+            flex-direction: column;
+            /* Sized to the controls it carries (22px) plus 4px breathing room
+               above and below — not to legacy overlay padding. This height is
+               website height borrowed for as long as Chrome is open. */
+            --hotswap-toolbar-height: 30px;
+            /* Clear of the resizer's own +/-4px grab zone, so a pixel is either
+               resize or activation and never both. */
+            --hotswap-activation-inset: 6px;
+            --hotswap-activation-height: 14px;
+            /* The top-right safe zone. Proportional to the toolbar rather than
+               an arbitrary pixel count, so it scales with the chrome.
+               BREADCRUMBS — WAS 1.5 toolbar heights. IS 1.75. WHY: the site's
+               own corner controls sit within roughly one control-row of the
+               top edge; 2.5 surrendered well past them and cost usable runway
+               height for nothing. 1.5 still clears that territory. */
+            --hotswap-website-inset: 0px;
+            --shortcut-runway-top-offset: calc(var(--hotswap-website-inset) + var(--hotswap-toolbar-height) * 1.75);
+            --hotswap-resting-opacity: var(--chrome-resting-opacity, 0.12);
+            --hotswap-hover-opacity: var(--chrome-hover-opacity, 1);
+        }
+        .stream-panel > .post-iframe { flex: 1 1 0; min-height: 0; width: 100%; border: none; display: block; }
+
+        /* Retracted to zero height: the website gets the whole panel. Revealing
+           grows the toolbar and pushes the iframe down — a layout change on the
+           iframe's existing parent, so the document itself is never touched. */
+        .hotswap-toolbar {
+            flex: 0 0 auto; height: 0; overflow: hidden;
+            display: flex; align-items: center; gap: 8px;
+            padding: 0 10px; box-sizing: border-box;
+            background: rgba(10,10,10,0.94); border-bottom: 0 solid #2d2d2d;
+            backdrop-filter: blur(8px); position: relative; z-index: 10002;
+            opacity: 0; transition: height 0.16s ease, opacity 0.16s ease;
+        }
+        /* BREADCRUMBS — the rail is FULL opacity whenever revealed. Retraction
+           already solves its intrusion; fading a surface that only exists while
+           deliberately in use just makes it harder to read. Ghost opacity now
+           belongs to the runway alone. */
+        .stream-panel.chrome-revealed > .hotswap-toolbar {
+            height: var(--hotswap-toolbar-height);
+            border-bottom-width: 1px;
+            opacity: 1;
+        }
+        .stream-panel.chrome-revealed { --hotswap-website-inset: var(--hotswap-toolbar-height); }
+
+        /* Subtle Layer-2 Chrome distinction (011-HOTSWAP-CHROME.md § Subtle
+           nested visual treatment). A graphite/smoky tint, not a color change
+           loud enough to read on its own — the explicit "L2 · P#" text is the
+           primary truth; this is only a peripheral-vision cue, reusing the
+           existing .is-nested state hook rather than inventing a parallel one. */
+        html.is-nested .hotswap-toolbar {
+            background: rgba(26, 24, 18, 0.94);
+            border-bottom-color: #3a331f;
+        }
+
+        .hotswap-position-label { white-space: nowrap; }
+        /* ── Compact rail geometry ────────────────────────────────────────────
+           One row, every control the same height, everything vertically centred.
+           Nothing here may reintroduce vertical offsets: the rail's height is
+           website height borrowed for as long as Chrome is open. */
+        .hotswap-toolbar > * { flex-shrink: 0; }
+        /* BREADCRUMBS — the old corner "···" carried `user-select: none`; the
+           rewrite into a flex rail dropped it. Restored across the whole rail
+           so dragging over the controls can never begin a text selection or a
+           native text drag (whose no-drop cursor is likewise invisible to
+           screenshots). */
+        .hotswap-toolbar, .hotswap-toolbar button, .hotswap-position-menu,
+        .hotswap-runway, .hotswap-runway button {
+            user-select: none; -webkit-user-select: none;
+        }
+        .hotswap-top-shortcuts { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .hotswap-top-shortcuts > [hidden] { display: none; }
+
+        .hotswap-position-btn {
+            display: flex; align-items: center; gap: 4px;
+            height: 22px; padding: 0 8px; margin: 0; line-height: 1;
+            background: #181818; border: 1px solid #3a3a3a; border-radius: 7px;
+            color: #9a9a9a; font-size: 11px; letter-spacing: 0.04em; cursor: pointer;
+            white-space: nowrap; transition: background 0.12s, color 0.12s, border-color 0.12s;
+        }
+        .hotswap-position-btn:hover:not(:disabled) { background: #222; color: #ddd; border-color: #555; }
+        .hotswap-position-btn.open { background: #0a2a4a; border-color: #0095f6; color: #6db8ff; }
+        .hotswap-position-btn:disabled { cursor: default; }
+        .hotswap-caret { font-size: 8px; opacity: 0.7; }
+        /* The pop-under is a PANEL child, not a toolbar child: the rail is
+           `overflow: hidden` so it can animate from zero height, which would
+           otherwise clip this away entirely. */
+        .hotswap-position-menu {
+            position: absolute; top: var(--hotswap-toolbar-height); left: 8px; margin-top: 4px;
+            background: rgba(10,10,10,0.97); border: 1px solid #333; border-radius: 10px;
+            padding: 6px; min-width: 170px; max-height: calc(100% - var(--hotswap-toolbar-height) - 16px);
+            overflow-y: auto; z-index: 10004;
+            display: flex; flex-direction: column; gap: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+        }
+        .stream-panel:not(.chrome-revealed) > .hotswap-position-menu { display: none; }
+        .hotswap-position-menu[hidden] { display: none; }
+        .hotswap-position-group { display: flex; flex-direction: column; gap: 3px; }
+        .hotswap-position-group-title {
+            font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #666; padding: 2px 4px;
+        }
+        .hotswap-position-menu .hotswap-position-item {
+            width: 100%; text-align: left; font-family: inherit;
+        }
+        .hotswap-layer-btn, .hotswap-mirror-btn, .hotswap-trigger, .hotswap-position-btn {
+            vertical-align: middle;
+        }
+
+        .hotswap-toolbar-spacer { flex: 1 1 auto; }
+        .hotswap-toolbar-actions { display: flex; align-items: center; gap: 6px; }
+
+        /* The activation region — deliberately NOT the resize border. */
+        .hotswap-activation {
+            position: absolute; left: 0; right: 0;
+            top: var(--hotswap-activation-inset);
+            height: var(--hotswap-activation-height);
+            z-index: 10003; background: transparent;
+        }
+        .stream-panel.chrome-revealed > .hotswap-activation { pointer-events: none; }
+
+        /* Layer scope. The active layer must be unmistakable, not a subtle
+           text-colour difference. */
+        .hotswap-layer-selector { display: flex; gap: 3px; }
+        .hotswap-layer-selector[hidden] { display: none; }
+        .hotswap-layer-btn {
+            background: #181818; border: 1px solid #3a3a3a; color: #777;
+            border-radius: 7px; font-size: 10px; font-weight: bold; letter-spacing: 0.06em;
+            padding: 3px 7px; cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s;
+        }
+        .hotswap-layer-btn:hover { color: #ccc; border-color: #555; }
+        .hotswap-layer-btn.active {
+            background: #f0c020; border-color: #f0c020; color: #101010;
+            box-shadow: 0 0 0 1px rgba(240,192,32,0.35), 0 0 10px rgba(240,192,32,0.35);
+        }
+
+        /* Mirror buttons: same canonical action, another surface. */
+        .hotswap-mirror-btn {
+            background: rgba(0,0,0,0.72); border: 1px solid #4a4a4a; color: #ccc;
+            border-radius: 9px; cursor: pointer; display: flex; align-items: center;
+            justify-content: center; flex-shrink: 0; transition: background 0.15s, color 0.15s, opacity 0.15s;
+            /* A two-glyph icon (Shuffle All is two dice) must stay on ONE line.
+               Without this it wraps inside the fixed box and stacks vertically,
+               which reads as a broken icon and fights the compact rail. The
+               button widens instead — the rail height never changes. */
+            white-space: nowrap; line-height: 1; padding: 0 2px; overflow: hidden;
+        }
+        .hotswap-mirror-btn:hover:not(:disabled) { background: rgba(0,0,0,0.95); color: #fff; border-color: #888; }
+        /* BREADCRUMBS — WAS: `cursor: not-allowed` plus grayscale.
+           IS: the ordinary cursor, and dimming alone.
+           WHY: Undo/Redo sit immediately left of the fixed "···" gateway and
+           are disabled whenever a panel has no history yet — which is every
+           fresh session. Crossing them to reach "···" painted a crossed-out
+           circle across a ~50px band of the approach path, and the cursor
+           changed three times in ~60px of travel, which reads as the "···"
+           itself being broken and flickering. A CSS cursor is drawn by the
+           compositor and never lands in a screenshot, which is exactly why the
+           artifact was visible on screen and absent from captures. Dimming
+           already communicates "unavailable"; `not-allowed` added alarm, not
+           information, and aimed it at the wrong control. */
+        .hotswap-mirror-btn:disabled { opacity: 0.32; cursor: default; }
+        .hotswap-toolbar-btn { min-width: 22px; width: auto; height: 22px; font-size: 12px; }
+        .hotswap-runway-btn  { width: 30px; height: 30px; font-size: 14px; }
+        .hotswap-runway-shuffle-all { flex-direction:column; gap:0; line-height:0.72; }
+        .hotswap-runway-shuffle-all > span { display:block; }
+        .hotswap-runway-shuffle-all > span:first-child { transform:translate(-2px, 1px); }
+        .hotswap-runway-shuffle-all > span:last-child  { transform:translate( 2px,-1px); }
+
+        /* The right runway: an overlay, and only as long as it is configured to
+           be. Starts below the top-right safe zone so the site keeps its own
+           corner controls — including their clickability. */
+        .hotswap-runway {
+            position: absolute; right: 10px;
+            top: var(--shortcut-runway-top-offset);
+            display: flex; flex-direction: column; gap: 6px;
+            z-index: 10001;
+            opacity: var(--hotswap-resting-opacity);
+            transition: opacity 0.15s ease, top 0.16s ease;
+            /* The runway can never grow past the panel. A short panel clips the
+               tail rather than spilling controls over the layout — the user's
+               configuration is still stored, and the "···" tray remains the
+               complete fallback path to every action. */
+            max-height: calc(100% - var(--shortcut-runway-top-offset) - 10px);
+            overflow: hidden;
+        }
+        .hotswap-runway:hover, .hotswap-runway:focus-within { opacity: var(--hotswap-hover-opacity); }
+
+        /* Small panels: the configuration is kept, the presentation adapts. */
+        .hotswap-picker { position:absolute; z-index:10005; min-width:190px; max-width:calc(100% - 12px); padding:8px; border:1px solid #333; border-radius:10px; background:rgba(10,10,10,0.97); box-shadow:0 8px 24px rgba(0,0,0,0.7); }
+        .hotswap-picker.hotswap-url-row.open { display:flex; }
+        .hotswap-picker.hotswap-url-row { width:clamp(280px, 60%, 560px); }
+        .hotswap-url-row .hotswap-input { flex:1 1 auto; min-width:0; }
+        .hotswap-empty-state { color:#777; font-size:11px; padding:8px 4px; text-align:center; }
+        @media (max-height: 260px) { .hotswap-runway { display: none; } }
+        @media (max-width: 220px) { .hotswap-position-label { display: none; } }
+
+        /* Bookmark modal */
+        #bookmark-modal { display:none; position:fixed; inset:0; z-index:2147483647; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
+        #bookmark-modal.open { display:flex; }
+        .bookmark-card { background:#161616; border:1px solid #2d2d2d; border-top:3px solid #f0c040; border-radius:16px; padding:24px; max-width:420px; width:92%; box-shadow:0 10px 40px rgba(0,0,0,0.8); }
+        .bookmark-card h3 { font-size:16px; color:#f0c040; margin-bottom:12px; }
+        .bm-url-preview { background:#111; border-radius:6px; padding:8px; margin-bottom:14px; font-size:11px; color:#555; word-break:break-all; font-family:monospace; }
+        .bookmark-card label { display:block; font-size:11px; color:#aaa; font-weight:bold; margin-bottom:5px; margin-top:10px; }
+        .bm-folder-select, .bm-new-folder-input { width:100%; background:#222; border:1px solid #333; padding:9px 11px; color:#fff; border-radius:8px; font-size:13px; margin-bottom:10px; outline:none; }
+        .bm-folder-select:focus, .bm-new-folder-input:focus { border-color:#f0c040; }
+        .bm-actions { display:flex; gap:10px; margin-top:16px; }
+        .bm-actions button { flex:1; padding:10px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:13px; }
+        .btn-bm-cancel { background:#222; color:#777; }
+        .btn-bm-save   { background:#f0c040; color:#111; }
+
+        /* This is a genuine top-level small-viewport fallback (phone/narrow
+           browser window), not a general "narrow Grid" rule. A nested Grid
+           Runtime's own iframe is very often under 900px wide even on a full
+           desktop monitor — that is a Panel's SIZE, not the device's — and
+           narrow-iframe alone must never strip a nested Grid down to a single
+           mobile column or hide its internal resizers. `html.is-nested` is
+           set synchronously before first paint, so every selector here is
+           scoped to exclude it; the fallback still applies exactly as before
+           to any top-level page that is genuinely this narrow. See
+           Docs ANCHOR/000-INVARIANTS.md — nested Grids remain fully capable. */
+        @media (max-width: 900px) {
+            html:not(.is-nested) body { overflow: auto; }
+            html:not(.is-nested) #triple-layout {
+                height: auto !important;
+                min-height: 100vh !important;
+                grid-template-columns: 1fr !important;
+                grid-template-rows: none !important;
+                grid-template-areas: none !important;
+                grid-auto-flow: row !important;
+                grid-auto-rows: minmax(40vh, auto) !important;
+            }
+            html:not(.is-nested) .stream-slot { grid-area: auto !important; }
+            html:not(.is-nested) .resizer { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="triple-layout" class="layout-lefttall">
+        <div id="screen-1-slot" class="stream-slot"><span class="slot-label">Position 1</span></div>
+        <div id="screen-2-slot" class="stream-slot"><span class="slot-label">Position 2</span></div>
+        <div id="screen-3-slot" class="stream-slot"><span class="slot-label">Position 3</span></div>
+        <div id="screen-4-slot" class="stream-slot"><span class="slot-label">Position 4</span></div>
+    </div>
+
+    <!-- Always-visible floating buttons -->
+    <div id="orchestration-dock">
+        <button class="float-btn" id="btn-toggle-master" title="Toggle master controls">🎬</button>
+        <a href="index.html" class="float-btn" title="Back to Launchpad">⚙</a>
+    </div>
+
+    <!-- Master control bar (hidden until toggled) -->
+    <div id="master-bar" class="master-dropup-anchor">
+        <div class="master-shell-content">
+        <div class="master-region master-structural">
+        <button class="master-btn shuffle-btn"   id="btn-master-shuffle">🎲 Shuffle</button>
+        <button class="master-btn shuffall-btn"  id="btn-master-shuffle-all">🎲🎲 Shuffle All</button>
+        <button class="master-btn undo-btn" id="btn-master-undo" disabled title="Undo the last change to this session">↩ Undo</button>
+        <button class="master-btn redo-btn" id="btn-master-redo" disabled title="Redo the last change to this session">↪ Redo</button>
+        </div>
+        <div class="master-region master-status-region">
+            <span id="master-status">Not connected</span>
+            <span id="master-nested-status" class="master-nested-status" hidden></span>
+        </div>
+        <div class="master-region master-layer-region">
+        <!-- Rebuilt on every refresh by _refreshMasterLayerSelector — one
+             button per outer Position that truthfully hosts an active nested
+             Runtime (`L2-P#`), plus `L1`. Never a fixed pair: see
+             006-TERMINOLOGY.md § L2-P# addressing. -->
+        <div class="hotswap-layer-selector" id="master-layer-selector" hidden></div>
+        </div>
+        <div class="master-layer-spacer"></div>
+        <div class="master-region master-contextual">
+        <div id="master-layout-shortcuts" class="master-layout-shortcuts"></div>
+        <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts">▦</button>
+        <button class="master-btn overflow-gateway" id="btn-master-overflow" title="More controls">⋯</button>
+        </div>
+        </div>
+        <div id="master-layout-menu" class="master-menu" aria-label="More layouts">
+        <button class="master-btn layout-btn" id="btn-layout-top2" data-layout="top2" title="2 Top + 1 Bottom Wide">
+            <span class="layout-icon li-top2"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-bottom2" data-layout="bottom2" title="1 Top Wide + 2 Bottom">
+            <span class="layout-icon li-bottom2"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-3col" data-layout="3col" title="3 Equal Columns">
+            <span class="layout-icon li-3col"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-lefttall" data-layout="lefttall" title="1 Left Tall + 2 Right Stacked">
+            <span class="layout-icon li-lefttall"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-righttall" data-layout="righttall" title="1 Right Tall + 2 Left Stacked">
+            <span class="layout-icon li-righttall"><i></i><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-vsplit" data-layout="vsplit" title="Vertical 50/50 Split">
+            <span class="layout-icon li-vsplit"><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-hsplit" data-layout="hsplit" title="Horizontal 50/50 Split">
+            <span class="layout-icon li-hsplit"><i></i><i></i></span>
+        </button>
+        <button class="master-btn layout-btn" id="btn-layout-4grid" data-layout="4grid" title="4 Screen Grid">
+            <span class="layout-icon li-4grid"><i></i><i></i><i></i><i></i></span>
+        </button>
+        </div>
+        <div id="master-general-menu" class="master-menu" aria-label="More controls">
+        <div>
+            <button class="master-btn folder-btn" id="btn-master-folder">🌐 Folder ▲</button>
+        </div>
+        <div>
+            <button class="master-btn save-btn" id="btn-master-save">💾 Save Session As...</button>
+        </div>
+        <button type="button" class="master-btn" id="btn-master-copy-diagnostics">Copy Diagnostics</button>
+        <button class="master-btn close-btn" id="btn-master-close">🎬 Close</button>
+        <a href="index.html" class="master-btn back-btn">⚙ Launchpad</a>
+        </div>
+        <div id="master-folder-dropup" class="master-dropup"></div>
+        <div id="master-save-dropup" class="master-dropup"></div>
+    </div>
+
+    <!-- Bookmark modal -->
+    <div id="bookmark-modal">
+        <div class="bookmark-card">
+            <h3>⭐ Save to Playlist</h3>
+            <div class="bm-url-preview" id="bm-url-preview"></div>
+            <label>Choose existing folder</label>
+            <select class="bm-folder-select" id="bm-folder-select"><option value="">— select a folder —</option></select>
+            <label>Or create a new folder</label>
+            <input type="text" class="bm-new-folder-input" id="bm-new-folder-input" placeholder="New playlist name...">
+            <div class="bm-actions">
+                <button class="btn-bm-cancel" id="btn-bm-cancel">Cancel</button>
+                <button class="btn-bm-save"   id="btn-bm-save">⭐ Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./js/triple-mode.js"></script>
+</body>
+</html>

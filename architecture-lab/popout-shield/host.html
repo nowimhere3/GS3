@@ -1,0 +1,11 @@
+<!doctype html><meta charset=utf-8><title>Popout Shield lab host</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style>
+<script>
+// Mirrors js/launch.js panel iframe creation (allow + sandbox), with the sandbox policy under test taken from ?sandbox=
+const q = new URLSearchParams(location.search);
+const f = document.createElement('iframe');
+f.allow = 'autoplay; fullscreen';
+if (q.get('sandbox') !== null) f.sandbox = q.get('sandbox');
+f.src = q.get('url');
+document.addEventListener('DOMContentLoaded', () => document.body.appendChild(f));
+</script>

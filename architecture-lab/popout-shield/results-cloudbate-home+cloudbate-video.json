@@ -1,0 +1,102 @@
+[
+ {
+  "site": "cloudbate-home",
+  "policy": "CURRENT",
+  "loadedUrl": "https://www.cloudbate.com/",
+  "bodyText": "CLOUDBATE\n \nARCHIVE OF CHATURBATE\nSignup Login\nLatest Recordings\nMost Popular\nGi",
+  "title": "Chaturbate Archive | Cloudbate",
+  "bodyChars": 3401,
+  "hasVideo": 0,
+  "clickLog": [
+   "center",
+   "center"
+  ],
+  "finalUrl": "https://www.cloudbate.com/",
+  "sameFrameNav": false,
+  "topUrlChanged": false,
+  "playing": false,
+  "popupCount": 0,
+  "popupUrls": [],
+  "blockedMessages": [],
+  "framingHeadersStripped": [
+   "X-Frame-Options:SAMEORIGIN"
+  ]
+ },
+ {
+  "site": "cloudbate-home",
+  "policy": "R0",
+  "loadedUrl": "https://www.cloudbate.com/",
+  "bodyText": "CLOUDBATE\n \nARCHIVE OF CHATURBATE\nSignup Login\nLatest Recordings\nMost Popular\nGi",
+  "title": "Chaturbate Archive | Cloudbate",
+  "bodyChars": 3401,
+  "hasVideo": 0,
+  "clickLog": [
+   "center",
+   "center"
+  ],
+  "finalUrl": "https://www.cloudbate.com/",
+  "sameFrameNav": false,
+  "topUrlChanged": false,
+  "playing": false,
+  "popupCount": 0,
+  "popupUrls": [],
+  "blockedMessages": [],
+  "framingHeadersStripped": [
+   "X-Frame-Options:SAMEORIGIN"
+  ]
+ },
+ {
+  "site": "cloudbate-video",
+  "policy": "CURRENT",
+  "loadedUrl": "https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/",
+  "bodyText": "CLOUDBATE\n \nARCHIVE OF CHATURBATE\nSignup Login\nLatest Recordings\nMost Popular\nGi",
+  "title": "Lylith_606 sex porn cam 05-Oct-2026",
+  "bodyChars": 1152,
+  "hasVideo": 0,
+  "clickLog": [
+   "[class*=\"play\" i]:not(script)",
+   "[class*=\"play\" i]:not(script)"
+  ],
+  "finalUrl": "https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/",
+  "sameFrameNav": false,
+  "topUrlChanged": false,
+  "playing": false,
+  "popupCount": 2,
+  "popupUrls": [
+   "https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/?play=true",
+   "https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/?play=true"
+  ],
+  "blockedMessages": [
+   "Unsafe attempt to initiate navigation for frame with origin 'http://localhost:8080' from frame with URL 'https://www.cloudbate.com/video/1136214/lylith-606-sex-"
+  ],
+  "framingHeadersStripped": [
+   "X-Frame-Options:SAMEORIGIN"
+  ]
+ },
+ {
+  "site": "cloudbate-video",
+  "policy": "R0",
+  "loadedUrl": "https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/",
+  "bodyText": "CLOUDBATE\n \nARCHIVE OF CHATURBATE\nSignup Login\nLatest Recordings\nMost Popular\nGi",
+  "title": "Lylith_606 sex porn cam 05-Oct-2026",
+  "bodyChars": 1152,
+  "hasVideo": 0,
+  "clickLog": [
+   "[class*=\"play\" i]:not(script)",
+   "[class*=\"play\" i]:not(script)"
+  ],
+  "finalUrl": "https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/",
+  "sameFrameNav": false,
+  "topUrlChanged": false,
+  "playing": false,
+  "popupCount": 0,
+  "popupUrls": [],
+  "blockedMessages": [
+   "Blocked opening 'https://www.cloudbate.com/video/1136214/lylith-606-sex-porn-cam-05-oct-2026/?play=true' in a new window because the request was made in a sandb",
+   "Unsafe attempt to initiate navigation for frame with origin 'http://localhost:8080' from frame with URL 'https://www.cloudbate.com/video/1136214/lylith-606-sex-"
+  ],
+  "framingHeadersStripped": [
+   "X-Frame-Options:SAMEORIGIN"
+  ]
+ }
+]

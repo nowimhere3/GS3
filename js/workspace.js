@@ -111,6 +111,15 @@ export function clearUndoHistory() {
     _undoStack.clear();
 }
 
+/** Order-insensitive equality for folderMap/lockState — avoids a raw
+ *  JSON.stringify() comparison silently going stale over key-order noise. */
+function _sameNormalizedMap(a, b) {
+    const ea = Object.entries(a || {}).sort(([k1], [k2]) => (k1 < k2 ? -1 : k1 > k2 ? 1 : 0));
+    const eb = Object.entries(b || {}).sort(([k1], [k2]) => (k1 < k2 ? -1 : k1 > k2 ? 1 : 0));
+    if (ea.length !== eb.length) return false;
+    return ea.every(([k, v], i) => k === eb[i][0] && JSON.stringify(v) === JSON.stringify(eb[i][1]));
+}
+
 /** 'live' or a preset id, as a string (Store persists strings). */
 export function getActiveWorkspaceId() {
     return Store.get('activeWorkspaceId') || 'live';
@@ -201,4 +210,47 @@ export function notifyWorkspaceEdited(urls, folderMap, lockState) {
         _debounceTimer = null;
         saveWorkspaceToPreset(presetId, { panels, folderMap, lockState });
     }, GITHUB_SYNC_DEBOUNCE_MS);
+}
+
+/**
+ * Force any pending debounced preset mirror to run now. Call this immediately
+ * before navigating away (e.g. Launch Grid) so a Builder edit already queued
+ * by notifyWorkspaceEdited() is never lost to a dying setTimeout.
+ */
+export function flushPendingWorkspaceSync() {
+    if (!_debounceTimer) return;
+    clearTimeout(_debounceTimer);
+    _debounceTimer = null;
+    if (isLiveBuilder()) return; // no second authority to mirror into
+    const presetId = getActivePresetId();
+    if (presetId === null) return;
+    saveWorkspaceToPreset(presetId, {
+        panels: normalizePanelsArray(Store.get('matrixUrls') || []),
+        folderMap: Store.get('folderMap') || {},
+        lockState: Store.get('lockState') || {},
+    });
+}
+
+/**
+ * Re-read the active PRESET into the shared Builder surface when they have
+ * diverged — i.e. something else (a Runtime "Save Session As") changed the
+ * Preset while the Builder was not looking. A no-op for Live Builder, whose
+ * data has no second authority, and a no-op when nothing changed, so Builder
+ * undo history is not cleared for free.
+ * @returns {boolean} whether the surface was refreshed
+ */
+export function rehydrateActiveWorkspaceIfStale() {
+    if (isLiveBuilder()) return false;
+    const preset = getPresetById(getActivePresetId());
+    if (!preset) return false;
+
+    const presetUrls = getPresetPanels(preset).map(getUrlPanelSource);
+    const currentUrls = Store.get('matrixUrls') || [];
+    const same = JSON.stringify(presetUrls) === JSON.stringify(currentUrls)
+        && _sameNormalizedMap(preset.folderMap || {}, Store.get('folderMap') || {})
+        && _sameNormalizedMap(preset.lockState || {}, Store.get('lockState') || {});
+    if (same) return false;
+
+    switchWorkspace(getActiveWorkspaceId()); // the existing, tested rehydration path
+    return true;
 }

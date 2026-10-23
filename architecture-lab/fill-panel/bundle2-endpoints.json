@@ -1,0 +1,86 @@
+[
+  {
+    "name": "xhomealone-162980",
+    "url": "https://xhomealone.com/embed/162980",
+    "final": "https://xhomealone.com/embed/162980",
+    "status": 200,
+    "bytes": 2888,
+    "frame": null
+  },
+  {
+    "name": "xhomealone-214910",
+    "url": "https://xhomealone.com/embed/214910",
+    "final": "https://xhomealone.com/embed/214910",
+    "status": 200,
+    "bytes": 2913,
+    "frame": null
+  },
+  {
+    "name": "camwhoreshd-1892550",
+    "url": "https://www.camwhoreshd.com/embed/1892550",
+    "final": "https://www.camwhoreshd.com/embed/1892550",
+    "status": 200,
+    "bytes": 311,
+    "frame": null,
+    "clues": [
+      "\t<title>Embed Player Error</title>"
+    ]
+  },
+  {
+    "name": "camwhoreshd-1946972",
+    "url": "https://www.camwhoreshd.com/embed/1946972",
+    "final": "https://www.camwhoreshd.com/embed/1946972",
+    "status": 200,
+    "bytes": 311,
+    "frame": null,
+    "clues": [
+      "\t<title>Embed Player Error</title>"
+    ]
+  },
+  {
+    "name": "cumcams-check",
+    "url": "https://cdn.cumcams.cc/p/cc/589ffbd/js/pages/check.js",
+    "final": "https://cdn.cumcams.cc/p/cc/589ffbd/js/pages/check.js",
+    "status": 200,
+    "bytes": 9524,
+    "frame": null
+  },
+  {
+    "name": "cumcams-player",
+    "url": "https://cdn.cumcams.cc/p/cc/589ffbd/js/main-plyr.js",
+    "final": "https://cdn.cumcams.cc/p/cc/589ffbd/js/main-plyr.js",
+    "status": 200,
+    "bytes": 16696,
+    "frame": null,
+    "clues": [
+      "    let play_button = $('#play_button');",
+      "    if (play_button.length > 0 && !play_button.data('dmca')) {",
+      "        play_button.click(play_button_pressed);",
+      "function play_button_pressed() {",
+      "    $.get(\"/api/video/\" + id + \"?token=\" + token, function (data) {",
+      "        if (Hls.isSupported() && nsource.includes('.m3u8')) {"
+    ]
+  },
+  {
+    "name": "cumcams-main",
+    "url": "https://cdn.cumcams.cc/p/cc/589ffbd/main.js",
+    "final": "https://cdn.cumcams.cc/p/cc/589ffbd/main.js",
+    "status": 200,
+    "bytes": 7606,
+    "frame": null,
+    "clues": [
+      "                            window.location.href = url;",
+      "                window.location.href = '/';",
+      "                        window.location.href = response.link;",
+      "    $.post('/api/confirm-age',"
+    ]
+  },
+  {
+    "name": "cumcams-tail",
+    "url": "https://cdn.cumcams.cc/p/cc/589ffbd/js/core/main-tail.js",
+    "final": "https://cdn.cumcams.cc/p/cc/589ffbd/js/core/main-tail.js",
+    "status": 200,
+    "bytes": 2892,
+    "frame": null
+  }
+]

@@ -9,7 +9,6 @@
  *   exportFolder(folderName, urls)   — downloads folder URLs as .txt
  *   deleteFolder(folderName, rowEl)  — confirms, removes from db, pushes, animates row out
  *   renderFolderManager()            — renders the Folder Manager card list with drag-reorder
- *   initFolderManagerDrawer()        — wires the Show/Hide drawer toggle
  *
  * Dependencies (injected via ctx or direct imports):
  *   getDatabaseStructure / setDatabaseStructure  — state.js
@@ -25,6 +24,7 @@
 
 import { getDatabaseStructure, setDatabaseStructure } from './state.js';
 import { pushDatabaseToRemote } from './sync.js';
+import { resolveShuffleScope, setShuffleScopeFolder } from './shuffle-scope.js';
 
 // ── Dropdown helpers ──────────────────────────────────────────────────────────
 
@@ -44,9 +44,9 @@ import { pushDatabaseToRemote } from './sync.js';
  */
 export function updateDirectoryDropdown(dirDropdownEl, onAfterUpdate, folderManagerOpen) {
     const db = getDatabaseStructure();
-    if (!db || !dirDropdownEl) return;
+    if (!db) return;
 
-    dirDropdownEl.innerHTML = '';
+    if (dirDropdownEl) dirDropdownEl.innerHTML = '';
     const ingestSelect = document.getElementById('ingest-folder-select');
     if (ingestSelect) ingestSelect.innerHTML = '<option value="">— select existing folder —</option>';
 
@@ -57,7 +57,7 @@ export function updateDirectoryDropdown(dirDropdownEl, onAfterUpdate, folderMana
         const opt = document.createElement('option');
         opt.value = folderName;
         opt.textContent = label;
-        dirDropdownEl.appendChild(opt);
+        if (dirDropdownEl) dirDropdownEl.appendChild(opt);
 
         if (ingestSelect) {
             const opt2 = document.createElement('option');
@@ -66,6 +66,12 @@ export function updateDirectoryDropdown(dirDropdownEl, onAfterUpdate, folderMana
             ingestSelect.appendChild(opt2);
         }
     });
+
+    if (dirDropdownEl) {
+        const scope = resolveShuffleScope(db);
+        dirDropdownEl.value = scope;
+        setShuffleScopeFolder(scope);
+    }
 
     if (folderManagerOpen) renderFolderManager(dirDropdownEl, onAfterUpdate);
     if (typeof onAfterUpdate === 'function') onAfterUpdate();
@@ -249,28 +255,6 @@ export function renderFolderManager(dirDropdownEl, onAfterUpdate) {
 
         list.appendChild(row);
     });
-}
-
-// ── Drawer toggle ─────────────────────────────────────────────────────────────
-
-/**
- * Wire up the Folder Manager drawer show/hide toggle button.
- * Re-renders the list when opened so it always reflects current db state.
- *
- * @param {HTMLElement} dirDropdownEl
- * @param {Function}    [onAfterUpdate]
- */
-export function initFolderManagerDrawer(dirDropdownEl, onAfterUpdate) {
-    const btn     = document.getElementById('btn-toggle-fm-drawer');
-    const content = document.getElementById('fm-drawer-content');
-    if (!btn || !content) return;
-
-    btn.onclick = () => {
-        const isOpen = content.style.display === 'block';
-        content.style.display = isOpen ? 'none' : 'block';
-        btn.textContent = isOpen ? '📋 Show Folders' : '✕ Hide Folders';
-        if (!isOpen) renderFolderManager(dirDropdownEl, onAfterUpdate);
-    };
 }
 
 // ── Bookmark modal folder list ────────────────────────────────────────────────

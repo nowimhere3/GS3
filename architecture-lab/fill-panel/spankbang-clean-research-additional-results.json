@@ -1,0 +1,473 @@
+[
+  {
+    "url": "https://spankbang.com/5dew5/embed/",
+    "observation": {
+      "title": "Embed Player",
+      "text": "Play Video\n Watch in HD\n Download",
+      "scripts": [
+        "https://www.googletagmanager.com/gtag/js?id=G-D3Y7J48ZCJ&cx=c&gtm=4e6a21",
+        "https://www.googletagmanager.com/gtm.js?id=GTM-PH7MRM9C",
+        "https://static.hotjar.com/c/hotjar-5012962.js?sv=6",
+        "https://script.hotjar.com/modules.e762be2b6b709245aabb.js",
+        "https://script.hotjar.com/browser-perf.8417c6bba72228fa2e29.js",
+        "https://assets.sb-cd.com/static/dist/desktop/js/lozad.04de490c65.js",
+        "https://assets.sb-cd.com/static/dist/desktop/js/player.embed.e64676ffed.js",
+        "https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      ],
+      "links": [
+        {
+          "text": "",
+          "href": "https://spankbang.com/5dew5/video/zelda?utm_source=embed&utm_medium=player&utm_term=embed&utm_campaign=embed_logo"
+        },
+        {
+          "text": " Watch in HD",
+          "href": "https://spankbang.com/5dew5/video/zelda?utm_source=embed&utm_medium=player&utm_term=embed&utm_campaign=embed_play"
+        },
+        {
+          "text": " Download",
+          "href": "https://spankbang.com/5dew5/video/zelda?utm_source=embed&utm_medium=player&utm_term=embed&utm_campaign=embed_download"
+        }
+      ],
+      "videos": 1,
+      "iframes": [
+        "",
+        "about:blank"
+      ]
+    },
+    "sizes": [
+      {
+        "size": {
+          "width": 800,
+          "height": 450
+        },
+        "boxes": [
+          {
+            "tag": "VIDEO",
+            "class": "vjs-tech",
+            "id": "embed-video-player_html5_api",
+            "text": "",
+            "x": 0,
+            "y": 0,
+            "w": 795,
+            "h": 405
+          },
+          {
+            "tag": "A",
+            "class": "button-logo",
+            "id": "",
+            "text": "",
+            "x": 10,
+            "y": 415,
+            "w": 160,
+            "h": 31.578125
+          },
+          {
+            "tag": "A",
+            "class": "button-hd",
+            "id": "",
+            "text": " Watch in HD",
+            "x": 647.875,
+            "y": 415,
+            "w": 137.125,
+            "h": 36.390625
+          },
+          {
+            "tag": "A",
+            "class": "button-dl",
+            "id": "",
+            "text": " Download",
+            "x": 510.84375,
+            "y": 415,
+            "w": 117.03125,
+            "h": 36.390625
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 640,
+          "height": 360
+        },
+        "boxes": [
+          {
+            "tag": "VIDEO",
+            "class": "vjs-tech",
+            "id": "embed-video-player_html5_api",
+            "text": "",
+            "x": 0,
+            "y": 0,
+            "w": 635,
+            "h": 324
+          },
+          {
+            "tag": "A",
+            "class": "button-logo",
+            "id": "",
+            "text": "",
+            "x": 10,
+            "y": 334,
+            "w": 128,
+            "h": 25.25
+          },
+          {
+            "tag": "A",
+            "class": "button-hd",
+            "id": "",
+            "text": " Watch in HD",
+            "x": 511.984375,
+            "y": 334,
+            "w": 113.015625,
+            "h": 31.109375
+          },
+          {
+            "tag": "A",
+            "class": "button-dl",
+            "id": "",
+            "text": " Download",
+            "x": 395.359375,
+            "y": 334,
+            "w": 96.625,
+            "h": 31.109375
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 480,
+          "height": 270
+        },
+        "boxes": [
+          {
+            "tag": "VIDEO",
+            "class": "vjs-tech",
+            "id": "embed-video-player_html5_api",
+            "text": "",
+            "x": 0,
+            "y": 0,
+            "w": 475,
+            "h": 243
+          },
+          {
+            "tag": "A",
+            "class": "button-logo",
+            "id": "",
+            "text": "",
+            "x": 10,
+            "y": 253,
+            "w": 96,
+            "h": 18.9375
+          },
+          {
+            "tag": "A",
+            "class": "button-hd",
+            "id": "",
+            "text": " Watch in HD",
+            "x": 376.125,
+            "y": 253,
+            "w": 88.875,
+            "h": 25.84375
+          },
+          {
+            "tag": "A",
+            "class": "button-dl",
+            "id": "",
+            "text": " Download",
+            "x": 279.890625,
+            "y": 253,
+            "w": 76.234375,
+            "h": 25.84375
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "url": "https://spankbang.com/78lm0/embed/",
+    "observation": {
+      "title": "Just a moment...",
+      "text": "spankbang.com\nVerifying you are human. This may take a few seconds.\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+      "scripts": [
+        "https://spankbang.com/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=a461a2b46a8c33a7",
+        "https://challenges.cloudflare.com/turnstile/v0/b/d76008a69eab/api.js?onload=zaERg6&render=explicit"
+      ],
+      "links": [
+        {
+          "text": "Cloudflare",
+          "href": "https://www.cloudflare.com/?utm_source=challenge&utm_campaign=l"
+        },
+        {
+          "text": "Privacy",
+          "href": "https://www.cloudflare.com/privacypolicy/"
+        }
+      ],
+      "videos": 0,
+      "iframes": []
+    },
+    "sizes": [
+      {
+        "size": {
+          "width": 800,
+          "height": 450
+        },
+        "boxes": [
+          {
+            "tag": "DIV",
+            "class": "footer",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 0,
+            "y": 380.390625,
+            "w": 785,
+            "h": 70
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-inner",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 24,
+            "y": 380.390625,
+            "w": 737,
+            "h": 70
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-wrapper",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 260.4375,
+            "y": 397.390625,
+            "w": 264.109375,
+            "h": 37
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-link-wrapper",
+            "id": "",
+            "text": "Performance and Security by Cloudflare\nPrivacy",
+            "x": 260.4375,
+            "y": 416.390625,
+            "w": 264.109375,
+            "h": 18
+          },
+          {
+            "tag": "SPAN",
+            "class": "footer-text",
+            "id": "",
+            "text": "Performance and Security by Cloudflare",
+            "x": 260.4375,
+            "y": 416.390625,
+            "w": 209.09375,
+            "h": 18
+          },
+          {
+            "tag": "A",
+            "class": "",
+            "id": "",
+            "text": "Cloudflare",
+            "x": 415.078125,
+            "y": 416.390625,
+            "w": 54.453125,
+            "h": 18
+          },
+          {
+            "tag": "SPAN",
+            "class": "footer-divider",
+            "id": "",
+            "text": "",
+            "x": 477.53125,
+            "y": 419.390625,
+            "w": 2,
+            "h": 12
+          },
+          {
+            "tag": "A",
+            "class": "footer-text",
+            "id": "",
+            "text": "Privacy",
+            "x": 487.53125,
+            "y": 416.390625,
+            "w": 37.015625,
+            "h": 18
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 640,
+          "height": 360
+        },
+        "boxes": [
+          {
+            "tag": "DIV",
+            "class": "footer",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 0,
+            "y": 410.390625,
+            "w": 625,
+            "h": 70
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-inner",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 16,
+            "y": 410.390625,
+            "w": 593,
+            "h": 70
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-wrapper",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 180.4375,
+            "y": 427.390625,
+            "w": 264.109375,
+            "h": 37
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-link-wrapper",
+            "id": "",
+            "text": "Performance and Security by Cloudflare\nPrivacy",
+            "x": 180.4375,
+            "y": 446.390625,
+            "w": 264.109375,
+            "h": 18
+          },
+          {
+            "tag": "SPAN",
+            "class": "footer-text",
+            "id": "",
+            "text": "Performance and Security by Cloudflare",
+            "x": 180.4375,
+            "y": 446.390625,
+            "w": 209.09375,
+            "h": 18
+          },
+          {
+            "tag": "A",
+            "class": "",
+            "id": "",
+            "text": "Cloudflare",
+            "x": 335.078125,
+            "y": 446.390625,
+            "w": 54.453125,
+            "h": 18
+          },
+          {
+            "tag": "SPAN",
+            "class": "footer-divider",
+            "id": "",
+            "text": "",
+            "x": 397.53125,
+            "y": 449.390625,
+            "w": 2,
+            "h": 12
+          },
+          {
+            "tag": "A",
+            "class": "footer-text",
+            "id": "",
+            "text": "Privacy",
+            "x": 407.53125,
+            "y": 446.390625,
+            "w": 37.015625,
+            "h": 18
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 480,
+          "height": 270
+        },
+        "boxes": [
+          {
+            "tag": "DIV",
+            "class": "footer",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 0,
+            "y": 434.390625,
+            "w": 465,
+            "h": 70
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-inner",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 16,
+            "y": 434.390625,
+            "w": 433,
+            "h": 70
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-wrapper",
+            "id": "",
+            "text": "Ray ID: a461a2b46a8c33a7\nPerformance and Security by Cloudflare\nPrivacy",
+            "x": 100.4375,
+            "y": 451.390625,
+            "w": 264.109375,
+            "h": 37
+          },
+          {
+            "tag": "DIV",
+            "class": "footer-link-wrapper",
+            "id": "",
+            "text": "Performance and Security by Cloudflare\nPrivacy",
+            "x": 100.4375,
+            "y": 470.390625,
+            "w": 264.109375,
+            "h": 18
+          },
+          {
+            "tag": "SPAN",
+            "class": "footer-text",
+            "id": "",
+            "text": "Performance and Security by Cloudflare",
+            "x": 100.4375,
+            "y": 470.390625,
+            "w": 209.09375,
+            "h": 18
+          },
+          {
+            "tag": "A",
+            "class": "",
+            "id": "",
+            "text": "Cloudflare",
+            "x": 255.078125,
+            "y": 470.390625,
+            "w": 54.453125,
+            "h": 18
+          },
+          {
+            "tag": "SPAN",
+            "class": "footer-divider",
+            "id": "",
+            "text": "",
+            "x": 317.53125,
+            "y": 473.390625,
+            "w": 2,
+            "h": 12
+          },
+          {
+            "tag": "A",
+            "class": "footer-text",
+            "id": "",
+            "text": "Privacy",
+            "x": 327.53125,
+            "y": 470.390625,
+            "w": 37.015625,
+            "h": 18
+          }
+        ]
+      }
+    ]
+  }
+]

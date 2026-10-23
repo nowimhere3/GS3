@@ -5,9 +5,24 @@
  */
 
 import { Store } from './storage.js';
-import { fetchDatabaseWithUI, fetchDatabaseSilently } from './sync.js';
-import { renderFolderManager } from './folders.js';
+import { fetchDatabaseWithUI, fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
+import { renderFolderManager, updateDirectoryDropdown } from './folders.js';
+import { getDatabaseStructure, setDatabaseStructure } from './state.js';
+import { initDropzone } from './parser.js';
+import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
 import { HOTSWAP_ACTIONS } from './launch.js';
+import { GRID_LAYOUTS, getLayoutIconMarkup } from './grid-layouts.js';
+import {
+    generateDiagnosticArtifact, copyDiagnosticArtifact, downloadDiagnosticArtifact,
+} from './diagnostics.js';
+import {
+    getHotswapTrayOrder, setHotswapTrayOrder, getQuickActionOrder, setQuickActionOrder,
+    getQuickActionCount, setQuickActionCount, isQuickActionRunwayEnabled,
+    setQuickActionRunwayEnabled, getChromeOpacity, setChromeOpacity,
+    getTopShortcutOrder, setTopShortcutOrder, getTopShortcutCount, setTopShortcutCount,
+    getGridLayoutShortcutOrder, setGridLayoutShortcutOrder,
+    getGridLayoutShortcutCount, setGridLayoutShortcutCount,
+} from './hotswap-chrome.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     Store.warmCache();
@@ -15,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function bootSettings() {
+    _initCollapsibleSections();
 
     // ── Restore persisted git credentials ─────────────────────────────────────
     const gitTokenEl = document.getElementById('git-token');
@@ -30,9 +46,10 @@ async function bootSettings() {
             const repo  = gitRepoEl?.value.trim()  || '';
             Store.set('gitToken', token);
             Store.set('gitRepo',  repo);
-            const success = await fetchDatabaseWithUI(_refreshFolderManager);
+            const success = await fetchDatabaseWithUI(_refreshSettingsData);
             if (success) {
-                _refreshFolderManager();
+                _refreshSettingsData();
+                _initIngest();
             }
         };
     }
@@ -43,18 +60,113 @@ async function bootSettings() {
     // ── Hotswap Overlay Controls ───────────────────────────────────────────────
     _initHotswapControls();
     _initGhostMode();
+    _initDiagnostics();
+    initBlacklist();
+    initBlacklistUI();
+    renderBlacklistDisplay();
 
     // ── Auto-fetch database if credentials are saved ──────────────────────────
     if (Store.get('gitToken') && Store.get('gitRepo')) {
-        await fetchDatabaseSilently(_refreshFolderManager);
+        await fetchDatabaseSilently(_refreshSettingsData);
     }
 
     // Initial folder manager render
-    _refreshFolderManager();
+    _refreshSettingsData();
+    _initIngest();
 }
 
-function _refreshFolderManager() {
-    renderFolderManager(null, _refreshFolderManager);
+function _refreshSettingsData() {
+    updateDirectoryDropdown(null);
+    renderFolderManager(null, _refreshSettingsData);
+}
+
+let _ingestInitialized = false;
+function _initIngest() {
+    if (_ingestInitialized || !getDatabaseStructure()) return;
+    _ingestInitialized = true;
+    initDropzone(document.getElementById('file-dropzone'), document.getElementById('manual-file-pick'), {
+        getDatabaseStructure,
+        setDatabaseStructure,
+        pushDatabaseToRemote,
+        updateDirectoryDropdown: _refreshSettingsData,
+        dirDropdown: null,
+    });
+}
+
+function _initCollapsibleSections() {
+    const screen = document.getElementById('settings-screen');
+    const order = ['github', 'ingest', 'hotswap', 'grid-layouts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
+    const state = { ...(Store.get('settingsSectionState') || {}) };
+    const cards = new Map([...screen.querySelectorAll(':scope > .config-card[data-section]')]
+        .map((card) => [card.dataset.section, card]));
+    order.forEach((id) => { const card = cards.get(id); if (card) screen.appendChild(card); });
+
+    cards.forEach((card, id) => {
+        const originalHeader = card.querySelector(':scope > .section-header');
+        const title = originalHeader?.textContent.trim() || id;
+        const body = document.createElement('div');
+        body.className = 'section-body';
+        body.id = `sec-${id}`;
+        [...card.children].forEach((child) => { if (child !== originalHeader) body.appendChild(child); });
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'section-toggle';
+        toggle.setAttribute('aria-controls', body.id);
+        toggle.innerHTML = `<span class="section-title"></span><span class="section-caret" aria-hidden="true">▼</span>`;
+        toggle.querySelector('.section-title').textContent = title;
+        originalHeader?.remove();
+        card.prepend(toggle);
+        card.appendChild(body);
+        const apply = () => {
+            const collapsed = state[id] === true;
+            card.dataset.collapsed = String(collapsed);
+            toggle.setAttribute('aria-expanded', String(!collapsed));
+        };
+        toggle.onclick = () => {
+            state[id] = !(state[id] === true);
+            if (!state[id]) delete state[id];
+            Store.set('settingsSectionState', state);
+            apply();
+            if (id === 'hotswap' && !state[id]) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+        };
+        apply();
+    });
+}
+
+function _initDiagnostics() {
+    const copyBtn = document.getElementById('btn-copy-diagnostics');
+    const downloadBtn = document.getElementById('btn-download-diagnostics');
+    const statusEl = document.getElementById('diagnostics-status');
+    if (!copyBtn || !downloadBtn || !statusEl) return;
+
+    const run = async (destination) => {
+        copyBtn.disabled = true;
+        downloadBtn.disabled = true;
+        statusEl.textContent = 'Generating diagnostics…';
+        statusEl.dataset.state = 'working';
+        try {
+            const artifact = await generateDiagnosticArtifact();
+            if (destination === 'copy') {
+                await copyDiagnosticArtifact(artifact);
+                statusEl.textContent = 'Diagnostics copied';
+            } else {
+                downloadDiagnosticArtifact(artifact);
+                statusEl.textContent = 'Diagnostics downloaded';
+            }
+            statusEl.dataset.state = 'ok';
+        } catch (error) {
+            statusEl.textContent = destination === 'copy'
+                ? 'Could not copy diagnostics. Use Download Diagnostics instead.'
+                : 'Could not download diagnostics.';
+            statusEl.dataset.state = 'error';
+        } finally {
+            copyBtn.disabled = false;
+            downloadBtn.disabled = false;
+        }
+    };
+
+    copyBtn.onclick = () => run('copy');
+    downloadBtn.onclick = () => run('download');
 }
 
 function _initFrameHeightSettings() {
@@ -128,136 +240,227 @@ function _wireSpacerLock(which, toggleEl, inputEl) {
     };
 }
 
-function _initHotswapControls() {
-    const toggleListEl   = document.getElementById('hotswap-toggle-list');
-    const slotCountRowEl = document.getElementById('slot-count-row');
-    const pickersEl      = document.getElementById('quick-slot-pickers');
-    if (!toggleListEl || !slotCountRowEl || !pickersEl) return;
-
-    const visibility = { ...Store.get('hotswapButtonVisibility') };
-    let quickSlots    = [...(Store.get('quickActionSlots') || [])];
-
-    const shortcutableActions = HOTSWAP_ACTIONS.filter((a) => a.shortcutable);
-
-    function _renderToggleList() {
-        toggleListEl.innerHTML = '';
-        HOTSWAP_ACTIONS.forEach(({ key, emoji, title }) => {
-            const isShortcut = quickSlots.includes(key);
-            const row = document.createElement('div');
-            row.className = 'hotswap-toggle-row';
-            row.innerHTML = `
-                <span class="hotswap-toggle-label">
-                    <span class="hotswap-toggle-emoji">${emoji}</span>${title}
-                    ${isShortcut ? '<span class="hotswap-shortcut-badge">Quick Action</span>' : ''}
-                </span>
-                <label class="switch" style="margin:0;">
-                    <input type="checkbox" data-key="${key}" ${visibility[key] !== false ? 'checked' : ''}>
-                    <span class="slider"></span>
-                </label>
-            `;
-            row.querySelector('input').onchange = (e) => {
-                visibility[key] = e.target.checked;
-                Store.set('hotswapButtonVisibility', visibility);
-            };
-            toggleListEl.appendChild(row);
-        });
-    }
-
-    function _renderSlotCountButtons() {
-        slotCountRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
-            btn.classList.toggle('active', parseInt(btn.dataset.count, 10) === quickSlots.length);
-        });
-    }
-
-    function _renderSlotPickers() {
-        pickersEl.innerHTML = '';
-        for (let i = 0; i < quickSlots.length; i += 1) {
-            const row = document.createElement('div');
-            row.className = 'quick-slot-picker-row';
-
-            const label = document.createElement('label');
-            label.textContent = `Slot ${i + 1}`;
-
-            const select = document.createElement('select');
-            select.className = 'quick-slot-select';
-
-            const noneOpt = document.createElement('option');
-            noneOpt.value = '';
-            noneOpt.textContent = '— none —';
-            select.appendChild(noneOpt);
-
-            shortcutableActions.forEach(({ key, emoji, title }) => {
-                // Don't offer an action already picked in a DIFFERENT slot
-                const takenElsewhere = quickSlots.some((v, idx) => v === key && idx !== i);
-                if (takenElsewhere) return;
-                const opt = document.createElement('option');
-                opt.value = key;
-                opt.textContent = `${emoji} ${title}`;
-                if (quickSlots[i] === key) opt.selected = true;
-                select.appendChild(opt);
-            });
-
-            select.onchange = () => {
-                quickSlots[i] = select.value;
-                Store.set('quickActionSlots', quickSlots);
-                _renderToggleList();
-                _renderSlotPickers(); // refresh exclusion sets across slots
-            };
-
-            row.appendChild(label);
-            row.appendChild(select);
-            pickersEl.appendChild(row);
-        }
-    }
-
-    slotCountRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
-        btn.onclick = () => {
-            const newCount = parseInt(btn.dataset.count, 10);
-            const next = [];
-            for (let i = 0; i < newCount; i += 1) next.push(quickSlots[i] || '');
-            quickSlots = next;
-            Store.set('quickActionSlots', quickSlots);
-            _renderSlotCountButtons();
-            _renderSlotPickers();
-            _renderToggleList();
-        };
-    });
-
-    _renderToggleList();
-    _renderSlotCountButtons();
-    _renderSlotPickers();
-}
-
+// BREADCRUMBS — WAS: this list carried a 'trigger' target covering the old
+// corner "···" button and its shortcut column.
+// IS: those surfaces no longer exist — Hotswap Chrome's own Resting/Hover pair
+// governs the toolbar and the runway directly, above.
+// WHY: keeping a toggle for a surface that was retired would be a setting the
+// user could switch with no visible effect. The remaining targets are separate
+// overlays that genuinely still opt in independently.
 const GHOST_TARGETS = [
-    { key: 'trigger', emoji: '···', title: '"···" + Quick Action Shortcuts' },
     { key: 'master',  emoji: '🎬',  title: 'Master Overlay (Launch Grid)' },
     { key: 'stream',  emoji: '🚀',  title: 'Stream Overlay (Launch Stream)' },
     { key: 'solo',    emoji: '🎬',  title: 'Solo Overlay (Launch Solo)' },
 ];
 
+/**
+ * Make a list of rows drag-reorderable. Presentation order only — the rows are
+ * views over the canonical action registry, never copies of it.
+ */
+function _makeReorderable(listEl, onReorder) {
+    let dragged = null;
+    listEl.querySelectorAll('.hotswap-toggle-row').forEach((row) => {
+        row.draggable = true;
+        row.ondragstart = (e) => {
+            dragged = row;
+            row.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', row.dataset.key); } catch {}
+        };
+        row.ondragend = () => {
+            dragged = null;
+            listEl.querySelectorAll('.hotswap-toggle-row').forEach((r) =>
+                r.classList.remove('dragging', 'drop-target'));
+            onReorder([...listEl.querySelectorAll('.hotswap-toggle-row')].map((r) => r.dataset.key));
+        };
+        row.ondragover = (e) => {
+            e.preventDefault();
+            if (!dragged || dragged === row) return;
+            row.classList.add('drop-target');
+            const { top, height } = row.getBoundingClientRect();
+            const after = e.clientY > top + height / 2;
+            listEl.insertBefore(dragged, after ? row.nextSibling : row);
+        };
+        row.ondragleave = () => row.classList.remove('drop-target');
+        row.ondrop = (e) => { e.preventDefault(); row.classList.remove('drop-target'); };
+    });
+}
+
+/**
+ * BREADCRUMBS — WAS: N repeated "Shortcut 1/2/3" dropdowns, each able to land
+ * on the same action, with a slot count of 0 doubling as "feature off".
+ * IS: one on/off switch, a 1-8 count laid out as two rows of four, and a single
+ * drag-ordered list. The tray has its own independent drag-ordered list.
+ * WHY: eight repeated pickers would be router-configuration UI, and letting two
+ * pickers choose the same action made uniqueness an accident rather than a
+ * property. An ordered permutation of the registry is unique by construction.
+ * The tray and the runway are separate ORDERED COLLECTIONS over the SAME
+ * canonical actions, so an action can appear in both without being duplicated.
+ */
+function _initHotswapControls() {
+    const topListEl = document.getElementById('top-order-list');
+    if (!topListEl) return;
+
+    const visibility = { ...Store.get('hotswapButtonVisibility') };
+    const byKey = new Map(HOTSWAP_ACTIONS.map((action) => [action.key, action]));
+
+    function _row(key, { withToggle }) {
+        const action = byKey.get(key);
+        const row = document.createElement('div');
+        row.className = 'hotswap-toggle-row';
+        row.dataset.key = key;
+        row.innerHTML = `
+            <span class="hotswap-toggle-label">
+                <span class="drag-handle">☰</span>
+                <span class="hotswap-toggle-emoji">${action.emoji}</span>${action.title}
+            </span>
+            ${withToggle ? `
+            <label class="switch" style="margin:0;">
+                <input type="checkbox" data-key="${key}" ${visibility[key] !== false ? 'checked' : ''}>
+                <span class="slider"></span>
+            </label>` : ''}
+        `;
+        const input = row.querySelector('input');
+        if (input) {
+            input.onchange = (e) => {
+                visibility[key] = e.target.checked;
+                Store.set('hotswapButtonVisibility', visibility);
+            };
+        }
+        return row;
+    }
+
+    function _renderList(listEl, keys, withToggle, onReorder, rowFactory = _row) {
+        listEl.innerHTML = '';
+        keys.forEach((key) => listEl.appendChild(rowFactory(key, { withToggle })));
+        _makeReorderable(listEl, onReorder);
+    }
+
+    /**
+     * Wire one shortcut collection: a 1-N count and a drag-ordered list, plus
+     * an optional on/off switch. The Runway carries a switch — the Top
+     * Toolbar does not: whether Toolbar Shortcuts exist at all is already
+     * expressed by the Top/Deep Cuts cutoff, so a second enable decision would
+     * only duplicate it. They remain INDEPENDENT collections: the same
+     * canonical action may legitimately appear on both.
+     */
+    function _wireCollection({ enabledId, configId, countRowId, listId, echoId, withToggle = false,
+                               isEnabled, setEnabled, getCount, setCount, getOrder, setOrder, rowFactory }) {
+        const enabledEl = enabledId && document.getElementById(enabledId);
+        const configEl = document.getElementById(configId);
+        const countRowEl = document.getElementById(countRowId);
+        const listEl = document.getElementById(listId);
+        const echoEl = echoId && document.getElementById(echoId);
+        if (!configEl || !countRowEl || !listEl) return;
+
+        const renderCount = () => {
+            const count = getCount();
+            countRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
+                btn.classList.toggle('active', parseInt(btn.dataset.count, 10) === count);
+            });
+            if (echoEl) echoEl.textContent = String(count);
+            [...listEl.querySelectorAll('.hotswap-toggle-row')].forEach((row, index) => {
+                const active = index < count;
+                row.classList.toggle('outside-cutoff', !active);
+                row.dataset.destination = active ? 'toolbar' : (listId === 'top-order-list' ? 'deep-cuts' : 'not-selected');
+                row.setAttribute('aria-description', active
+                    ? (listId === 'top-order-list' ? 'On the Top Toolbar' : 'Selected for the Runway')
+                    : (listId === 'top-order-list' ? 'Currently in Deep Cuts; remains reorderable' : 'Outside the Runway count; remains reorderable'));
+            });
+        };
+        const renderEnabled = () => {
+            if (!enabledEl) return;
+            const on = isEnabled();
+            enabledEl.checked = on;
+            // Off means the surface does not exist. The configuration below is
+            // kept, just not applicable, so switching back on restores it whole.
+            configEl.classList.toggle('disabled', !on);
+        };
+
+        if (enabledEl) enabledEl.onchange = () => { setEnabled(enabledEl.checked); renderEnabled(); };
+        countRowEl.querySelectorAll('.btn-slot-count').forEach((btn) => {
+            btn.onclick = () => { setCount(parseInt(btn.dataset.count, 10)); renderCount(); };
+        });
+        _renderList(listEl, getOrder(), withToggle, (order) => { setOrder(order); renderCount(); }, rowFactory);
+        renderCount();
+        renderEnabled();
+    }
+
+    _wireCollection({
+        configId: 'top-shortcuts-config',
+        countRowId: 'top-count-row', listId: 'top-order-list', echoId: 'top-count-echo',
+        getCount: getTopShortcutCount, setCount: setTopShortcutCount,
+        getOrder: getTopShortcutOrder, setOrder: setTopShortcutOrder,
+        withToggle: true,
+    });
+    _wireCollection({
+        configId: 'grid-layout-shortcuts-config',
+        countRowId: 'grid-layout-count-row', listId: 'grid-layout-order-list', echoId: 'grid-layout-count-echo',
+        getCount: getGridLayoutShortcutCount, setCount: setGridLayoutShortcutCount,
+        getOrder: getGridLayoutShortcutOrder, setOrder: setGridLayoutShortcutOrder,
+        // The icon is the primary recognition cue, the same mini-floorplan
+        // grammar the Runtime Master Bar already uses — never the raw
+        // internal layout id as the user-facing label. One canonical
+        // registry (grid-layouts.js), reused here rather than a second,
+        // Settings-only layout vocabulary.
+        rowFactory: (id) => {
+            const definition = GRID_LAYOUTS.find((layout) => layout.id === id);
+            const row = document.createElement('div');
+            row.className = 'hotswap-toggle-row';
+            row.dataset.key = id;
+            row.innerHTML = `<span class="hotswap-toggle-label">
+                <span class="drag-handle">☰</span><span class="layout-btn-shell layout-btn">${getLayoutIconMarkup(id)}</span>
+                <span class="layout-icon-title">${definition?.title || id}</span>
+            </span>`;
+            return row;
+        },
+    });
+    _wireCollection({
+        enabledId: 'quick-actions-enabled', configId: 'quick-actions-config',
+        countRowId: 'slot-count-row', listId: 'runway-order-list', echoId: 'runway-count-echo',
+        isEnabled: isQuickActionRunwayEnabled, setEnabled: setQuickActionRunwayEnabled,
+        getCount: getQuickActionCount, setCount: setQuickActionCount,
+        getOrder: getQuickActionOrder, setOrder: setQuickActionOrder,
+    });
+
+}
+
+
+/**
+ * Make a list of rows drag-reorderable. Presentation order only — the rows are
+ * views over the canonical action registry, never copies of it.
+ */
 function _initGhostMode() {
-    const sliderEl = document.getElementById('ghost-opacity-slider');
-    const inputEl  = document.getElementById('ghost-opacity-input');
     const toggleListEl = document.getElementById('ghost-toggle-list');
-    if (!sliderEl || !inputEl || !toggleListEl) return;
+    if (!toggleListEl) return;
 
-    const opacity = Store.get('ghostOpacity');
-    sliderEl.value = opacity;
-    inputEl.value  = opacity;
-
-    const setOpacity = (val) => {
-        const clamped = Math.max(0, Math.min(100, Math.round(val)));
-        sliderEl.value = clamped;
-        inputEl.value  = clamped;
-        Store.set('ghostOpacity', clamped);
+    // BREADCRUMBS — WAS: these two values dimmed the top toolbar as well.
+    // IS: they describe the RIGHT RUNWAY only, and live in its Settings card.
+    // WHY: the toolbar retracts to nothing when unused, which already solves
+    // the intrusion opacity exists to solve. Using both mechanisms on one
+    // surface only made a deliberately-summoned control harder to read.
+    const wireOpacity = (sliderId, inputId, apply, initial) => {
+        const sliderEl = document.getElementById(sliderId);
+        const inputEl = document.getElementById(inputId);
+        if (!sliderEl || !inputEl) return;
+        sliderEl.value = initial;
+        inputEl.value = initial;
+        const set = (value) => {
+            const clamped = Math.max(0, Math.min(100, Math.round(value) || 0));
+            sliderEl.value = clamped;
+            inputEl.value = clamped;
+            apply(clamped);
+        };
+        sliderEl.oninput = () => set(parseFloat(sliderEl.value));
+        inputEl.oninput = () => { if (inputEl.value !== '') set(parseFloat(inputEl.value)); };
+        inputEl.onblur = () => set(parseFloat(inputEl.value) || 0);
     };
 
-    sliderEl.oninput = () => setOpacity(parseFloat(sliderEl.value));
-    inputEl.oninput  = () => {
-        if (inputEl.value === '') return;
-        setOpacity(parseFloat(inputEl.value));
-    };
-    inputEl.onblur = () => setOpacity(parseFloat(inputEl.value) || 0);
+    const opacity = getChromeOpacity();
+    wireOpacity('ghost-opacity-slider', 'ghost-opacity-input',
+        (value) => setChromeOpacity({ resting: value }), opacity.resting);
+    wireOpacity('hover-opacity-slider', 'hover-opacity-input',
+        (value) => setChromeOpacity({ hover: value }), opacity.hover);
 
     const targets = { ...Store.get('ghostTargets') };
     GHOST_TARGETS.forEach(({ key, emoji, title }) => {

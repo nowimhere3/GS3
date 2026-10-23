@@ -1,0 +1,406 @@
+[
+  {
+    "provider": "stream-leak.com",
+    "specimen": 0,
+    "canonical": "https://stream-leak.com/videos/156860/neli-elinek-hot-porn-leaked-video-chaturbate-cosplay-feet-tattoo-smalltits-ahegao/",
+    "popups": 0,
+    "requests": [
+      "https://stream-leak.com/embed/156860",
+      "https://stream-leak.com/player/kt_player.js",
+      "https://stream-leak.com/player/skin/youtube.css",
+      "https://stream-leak.com/player/skin/fonts/ktplayeryt.ttf",
+      "https://stream-leak.com/get_file/9/8c7ae183c07e129790f6cb44d548acc1/156000/156860/156860.mp4/",
+      "https://stream-leak.com/contents/videos_screenshots/156000/156860/preview.mp4.jpg",
+      "https://cdn4.stream-leak.com/remote_control.php",
+      "https://stream-leak.com/player/skin/img/play_white.png",
+      "https://cdn4.stream-leak.com/remote_control.php",
+      "https://cdn4.stream-leak.com/remote_control.php"
+    ],
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "Unsafe attempt to initiate navigation for frame with origin 'http://127.0.0.1:4190' from frame with URL 'https://stream-leak.com/embed/156860'. The frame attempting navigation of the top-level window "
+    ],
+    "pageEvidence": {
+      "title": "stream-leak.com",
+      "text": "stream-leak.com refused to connect.",
+      "iframes": [],
+      "embeds": null,
+      "config": null
+    },
+    "underlyingBefore": [],
+    "embed": "https://stream-leak.com/embed/156860",
+    "embedEvidence": {
+      "title": "neli_elinek Hot Porn Leaked Video [Chaturbate] - cosplay, feet, tattoo, smalltits, ahegao",
+      "text": "00:00\n15:02",
+      "iframes": [],
+      "links": [
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "720p",
+          "href": "https://stream-leak.com/videos/156860/neli-elinek-hot-porn-leaked-video-chaturbate-cosplay-feet-tattoo-smalltits-ahegao/?rnd=1791257993661"
+        },
+        {
+          "text": "480p",
+          "href": ""
+        },
+        {
+          "text": "No subtitles",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        }
+      ],
+      "config": null
+    },
+    "before": [
+      {
+        "paused": true,
+        "time": 0,
+        "ready": 4,
+        "muted": false,
+        "volume": 1,
+        "width": 1920,
+        "audioTracks": 3687,
+        "error": null
+      }
+    ],
+    "after": [
+      {
+        "paused": false,
+        "time": 4.962921,
+        "ready": 4,
+        "muted": false,
+        "volume": 1,
+        "width": 1920,
+        "audioTracks": 82267,
+        "error": null
+      }
+    ],
+    "playing": true,
+    "underlyingAfter": [],
+    "doubleAudio": false,
+    "controlsPause": true,
+    "geometry": [
+      {
+        "size": {
+          "width": 1600,
+          "height": 900
+        },
+        "elements": [
+          {
+            "tag": "VIDEO",
+            "class": "fp-engine",
+            "id": "",
+            "x": 0,
+            "y": 0,
+            "w": 795,
+            "h": 898,
+            "text": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "fp-controls fade",
+            "id": "",
+            "x": 0,
+            "y": 857,
+            "w": 795,
+            "h": 40,
+            "text": "                                                                                                    "
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 1200,
+          "height": 700
+        },
+        "elements": [
+          {
+            "tag": "VIDEO",
+            "class": "fp-engine",
+            "id": "",
+            "x": 0,
+            "y": 0,
+            "w": 595,
+            "h": 698,
+            "text": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "fp-controls fade",
+            "id": "",
+            "x": 0,
+            "y": 657,
+            "w": 595,
+            "h": 40,
+            "text": "                                                                                                    "
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 900,
+          "height": 600
+        },
+        "elements": [
+          {
+            "tag": "VIDEO",
+            "class": "fp-engine",
+            "id": "",
+            "x": 0,
+            "y": 0,
+            "w": 898,
+            "h": 238,
+            "text": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "fp-controls fade",
+            "id": "",
+            "x": 0,
+            "y": 197,
+            "w": 898,
+            "h": 40,
+            "text": "                                                                                                    "
+          }
+        ]
+      }
+    ],
+    "restored": true,
+    "identity": "https://stream-leak.com/videos/156860/neli-elinek-hot-porn-leaked-video-chaturbate-cosplay-feet-tattoo-smalltits-ahegao/",
+    "focusStayed": true
+  },
+  {
+    "provider": "stream-leak.com",
+    "specimen": 1,
+    "canonical": "https://stream-leak.com/videos/132563/neli-elinek-top-porn-video-chaturbate-cosplay-feet-tattoo-smalltits-ahegao/",
+    "popups": 0,
+    "requests": [
+      "https://stream-leak.com/embed/132563",
+      "https://stream-leak.com/player/kt_player.js",
+      "https://stream-leak.com/player/skin/youtube.css",
+      "https://stream-leak.com/player/skin/fonts/ktplayeryt.ttf",
+      "https://stream-leak.com/get_file/13/fc1c673486f1538d3bb826ff8b5330df/132000/132563/132563.mp4/",
+      "https://stream-leak.com/contents/videos_screenshots/132000/132563/preview.mp4.jpg",
+      "https://cp2.stream-leak.com/remote_control.php",
+      "https://stream-leak.com/player/skin/img/play_white.png",
+      "https://cp2.stream-leak.com/remote_control.php",
+      "https://cp2.stream-leak.com/remote_control.php",
+      "https://cp2.stream-leak.com/remote_control.php",
+      "https://cp2.stream-leak.com/remote_control.php"
+    ],
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "Unsafe attempt to initiate navigation for frame with origin 'http://127.0.0.1:4190' from frame with URL 'https://stream-leak.com/embed/132563'. The frame attempting navigation of the top-level window "
+    ],
+    "pageEvidence": {
+      "title": "stream-leak.com",
+      "text": "stream-leak.com refused to connect.",
+      "iframes": [],
+      "embeds": null,
+      "config": null
+    },
+    "underlyingBefore": [],
+    "embed": "https://stream-leak.com/embed/132563",
+    "embedEvidence": {
+      "title": "neli_elinek Top Porn Video [Chaturbate] - cosplay, feet, tattoo, smalltits, ahegao",
+      "text": "00:00\n15:04",
+      "iframes": [],
+      "links": [
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        },
+        {
+          "text": "720p",
+          "href": "https://stream-leak.com/videos/132563/neli-elinek-top-porn-video-chaturbate-cosplay-feet-tattoo-smalltits-ahegao/?rnd=1791258015445"
+        },
+        {
+          "text": "480p",
+          "href": ""
+        },
+        {
+          "text": "No subtitles",
+          "href": ""
+        },
+        {
+          "text": "",
+          "href": ""
+        }
+      ],
+      "config": null
+    },
+    "before": [
+      {
+        "paused": true,
+        "time": 0,
+        "ready": 4,
+        "muted": false,
+        "volume": 1,
+        "width": 1920,
+        "audioTracks": 3684,
+        "error": null
+      }
+    ],
+    "after": [
+      {
+        "paused": false,
+        "time": 4.944457,
+        "ready": 4,
+        "muted": false,
+        "volume": 1,
+        "width": 1920,
+        "audioTracks": 81969,
+        "error": null
+      }
+    ],
+    "playing": true,
+    "underlyingAfter": [],
+    "doubleAudio": false,
+    "controlsPause": true,
+    "geometry": [
+      {
+        "size": {
+          "width": 1600,
+          "height": 900
+        },
+        "elements": [
+          {
+            "tag": "VIDEO",
+            "class": "fp-engine",
+            "id": "",
+            "x": 0,
+            "y": 0,
+            "w": 795,
+            "h": 898,
+            "text": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "fp-controls fade",
+            "id": "",
+            "x": 0,
+            "y": 857,
+            "w": 795,
+            "h": 40,
+            "text": "                                                                                                    "
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 1200,
+          "height": 700
+        },
+        "elements": [
+          {
+            "tag": "VIDEO",
+            "class": "fp-engine",
+            "id": "",
+            "x": 0,
+            "y": 0,
+            "w": 595,
+            "h": 698,
+            "text": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "fp-controls fade",
+            "id": "",
+            "x": 0,
+            "y": 657,
+            "w": 595,
+            "h": 40,
+            "text": "                                                                                                    "
+          }
+        ]
+      },
+      {
+        "size": {
+          "width": 900,
+          "height": 600
+        },
+        "elements": [
+          {
+            "tag": "VIDEO",
+            "class": "fp-engine",
+            "id": "",
+            "x": 0,
+            "y": 0,
+            "w": 898,
+            "h": 238,
+            "text": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "fp-controls fade",
+            "id": "",
+            "x": 0,
+            "y": 197,
+            "w": 898,
+            "h": 40,
+            "text": "                                                                                                    "
+          }
+        ]
+      }
+    ],
+    "restored": true,
+    "identity": "https://stream-leak.com/videos/132563/neli-elinek-top-porn-video-chaturbate-cosplay-feet-tattoo-smalltits-ahegao/",
+    "focusStayed": true
+  }
+]

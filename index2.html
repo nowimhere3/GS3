@@ -5,11 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Single Mode - Solo Streams (Cloud Sync)</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230095f6'/><text y='72' x='50' text-anchor='middle' font-size='65' font-family='Arial'>🎬</text></svg>">
-    <link rel="icon" type="image/png" href="./favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="shortcut icon" href="./favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
-    <link rel="manifest" href="./site.webmanifest" />
     <script>
         // Detect if this page is running nested inside another Launchpad
         // iframe (e.g. via 🚀), and how many levels deep. Same-origin, so
@@ -22,15 +17,29 @@
             if (depth >= 1) document.documentElement.classList.add('is-nested');
             if (depth === 1) document.documentElement.classList.add('layer-2');
 
-            // Ghost Mode — reads raw localStorage directly (the Store module
-            // isn't loaded yet at this point). Sets --ghost-opacity plus one
-            // class per target so each surface can opt in independently.
+            // Ghost Mode / Hotswap Chrome opacity — reads raw localStorage
+            // directly (the Store module isn't loaded yet at this point).
+            //
+            // BREADCRUMBS — WAS: one opacity value, with hover hardcoded to 1.
+            // IS: exactly TWO customer-facing values, RESTING and HOVER, shared
+            // by every Chrome surface.
+            // WHY: the top toolbar and the Quick Action runway are one control
+            // surface split across two edges, not two features. Giving each its
+            // own resting/hover pair would be four settings to keep in sync for
+            // a distinction the user never asked for. The resting key name is
+            // deliberately unchanged so existing preferences survive.
             try {
-                var opacityRaw = localStorage.getItem('hotswap_ghost_opacity');
-                var opacityPct = opacityRaw !== null ? parseFloat(opacityRaw) : 12;
-                if (isNaN(opacityPct)) opacityPct = 12;
-                opacityPct = Math.max(0, Math.min(100, opacityPct));
-                document.documentElement.style.setProperty('--ghost-opacity', opacityPct / 100);
+                var readPct = function (key, fallback) {
+                    var raw = localStorage.getItem(key);
+                    var pct = raw !== null ? parseFloat(raw) : fallback;
+                    if (isNaN(pct)) pct = fallback;
+                    return Math.max(0, Math.min(100, pct));
+                };
+                var restingPct = readPct('hotswap_ghost_opacity', 12);
+                var hoverPct = readPct('hotswap_hover_opacity', 100);
+                document.documentElement.style.setProperty('--ghost-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-resting-opacity', restingPct / 100);
+                document.documentElement.style.setProperty('--chrome-hover-opacity', hoverPct / 100);
 
                 var targetsRaw = localStorage.getItem('hotswap_ghost_targets');
                 var targets = targetsRaw ? JSON.parse(targetsRaw) : {};
@@ -42,7 +51,14 @@
         })();
     </script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* GS3-owned dark scrollbars */
+        html { color-scheme: dark; }
+        * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-color: #666 #1a1a1a; scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        ::-webkit-scrollbar-corner { background: #1a1a1a; }
         body { 
             background: #0b0b0b; 
             color: #fff; 
@@ -62,27 +78,29 @@
         /* Control bar — hidden by default, slides up when 🎬 is toggled */
         #control-bar {
             position: fixed;
-            bottom: -80px;
+            bottom: 0;
             left: 0;
             right: 0;
             background: #161616;
             border-top: 2px solid #2d2d2d;
-            padding: 12px 16px;
+            box-sizing: border-box;
+            padding: 12px calc(16px + var(--gs3-dock-reserve, 128px)) 12px 16px;
             display: flex;
             align-items: center;
             gap: 8px;
             flex-wrap: wrap;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
             z-index: 29000;
-            transition: bottom 0.25s ease, opacity 0.15s ease;
+            transform: translateY(100%);
+            transition: transform 0.25s ease, opacity 0.15s ease;
         }
-        #control-bar.open { bottom: 0; }
+        #control-bar.open { transform: translateY(0); }
 
         html.ghost-solo #control-bar.open { opacity: var(--ghost-opacity, 0.12); }
         html.ghost-solo #control-bar.open:hover { opacity: 1; }
 
         /* Floating 🎬 (toggle control bar) + ⚙ (back to Launchpad) */
-        #floating-btns { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
+        #orchestration-dock { position: fixed; bottom: 18px; right: 18px; z-index: 30000; display: flex; align-items: center; gap: 8px; }
         .float-btn {
             width: 44px;
             height: 44px;
@@ -107,7 +125,7 @@
            with the OUTER session's own fixed floating-btns cluster, which
            always anchors to the true browser viewport's bottom-right corner
            regardless of which panel this iframe happens to occupy. */
-        html.is-nested #floating-btns { right: auto; left: 18px; }
+        html.is-nested #orchestration-dock { right: auto; left: 18px; }
         html.is-nested .float-btn { border-color: #f0c020; border-width: 2px; }
         html.is-nested .float-btn:hover { border-color: #ffd84a; }
         html.is-nested .float-btn.active { border-color: #f0c020; }
@@ -440,7 +458,7 @@
     </div>
 
     <!-- Floating master controls -->
-    <div id="floating-btns">
+    <div id="orchestration-dock">
         <button class="float-btn" id="btn-toggle-master" title="Toggle Solo controls">🎬</button>
         <a class="float-btn" id="back-link" href="index.html" title="Back to Launchpad">⚙</a>
     </div>

@@ -19,6 +19,19 @@ import { initBlacklist, initBlacklistUI } from './blacklist.js';
 import { fetchDatabaseSilently } from './sync.js';
 import { launchSingleMode, getCurrentUrl, getCurrentFolder, loadRandom, loadRandomFromAll, deleteAndReplace } from './single-launch.js';
 
+function installDockReserve(dockEl) {
+    if (!dockEl) return;
+    const publish = () => {
+        const width = Math.ceil(dockEl.getBoundingClientRect().width);
+        document.documentElement.style.setProperty('--gs3-dock-reserve', `${width + 16}px`);
+    };
+    publish();
+    if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(publish);
+        observer.observe(dockEl);
+    }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -40,6 +53,7 @@ async function boot() {
     const bookmarkModalEl    = document.getElementById('bookmark-modal');
     const controlBar         = document.getElementById('control-bar');
     const btnToggleMaster    = document.getElementById('btn-toggle-master');
+    installDockReserve(document.getElementById('orchestration-dock'));
 
     // ── Initialize modules ─────────────────────────────────────────────────────
     initBlacklist();
@@ -55,6 +69,10 @@ async function boot() {
 
     if (!db || Object.keys(db).length === 0) {
         statusEl.textContent = 'No database loaded. Connect GitHub to get started.';
+        [btnFolder, btnFavorite, btnPurge, btnDeleteReplace, btnShuffle, btnShuffleAll, btnToggleMaster]
+            .forEach((button) => {
+                if (button) button.disabled = true;
+            });
         return;
     }
 

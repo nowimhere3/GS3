@@ -10,20 +10,21 @@ import {
     setTargetUrls, setUrlFolderMap, setRowLockState,
     getDatabaseStructure, setDatabaseStructure, setDatabaseSha,
 } from './state.js';
-import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
+import { initBlacklist } from './blacklist.js';
 import {
     updateDirectoryDropdown,
-    initFolderManagerDrawer,
     populateBookmarkFolderSelect,
     renderFolderManager,
 } from './folders.js';
 import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
 import { getPresets, getPresetSummary, loadPresetsSilently } from './presets.js';
-import { getActiveWorkspaceId, switchWorkspace, isLiveBuilder } from './workspace.js';
-import { initDropzone } from './parser.js';
-import { initGrid, renderInputRows } from './grid.js';
-import { initScrollEngine, stopScrolling, updateSpeedLabel } from './scroll.js';
-import { launchMatrix } from './launch.js';
+import {
+    getActiveWorkspaceId, switchWorkspace, isLiveBuilder,
+    flushPendingWorkspaceSync, rehydrateActiveWorkspaceIfStale,
+} from './workspace.js';
+import { initGrid, renderInputRows, saveInputsToState } from './grid.js';
+import { initScrollEngine, stopScrolling } from './scroll.js';
+import { launchMatrix, RUNTIME_LAUNCH_MESSAGE_SOURCE } from './launch.js';
 
 const MANUAL_DIRECTORY_OPTION = '<option value="manual">Manual Configuration Only (No Sync)</option>';
 
@@ -58,10 +59,8 @@ async function boot() {
     const portraitToggle   = document.getElementById('portrait-mode-toggle');
     const dirDropdownEl    = document.getElementById('directory-dropdown');
     const statusEl         = document.getElementById('status');
-    const dropzoneEl       = document.getElementById('file-dropzone');
-    const fileInputEl      = document.getElementById('manual-file-pick');
     const bookmarkModalEl  = document.getElementById('bookmark-modal');
-    console.log('[app] boot: checkpoint 1 — grabbed DOM refs', { setupScreenEl, loopScreenEl, feedContainerEl, containerEl, portraitToggle, dirDropdownEl, statusEl, dropzoneEl, fileInputEl, bookmarkModalEl });
+    console.log('[app] boot: checkpoint 1 — grabbed DOM refs', { setupScreenEl, loopScreenEl, feedContainerEl, containerEl, portraitToggle, dirDropdownEl, statusEl, bookmarkModalEl });
 
     // ── Restore persisted state ───────────────────────────────────────────────
     const cachedUrls = Store.get('matrixUrls');
@@ -77,10 +76,7 @@ async function boot() {
 
     // ── Init modules ──────────────────────────────────────────────────────────
     initBlacklist();
-    initBlacklistUI();
-    renderBlacklistDisplay();
     initScrollEngine({ loopScreenEl });
-    updateSpeedLabel();
     console.log('[app] boot: checkpoint 3 — init modules done');
 
     // ── Frame height helper ───────────────────────────────────────────────────
@@ -169,7 +165,6 @@ async function boot() {
         const { token, repo } = _restoreGitInputsFromStorage(refreshFromDisk);
         console.log('[app] _restoreGitSyncState: token present?', !!token, 'repo present?', !!repo, 'repo value:', repo);
         if (!token || !repo) {
-            console.error('[app] _restoreGitSyncState: showing disconnected state — Store.get returned empty token/repo despite localStorage check. token:', token, 'repo:', repo);
             _showDisconnectedGitState();
             return;
         }
@@ -182,18 +177,7 @@ async function boot() {
     }
 
     // ── Folder manager ───────────────────────────────────────────────────────
-    initFolderManagerDrawer(dirDropdownEl, () => renderInputRows());
-    console.log('[app] boot: checkpoint 5 — folder manager drawer init');
-
     // ── Parser / dropzone ─────────────────────────────────────────────────────
-    initDropzone(dropzoneEl, fileInputEl, {
-        getDatabaseStructure,
-        setDatabaseStructure,
-        pushDatabaseToRemote,
-        updateDirectoryDropdown: _refreshDropdowns,
-        dirDropdown: dirDropdownEl,
-    });
-    console.log('[app] boot: checkpoint 6 — dropzone init');
     initGrid({
         containerEl:    containerEl,
         dirDropdown:    dirDropdownEl,
@@ -209,7 +193,6 @@ async function boot() {
                 getFrameHeights,
                 openBookmarkModal,
                 stopScrolling,
-                updateSpeedLabel,
             });
         },
     });
@@ -228,12 +211,34 @@ async function boot() {
         };
     }
 
-    // 🧩 Launch Grid — pass along exactly which workspace was active AT CLICK
-    // TIME via a URL param, so index3.html's working copy is tied to the
-    // right source unambiguously (rather than re-reading Store at its own
-    // boot, which could race if e.g. multiple tabs are open).
+    // 🧩 Launch Grid — top-level Design-Time owns navigation. When hosted by a
+    // Runtime Panel, it sends semantic intent and the parent assigns content.
+    // Neither branch depends on the parent's [L2][L1] command-target selector:
+    // this is a host-level "replace the Panel that hosts me" request, answered
+    // by identifying the sender's frame, never by which Runtime object the
+    // Master Bar currently has selected as its command target.
     document.getElementById('btn-launch-grid')?.addEventListener('click', () => {
+        // Local bookkeeping (Builder autosave, the debounced preset mirror) is
+        // a courtesy, not the reason this button exists. A failure in either
+        // must never silently swallow the actual launch intent below it — that
+        // would look to the user like "Launch Grid does nothing," with no
+        // visible error to explain why.
+        try {
+            saveInputsToState({ checkpoint: false });
+            flushPendingWorkspaceSync(); // do not abandon the pending mirror to a dying debounce
+        } catch (err) {
+            console.error('[Launch Grid] local save/sync failed; launching anyway', err);
+        }
         const workspaceId = getActiveWorkspaceId();
+        if (window.parent !== window) {
+            window.parent.postMessage({
+                source: RUNTIME_LAUNCH_MESSAGE_SOURCE,
+                action: 'launchRuntime',
+                kind: 'grid',
+                workspace: workspaceId,
+            }, window.location.origin);
+            return;
+        }
         window.location.href = `index3.html?workspace=${encodeURIComponent(workspaceId)}`;
     });
 
@@ -263,6 +268,7 @@ async function _initWorkspaceTabs() {
     if (!tabsEl) return;
 
     await loadPresetsSilently();
+    if (rehydrateActiveWorkspaceIfStale()) renderInputRows();
     _renderWorkspaceTabs(tabsEl);
 }
 
@@ -310,6 +316,4 @@ function _initLaunchpad() {
     // Git token/repo inputs, and Frame Height settings, now live only on
     // settings.html — nothing to restore into this page's DOM for them.
     renderInputRows();
-    renderBlacklistDisplay();
-    initBlacklistUI();
 }

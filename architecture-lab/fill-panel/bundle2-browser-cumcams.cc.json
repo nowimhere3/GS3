@@ -1,0 +1,114 @@
+[
+  {
+    "host": "cumcams.cc",
+    "specimen": 0,
+    "canonical": "https://cumcams.cc/video/190505100/play",
+    "candidate": "https://cumcams.cc/video/190505100/play",
+    "labOnlyResolver": true,
+    "extensionStandin": true,
+    "popups": 0,
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing."
+    ],
+    "requests": [],
+    "normal": {
+      "title": "Establishing a secure connection ...",
+      "text": "Submitting...\nRequest ID: 092035bfe14fcf51268aa23003d94404",
+      "iframes": [
+        "https://shield-templates-prod.b-cdn.net/151726/challenge.html"
+      ],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "frames": [
+      "https://cumcams.cc/video/190505100/play",
+      "https://shield-templates-prod.b-cdn.net/151726/challenge.html"
+    ],
+    "underlyingAutoplay": [],
+    "underlyingBeforeFill": [],
+    "normalAfterClick": {
+      "title": "Establishing a secure connection ...",
+      "text": "Submitting...\nRequest ID: 092035bfe14fcf51268aa23003d94404",
+      "iframes": [
+        "https://shield-templates-prod.b-cdn.net/151726/challenge.html"
+      ],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "executorBefore": {
+      "src": "https://cumcams.cc/video/190505100/play",
+      "identity": "https://cumcams.cc/video/190505100/play",
+      "session": "https://cumcams.cc/video/190505100/play",
+      "capability": {
+        "generation": 3,
+        "capable": false,
+        "active": false,
+        "acceptingReports": true,
+        "pendingActive": null,
+        "embedAvailable": true,
+        "embedActive": false
+      },
+      "mapped": "https://cumcams.cc/video/190505100/play"
+    },
+    "error": "locator.elementHandle: Timeout 4000ms exceeded."
+  },
+  {
+    "host": "cumcams.cc",
+    "specimen": 1,
+    "canonical": "https://cumcams.cc/video/189616780/play",
+    "candidate": "https://cumcams.cc/video/189616780/play",
+    "labOnlyResolver": true,
+    "extensionStandin": true,
+    "popups": 0,
+    "blocked": [
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing."
+    ],
+    "requests": [],
+    "normal": {
+      "title": "Establishing a secure connection ...",
+      "text": "Submitting...\nRequest ID: aee3953edb30a1a06be754bb62f6f176",
+      "iframes": [
+        "https://shield-templates-prod.b-cdn.net/151726/challenge.html"
+      ],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "frames": [
+      "https://cumcams.cc/video/189616780/play",
+      "https://shield-templates-prod.b-cdn.net/151726/challenge.html"
+    ],
+    "underlyingAutoplay": [],
+    "underlyingBeforeFill": [],
+    "normalAfterClick": {
+      "title": "Establishing a secure connection ...",
+      "text": "Submitting...\nRequest ID: aee3953edb30a1a06be754bb62f6f176",
+      "iframes": [
+        "https://shield-templates-prod.b-cdn.net/151726/challenge.html"
+      ],
+      "videos": 0,
+      "play": false,
+      "links": []
+    },
+    "executorBefore": {
+      "src": "https://cumcams.cc/video/189616780/play",
+      "identity": "https://cumcams.cc/video/189616780/play",
+      "session": "https://cumcams.cc/video/189616780/play",
+      "capability": {
+        "generation": 3,
+        "capable": false,
+        "active": false,
+        "acceptingReports": true,
+        "pendingActive": null,
+        "embedAvailable": true,
+        "embedActive": false
+      },
+      "mapped": "https://cumcams.cc/video/189616780/play"
+    },
+    "error": "locator.elementHandle: Timeout 4000ms exceeded."
+  }
+]

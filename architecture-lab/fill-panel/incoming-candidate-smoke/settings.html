@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings — Stream Loop Launchpad</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230095f6'/><text y='72' x='50' text-anchor='middle' font-size='60' font-weight='bold' fill='%23fff'>G</text></svg>">
+    <style>
+        /* GS3-owned dark scrollbars */
+        html { color-scheme: dark; }
+        * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-color: #666 #1a1a1a; scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        ::-webkit-scrollbar-corner { background: #1a1a1a; }
+        body { background: #0b0b0b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; overflow-x: hidden; }
+
+        #settings-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            padding: 20px;
+            background: linear-gradient(135deg, #111 0%, #1a1a1a 100%);
+        }
+
+        .settings-header {
+            width: 100%;
+            max-width: 650px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .btn-back {
+            background: #222;
+            border: 1px solid #333;
+            color: #aaa;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .btn-back:hover { background: #2a2a2a; color: #fff; }
+
+        .settings-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .config-card {
+            background: #161616;
+            border: 1px solid #2d2d2d;
+            border-radius: 16px;
+            padding: 20px 30px;
+            width: 100%;
+            max-width: 650px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+        }
+
+        .section-header {
+            margin-bottom: 16px;
+        }
+        .section-header h3 {
+            font-size: 15px;
+            color: #eee;
+            font-weight: bold;
+        }
+
+        h2 { font-size: 24px; margin-bottom: 8px; color: #fff; text-align: center; }
+        .subtitle { font-size: 13px; color: #777; margin-bottom: 20px; }
+
+        /* Panel Accents */
+        .git-panel    { border-top: 3px solid #f1502f; }
+        .manager-panel { border-top: 3px solid #26a69a; }
+        .frame-height-panel { border-top: 3px solid #7c4dff; }
+        .diagnostics-panel { border-top: 3px solid #4f8fc7; }
+        .diagnostics-actions { display: flex; gap: 10px; }
+        .diagnostics-actions .btn { flex: 1; color: #9dccf5; border: 1px solid #315d83; }
+        .diagnostics-status { min-height: 18px; margin-top: 10px; color: #8292a0; font-size: 12px; }
+        .diagnostics-status[data-state="ok"] { color: #75b798; }
+        .diagnostics-status[data-state="error"] { color: #ff8c8c; }
+
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; font-weight: bold; }
+
+        .url-input {
+            width: 100%;
+            background: #222;
+            border: 1px solid #333;
+            padding: 12px 16px;
+            color: #fff;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .url-input:focus { border-color: #0095f6; }
+
+        .btn { border: none; padding: 12px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; transition: background 0.2s, transform 0.1s; }
+        .btn:active { transform: scale(0.98); }
+        .btn-add { background: #222; color: #0095f6; border: 1px solid #333; }
+        .btn-add:hover { background: #2a2a2a; }
+
+        /* Frame Height Panel */
+        .frame-height-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 4px;
+        }
+        .frame-height-group label {
+            display: block;
+            font-size: 11px;
+            color: #aaa;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .frame-height-group .fh-desc {
+            font-size: 10px;
+            color: #555;
+            margin-bottom: 8px;
+        }
+        .frame-height-input-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .frame-height-input {
+            flex: 1;
+            background: #222;
+            border: 1px solid #5a3aaa;
+            color: #c9b8ff;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            outline: none;
+            width: 100%;
+        }
+        .frame-height-input:focus { border-color: #7c4dff; }
+        .frame-height-unit {
+            font-size: 12px;
+            color: #555;
+            flex-shrink: 0;
+        }
+        .btn-fh-apply {
+            background: #2a1a5a;
+            border: 1px solid #7c4dff;
+            color: #c9b8ff;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 14px;
+            transition: background 0.15s;
+        }
+        .btn-fh-apply:hover { background: #3a2a7a; }
+
+        /* Spacer toggle row */
+        .spacer-toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #111;
+            border: 1px solid #2a1a5a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-top: 14px;
+        }
+        .spacer-toggle-label {
+            font-size: 13px;
+            color: #c9b8ff;
+            font-weight: bold;
+        }
+        .spacer-toggle-sub {
+            font-size: 10px;
+            color: #555;
+            margin-top: 2px;
+        }
+        .spacer-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .spacer-height-input {
+            background: #222;
+            border: 1px solid #5a3aaa;
+            color: #c9b8ff;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: bold;
+            outline: none;
+            width: 70px;
+            text-align: center;
+        }
+        .spacer-height-input:focus { border-color: #7c4dff; }
+
+        /* Spacer row lock button */
+        .btn-spacer-lock {
+            background: #0a2a0a;
+            border: 2px solid #4caf50;
+            border-radius: 8px;
+            color: #4caf50;
+            cursor: pointer;
+            font-size: 13px;
+            padding: 4px 8px;
+            flex-shrink: 0;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            line-height: 1;
+            margin-left: 6px;
+        }
+        .btn-spacer-lock.locked {
+            background: #2a0a0a;
+            border-color: #ed4956;
+            color: #ed4956;
+        }
+        .spacer-row-locked .spacer-height-input {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+        .spacer-row-locked .switch {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        /* Toggle switch */
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .3s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #0095f6; }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        /* Folder Manager */
+        .folder-manager-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+        .folder-manager-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 10px 12px;
+            cursor: default;
+            transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+        }
+        .folder-manager-row.drag-over {
+            border-color: #26a69a;
+            background: #0a1f1e;
+        }
+        .folder-manager-row.dragging {
+            opacity: 0.4;
+        }
+        .drag-handle {
+            color: #444;
+            font-size: 16px;
+            cursor: grab;
+            flex-shrink: 0;
+            padding: 0 2px;
+            user-select: none;
+            line-height: 1;
+        }
+        .drag-handle:hover { color: #26a69a; }
+        .drag-handle:active { cursor: grabbing; }
+        .folder-manager-name {
+            flex: 1;
+            font-size: 13px;
+            color: #ddd;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .folder-manager-count {
+            font-size: 11px;
+            color: #555;
+            font-family: monospace;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .btn-fm-export {
+            background: #0a2a1a;
+            border: 1px solid #1a6b3a;
+            color: #4caf50;
+            border-radius: 8px;
+            padding: 5px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .btn-fm-export:hover { background: #0d3a22; }
+        .btn-fm-delete {
+            background: #331417;
+            border: 1px solid #4a1a1e;
+            color: #ed4956;
+            border-radius: 8px;
+            padding: 5px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .btn-fm-delete:hover { background: #ed4956; color: #fff; }
+        .folder-manager-empty { color: #444; font-style: italic; font-size: 13px; text-align: center; padding: 20px 0; }
+
+        /* Hotswap Overlay Controls */
+        .hotswap-panel { border-top: 3px solid #0095f6; }
+        .hotswap-panel { --hotswap-trailing-inset: 12px; }
+        .hotswap-toggle-list { display: flex; flex-direction: column; gap: 8px; }
+        .hotswap-toggle-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            justify-content: space-between;
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 10px var(--hotswap-trailing-inset) 10px 14px;
+        }
+        .hotswap-toggle-label { font-size: 13px; color: #ddd; display: flex; align-items: center; gap: 10px; }
+        .hotswap-toggle-emoji { font-size: 15px; }
+
+        /* Grid layout mini-floorplan — the SAME visual grammar index3.html's
+           Master Bar uses for its layout shortcuts and overflow menu, reused
+           here verbatim so a Settings row and its Runtime counterpart are
+           recognizable as the same layout, never a second icon system.
+           The button shell gives the diagram the same bordered control
+           treatment as the Runtime layout buttons. */
+        .layout-btn-shell {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 5px 8px;
+            flex-shrink: 0;
+            box-sizing: border-box;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .hotswap-toggle-row:hover .layout-btn-shell {
+            background: #252525;
+            border-color: #555;
+        }
+        .layout-icon { display: grid; width: 26px; height: 20px; gap: 2px; flex-shrink: 0; }
+        .layout-icon i { background: #8ab4d8; display: block; border-radius: 1px; font-style: normal; }
+        .layout-icon i:nth-child(1) { grid-area: a; }
+        .layout-icon i:nth-child(2) { grid-area: b; }
+        .layout-icon i:nth-child(3) { grid-area: c; }
+        .layout-icon i:nth-child(4) { grid-area: d; }
+        .li-top2      { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c c"; }
+        .li-bottom2   { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a a" "b c"; }
+        .li-3col      { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b c"; }
+        .li-lefttall  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "a c"; }
+        .li-righttall { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "b a" "c a"; }
+        .li-vsplit    { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; grid-template-areas: "a b"; }
+        .li-hsplit    { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a" "b"; }
+        .li-4grid     { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; grid-template-areas: "a b" "c d"; }
+        .hotswap-toggle-label .layout-icon-title { white-space: nowrap; }
+        .hotswap-shortcut-badge {
+            font-size: 10px;
+            color: #6db8ff;
+            background: #0a2a4a;
+            border: 1px solid #2f6fb3;
+            border-radius: 6px;
+            padding: 2px 6px;
+            margin-left: 6px;
+        }
+
+        .slot-count-row { display: flex; gap: 8px; }
+        /* Eight was chosen because it lays out as two clean rows of four and is
+           as much runway as a panel edge can carry without becoming a wall. */
+        .slot-count-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        /* 1-10 lays out as two rows of five, matching the runway's two-of-four. */
+        .slot-count-grid-5 { grid-template-columns: repeat(5, 1fr); }
+
+        /* ── Hotswap Settings hierarchy ───────────────────────────────────────
+           BREADCRUMBS — WAS: "Top Shortcuts", "Quick Action Shortcut Runway"
+           and "Deep Cuts" read as three peers, which hid the real structure.
+           IS: two major SURFACES (Top Toolbar, Runway); Toolbar Shortcuts and
+           Deep Cuts are SUBSECTIONS of the Top Toolbar.
+           WHY: Deep Cuts is the toolbar's fallback gateway, not a third place
+           to put controls. Presenting it as a peer invited the reading that
+           the toolbar and the tray were unrelated surfaces. */
+        .hotswap-surface { margin-top: 22px; }
+        .hotswap-surface + .hotswap-surface { margin-top: 28px; }
+        .hotswap-surface-header { border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; }
+        .hotswap-surface-header h3 { font-size: 15px; }
+        .hotswap-subsection { margin-top: 18px; padding-left: 14px; border-left: 2px solid #262626; }
+        .hotswap-sub-header h4 { font-size: 13px; color: #cfcfcf; font-weight: bold; }
+
+        /* BREADCRUMBS — every Hotswap ON/OFF switch shares ONE alignment
+           grammar rather than per-section offsets: the heading row is a flex
+           row whose switch is pushed to the far right by `margin-left: auto`.
+           A vertical ruler laid against the card's right edge therefore
+           touches every comparable switch, whatever nesting depth it sits at,
+           because the padding is inherited from the same card. */
+        .section-header.hotswap-surface-header,
+        .section-header.hotswap-sub-header {
+            display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding-right: var(--hotswap-trailing-inset);
+        }
+        .section-header.hotswap-surface-header > .switch,
+        .section-header.hotswap-sub-header > .switch { margin-left: auto; }
+        /* No per-section compensation: a subsection's padding narrows its
+           content box on the LEFT only, so its right edge already coincides
+           with the surface's. The switches land on one axis by construction. */
+        #quick-actions-config.disabled { opacity: 0.35; pointer-events: none; }
+        .hotswap-toggle-row[draggable="true"] { cursor: grab; }
+        .hotswap-toggle-row.dragging { opacity: 0.4; }
+        .hotswap-toggle-row.outside-cutoff { opacity: 0.48; }
+        .hotswap-toggle-row.outside-cutoff:hover { opacity: 0.72; }
+        .hotswap-toggle-row[data-destination="deep-cuts"]::after { content: "Deep Cuts"; grid-column: 1; color: #777; font-size: 10px; margin: 3px 0 0 31px; }
+        .hotswap-toggle-row.drop-target { outline: 1px dashed #0095f6; outline-offset: 2px; }
+        .drag-handle { color: #555; margin-right: 8px; cursor: grab; user-select: none; }
+        .btn-slot-count {
+            flex: 1;
+            background: #222;
+            border: 1px solid #333;
+            color: #aaa;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .btn-slot-count:hover { background: #2a2a2a; }
+        .btn-slot-count.active { background: #0a2a4a; border-color: #0095f6; color: #6db8ff; }
+
+        .section-toggle { width:100%; display:grid; grid-template-columns:1fr auto; align-items:center; gap:10px; padding:0; margin:0 0 16px; border:0; background:none; color:#eee; text-align:left; cursor:pointer; font:inherit; }
+        .section-title { font-size:15px; font-weight:bold; }
+        .section-caret { color:#777; transition:transform 0.15s ease; }
+        .config-card[data-collapsed="true"] .section-body { display:none; }
+        .config-card[data-collapsed="true"] .section-caret { transform:rotate(-90deg); }
+        .config-card[data-collapsed="true"] .section-toggle { margin-bottom:0; }
+        .ingest-panel { border-top:3px solid #f59e0b; }
+        .blacklist-panel { border-top:3px solid #a855f7; }
+        .dropzone-container { border:2px dashed #444; border-radius:10px; padding:24px; margin-bottom:16px; text-align:center; cursor:pointer; background:#111; }
+        .dropzone-container:hover, .dropzone-container.dragover { border-color:#f59e0b; background:#18130a; }
+        .dropzone-title { color:#ddd; font-size:13px; font-weight:bold; }
+        .dropzone-desc { color:#777; font-size:11px; margin-top:5px; }
+        .directory-select { width:100%; background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:8px; }
+        .or-divider { display:flex; align-items:center; gap:10px; margin:15px 0; }
+        .or-divider-line { height:1px; background:#333; flex:1; }
+        .or-divider-label { color:#666; font-size:10px; }
+        .blacklist-display { font-size:12px; color:#fb7185; background:#111; padding:12px; border-radius:8px; max-height:120px; overflow-y:auto; border:1px solid rgba(244,63,94,.2); min-height:40px; margin-bottom:12px; }
+        .blacklist-tag { display:inline-flex; align-items:center; gap:5px; background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.25); border-radius:999px; padding:2px 10px; margin:2px 3px; }
+        .bl-remove-btn, .btn-bl-clear { border:0; background:none; color:#888; cursor:pointer; }
+        .blacklist-manual-row { display:flex; gap:8px; align-items:center; }
+        .blacklist-manual-row .url-input { flex:1; }
+
+        .quick-slot-pickers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+        .quick-slot-picker-row { display: flex; align-items: center; gap: 10px; }
+        .quick-slot-picker-row label { font-size: 12px; color: #aaa; font-weight: bold; width: 70px; flex-shrink: 0; }
+        .quick-slot-select {
+            flex: 1;
+            background: #222;
+            border: 1px solid #333;
+            color: #fff;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+        }
+        .quick-slot-select:focus { border-color: #0095f6; }
+
+        /* Ghost Mode */
+        .ghost-panel { border-top: 3px solid #9d6dff; }
+        .ghost-opacity-row { display: flex; align-items: center; gap: 10px; }
+        .ghost-opacity-row input[type="range"] { flex: 1; accent-color: #9d6dff; }
+        .ghost-opacity-row input[type="number"] {
+            width: 60px;
+            background: #222;
+            border: 1px solid #333;
+            color: #fff;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 13px;
+            text-align: center;
+            outline: none;
+        }
+        .ghost-opacity-row input[type="number"]:focus { border-color: #9d6dff; }
+        .ghost-opacity-pct { color: #888; font-size: 13px; font-weight: bold; width: 14px; }
+    </style>
+</head>
+<body>
+
+<div id="settings-screen">
+
+    <div class="settings-header">
+        <a href="index.html" class="btn-back">← Back</a>
+        <span class="settings-title">⚙ Settings</span>
+    </div>
+
+    <!-- GitHub Cloud Sync Pipeline -->
+    <div class="config-card git-panel" data-section="github">
+        <div class="section-header">
+            <h3>GitHub Cloud Sync Pipeline</h3>
+        </div>
+        <p class="subtitle">Connect your remote database to synchronize directory pools and file purges.</p>
+        <div class="input-group">
+            <label>GitHub Personal Access Token (PAT)</label>
+            <input type="password" id="git-token" class="url-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxx">
+        </div>
+        <div class="input-group">
+            <label>Repository Target (Username/RepoName)</label>
+            <input type="text" id="git-repo" class="url-input" placeholder="YourUsername/stream-matrix">
+        </div>
+        <button class="btn btn-add" style="width:100%; color: #f1502f; border-color: #f1502f;" id="btn-connect-git">⚡ Connect &amp; Fetch Database</button>
+    </div>
+
+    <div class="config-card ingest-panel" data-section="ingest">
+        <div class="section-header"><h3>Ingest Extracted Directories</h3></div>
+        <p class="subtitle">Drag &amp; drop raw file listings to parse URLs automatically into your cloud repository database.</p>
+        <div class="dropzone-container" id="file-dropzone">
+            <div class="dropzone-title">Drop bookmark .html, .csv, or .txt files here</div>
+            <div class="dropzone-desc">Extracts unique destination URLs instantly</div>
+            <input type="file" id="manual-file-pick" style="display:none;" accept=".html,.htm,.txt,.csv">
+        </div>
+        <div class="input-group">
+            <label>Target Folder in Database</label>
+            <select class="directory-select" id="ingest-folder-select"><option value="">— select existing folder —</option></select>
+        </div>
+        <div class="or-divider"><div class="or-divider-line"></div><span class="or-divider-label">OR CREATE NEW</span><div class="or-divider-line"></div></div>
+        <div class="input-group"><label>New Folder Name</label><input type="text" id="target-folder-input" class="url-input" placeholder="e.g., Imported_Leads_Pool"></div>
+    </div>
+
+    <!-- Hotswap Overlay Controls -->
+    <div class="config-card hotswap-panel" data-section="hotswap">
+        <div class="section-header">
+            <h3>🎛 Hotswap Overlay Controls</h3>
+        </div>
+        <p class="subtitle">Three surfaces, one set of actions. Top Shortcuts ride the toolbar; the Quick Action Runway sits over the content; Deep Cuts ("···") is the deeper toolbox. The same action may appear on more than one.</p>
+
+        <div class="hotswap-surface">
+            <div class="section-header hotswap-surface-header">
+                <h3>Top Toolbar</h3>
+            </div>
+            <p class="subtitle">The rail that slides in at the top of a panel. <strong>Position</strong>, the <strong>L2/L1</strong> selector when a Layer 2 exists, <strong>Undo</strong>, <strong>Redo</strong> and <strong>···</strong> are fixed controls — they are always present and cannot be removed or reordered. Everything below configures the region between them.</p>
+
+        <div class="hotswap-subsection">
+        <div class="section-header hotswap-sub-header">
+            <h4>Toolbar Shortcuts</h4>
+        </div>
+        <p class="subtitle">The configurable middle of the toolbar, available whenever the toolbar is revealed. Narrow panels show fewer; widening restores them. Your saved count and order never change to fit.</p>
+        <div id="top-shortcuts-config">
+            <div class="input-group">
+                <label>Number of Shortcuts</label>
+                <div class="slot-count-grid slot-count-grid-5" id="top-count-row">
+                    <button class="btn-slot-count" data-count="1">1</button>
+                    <button class="btn-slot-count" data-count="2">2</button>
+                    <button class="btn-slot-count" data-count="3">3</button>
+                    <button class="btn-slot-count" data-count="4">4</button>
+                    <button class="btn-slot-count" data-count="5">5</button>
+                    <button class="btn-slot-count" data-count="6">6</button>
+                    <button class="btn-slot-count" data-count="7">7</button>
+                    <button class="btn-slot-count" data-count="8">8</button>
+                    <button class="btn-slot-count" data-count="9">9</button>
+                    <button class="btn-slot-count" data-count="10">10</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Top / Deep Cuts Action Order</label>
+                <p class="subtitle" style="margin-top:0;">Drag across the cutoff. The first <span id="top-count-echo">3</span> visible actions appear on the toolbar; grey rows automatically live in Deep Cuts. Switches control intentional visibility.</p>
+                <div class="hotswap-toggle-list" id="top-order-list"></div>
+            </div>
+        </div>
+        </div>
+
+        <div class="hotswap-subsection">
+        <div class="section-header hotswap-sub-header">
+            <h4>··· Deep Cuts</h4>
+        </div>
+        <p class="subtitle">The fixed fallback gateway contains the visible remainder of the ordered list above, plus temporary responsive overflow. When empty it remains enabled and says all actions are on the toolbar.</p>
+        </div>
+        </div>
+
+        <div class="hotswap-surface">
+        <div class="section-header hotswap-surface-header">
+            <h3>Quick Action Shortcut Runway</h3>
+            <label class="switch">
+                <input type="checkbox" id="quick-actions-enabled">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <p class="subtitle">A vertical runway down the right edge of every panel, starting below the top-right corner so the website keeps its own controls.</p>
+
+        <div id="quick-actions-config">
+            <div class="input-group">
+                <label>Resting Opacity</label>
+                <div class="ghost-opacity-row">
+                    <input type="range" id="ghost-opacity-slider" min="0" max="100" step="1">
+                    <input type="number" id="ghost-opacity-input" min="0" max="100" step="1">
+                    <span class="ghost-opacity-pct">%</span>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Hover Opacity</label>
+                <div class="ghost-opacity-row">
+                    <input type="range" id="hover-opacity-slider" min="0" max="100" step="1">
+                    <input type="number" id="hover-opacity-input" min="0" max="100" step="1">
+                    <span class="ghost-opacity-pct">%</span>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Number of Shortcuts</label>
+                <div class="slot-count-grid" id="slot-count-row">
+                    <button class="btn-slot-count" data-count="1">1</button>
+                    <button class="btn-slot-count" data-count="2">2</button>
+                    <button class="btn-slot-count" data-count="3">3</button>
+                    <button class="btn-slot-count" data-count="4">4</button>
+                    <button class="btn-slot-count" data-count="5">5</button>
+                    <button class="btn-slot-count" data-count="6">6</button>
+                    <button class="btn-slot-count" data-count="7">7</button>
+                    <button class="btn-slot-count" data-count="8">8</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Shortcut Order</label>
+                <p class="subtitle" style="margin-top:0;">Drag to reorder. The first <span id="runway-count-echo">3</span> appear, top to bottom.</p>
+                <div class="hotswap-toggle-list" id="runway-order-list"></div>
+            </div>
+        </div>
+
+        </div>
+    </div>
+
+    <div class="config-card" data-section="grid-layouts">
+        <div class="section-header"><h3>▦ Grid Layout Shortcuts</h3></div>
+        <p class="subtitle">Choose 1–4 stable Grid arrangement shortcuts. Drag to set their order; every remaining arrangement stays available in the Grid layout gateway.</p>
+        <div id="grid-layout-shortcuts-config">
+            <div class="input-group">
+                <label>Visible Shortcuts</label>
+                <div class="slot-count-grid" id="grid-layout-count-row">
+                    <button class="btn-slot-count" data-count="1">1</button>
+                    <button class="btn-slot-count" data-count="2">2</button>
+                    <button class="btn-slot-count" data-count="3">3</button>
+                    <button class="btn-slot-count" data-count="4">4</button>
+                </div>
+                <span class="subtitle">Showing <span id="grid-layout-count-echo">2</span> shortcuts</span>
+            </div>
+            <div class="input-group">
+                <label>Grid Layout Order</label>
+                <div class="hotswap-toggle-list" id="grid-layout-order-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Folder Manager -->
+    <div class="config-card manager-panel" data-section="folders">
+        <div class="section-header">
+            <h3>📂 Folder Manager</h3>
+        </div>
+        <p class="subtitle">Export a folder's URLs as a .txt file, or permanently delete a folder and all its links from the database.</p>
+        <div class="folder-manager-list" id="folder-manager-list">
+            <div class="folder-manager-empty">Connect your GitHub database to manage folders.</div>
+        </div>
+    </div>
+
+    <!-- Frame Height Settings -->
+    <div class="config-card frame-height-panel" data-section="frame-heights">
+        <div class="section-header">
+            <h3>📐 Frame Height Settings</h3>
+        </div>
+        <p class="subtitle">Set the height of each iframe panel before launching. Changes apply on next launch.</p>
+        <div class="frame-height-grid">
+            <div class="frame-height-group">
+                <label>🖥 Landscape Mode Height</label>
+                <div class="fh-desc">Suggested: 100vh (full screen). Try 80vh–120vh.</div>
+                <div class="frame-height-input-row">
+                    <input type="text" class="frame-height-input" id="fh-landscape-input" placeholder="100">
+                    <span class="frame-height-unit">vh</span>
+                </div>
+            </div>
+            <div class="frame-height-group">
+                <label>📱 Portrait Mode Height</label>
+                <div class="fh-desc">Suggested: 50vh (half screen). Try 40vh–70vh.</div>
+                <div class="frame-height-input-row">
+                    <input type="text" class="frame-height-input" id="fh-portrait-input" placeholder="50">
+                    <span class="frame-height-unit">vh</span>
+                </div>
+            </div>
+        </div>
+        <button class="btn-fh-apply" id="btn-fh-apply">✓ Save Heights</button>
+
+        <div class="spacer-toggle-row" id="fh-spacer-top-row">
+            <div>
+                <div class="spacer-toggle-label">Top Spacer Block</div>
+                <div class="spacer-toggle-sub">Adds a blank black block before the first stream</div>
+            </div>
+            <div class="spacer-right">
+                <input type="text" class="spacer-height-input" id="fh-spacer-top-input" placeholder="50">
+                <span class="frame-height-unit">vh</span>
+                <label class="switch" style="margin:0;">
+                    <input type="checkbox" id="fh-spacer-top-toggle">
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-spacer-lock" id="btn-lock-spacer-top" title="Lock — prevents Save Heights from changing this row">🔓</button>
+            </div>
+        </div>
+
+        <div class="spacer-toggle-row" id="fh-spacer-end-row">
+            <div>
+                <div class="spacer-toggle-label">End Spacer Block</div>
+                <div class="spacer-toggle-sub">Adds a blank black block after the last stream so it can scroll fully into view</div>
+            </div>
+            <div class="spacer-right">
+                <input type="text" class="spacer-height-input" id="fh-spacer-input" placeholder="50">
+                <span class="frame-height-unit">vh</span>
+                <label class="switch" style="margin:0;">
+                    <input type="checkbox" id="fh-spacer-toggle">
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-spacer-lock" id="btn-lock-spacer-end" title="Lock — prevents Save Heights from changing this row">🔓</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ghost Mode (other overlays) -->
+    <div class="config-card ghost-panel" data-section="ghost">
+        <div class="section-header">
+            <h3>👻 Ghost Mode</h3>
+        </div>
+        <p class="subtitle">Fade these overlays to the Runway's Resting Opacity until you hover them. The Hotswap toolbar is not listed: it retracts completely when unused, so it has nothing to fade.</p>
+        <div class="hotswap-toggle-list" id="ghost-toggle-list" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="config-card diagnostics-panel" data-section="diagnostics">
+        <div class="section-header"><h3>Diagnostics</h3></div>
+        <p class="subtitle">Generate a fresh, redacted RM-1 current-truth snapshot. Diagnostics observe existing state and never repair or change it.</p>
+        <div class="diagnostics-actions">
+            <button type="button" class="btn btn-add" id="btn-copy-diagnostics">Copy Diagnostics</button>
+            <button type="button" class="btn btn-add" id="btn-download-diagnostics">Download Diagnostics</button>
+        </div>
+        <div class="diagnostics-status" id="diagnostics-status" role="status" aria-live="polite"></div>
+    </div>
+
+    <div class="config-card blacklist-panel" data-section="blacklist">
+        <div class="section-header"><h3>Domain Blacklist</h3></div>
+        <p class="subtitle">Blocked domains are skipped during launch and shuffle. Purge also blacklists the domain.</p>
+        <div class="blacklist-display" id="blacklist-display"><span class="bl-empty">No domains blacklisted yet.</span></div>
+        <div class="blacklist-manual-row">
+            <input type="text" id="blacklist-manual-input" class="url-input" placeholder="e.g. deadsite.com">
+            <button class="btn btn-add" id="btn-bl-add">Block</button>
+            <button class="btn-bl-clear" id="btn-bl-clear">Clear All</button>
+        </div>
+    </div>
+
+</div>
+
+<script type="module" src="./js/settings.js"></script>
+</body>
+</html>

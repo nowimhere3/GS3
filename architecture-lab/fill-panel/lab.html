@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fill Panel Architecture Lab (throwaway)</title>
+<style>
+body{font:13px system-ui,sans-serif;background:#181818;color:#ddd;margin:16px}
+h1{font-size:18px}h2{border-top:2px solid #555;padding-top:10px;margin-top:28px}
+input[type=text]{width:520px;background:#222;color:#eee;border:1px solid #555;padding:4px}
+button{background:#333;color:#eee;border:1px solid #666;padding:4px 10px;cursor:pointer;margin:2px}
+button:hover{background:#444}
+.case{border:1px solid #444;padding:8px;margin:10px 0;background:#1f1f1f}
+.meta code{color:#9cf;word-break:break-all}
+.cand{border-top:1px dashed #444;margin-top:8px;padding-top:6px}
+.pair{display:flex;gap:10px;flex-wrap:wrap}
+.pair>div{flex:none}
+.box{background:#000;border:1px solid #666}
+.box iframe{width:100%;height:100%;border:0;display:block}
+.chk{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px;margin-top:6px}
+.chk label{display:flex;justify-content:space-between;gap:6px}
+textarea{width:100%;height:36px;background:#222;color:#eee;border:1px solid #555}
+.panel{position:relative;overflow:hidden;background:#000;border:2px solid #0a0;margin:8px 0}
+.panel iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:0}
+.sel{position:absolute;inset:0;cursor:crosshair;background:rgba(0,120,255,.08);z-index:5}
+.sel .r{position:absolute;border:2px dashed #0af;background:rgba(0,170,255,.2)}
+#status{color:#fc6}
+.note{color:#999}
+</style></head><body>
+<h1>Fill Panel Architecture Lab <span class="note">— throwaway; delete <code>architecture-lab/fill-panel/</code></span></h1>
+<p class="note">Iframes use GS3's real conditions: <code>allow="autoplay; fullscreen" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"</code>. A candidate that only works without the sandbox must be recorded as "SURVIVES GS3 SANDBOX: no". Serve over http (e.g. <code>python -m http.server</code> from the repo root) and open <code>/architecture-lab/fill-panel/lab.html</code>.</p>
+
+<h2>PROBE 1 — EMBED ADAPTER</h2>
+<div>Paste source URL: <input type="text" id="e-url" placeholder="https://www.xvideos.red/video.xxxx/slug">
+ Size: <select id="e-size"><option value="480x270">480×270</option><option value="640x360">640×360</option></select>
+ <button id="e-add">Add</button> <button id="e-copy">Copy Embed Results</button> <span id="e-status" class="note"></span></div>
+<div id="cases"></div>
+
+<h2>PROBE 2 — FRAMED VIEWPORT</h2>
+<div>URL: <input type="text" id="f-url" placeholder="https://…multi-video page"> <button id="f-load">Load</button>
+ Panel: <select id="f-size"><option value="640x360">640×360</option><option value="480x270">480×270</option><option value="800x450">800×450</option></select></div>
+<div>
+ <button id="f-frame">Frame Video</button><button id="f-exit">Exit Frame</button><button id="f-reframe">Re-frame</button><button id="f-reuse">Reuse Last Frame</button>
+ <span id="status"></span></div>
+<div class="panel" id="panel"><iframe id="f-iframe" allow="autoplay; fullscreen" allowfullscreen sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe></div>
+<div id="f-info" class="note"></div>
+<div class="chk" id="f-chk"></div>
+<textarea id="f-notes" placeholder="Framed Viewport notes"></textarea>
+<div><button id="f-copy">Copy Framed Viewport Results</button> <span id="f-cstatus" class="note"></span></div>
+<script src="lab.js"></script>
+</body></html>

@@ -1,0 +1,1587 @@
+import { getPanelRuntimeLayer, getPanelRenderUrl, isEmptyPanel, normalizePanel } from './panels.js';
+import { Store } from './storage.js';
+import {
+    State,
+    getDatabaseStructure,
+    setDatabaseStructure,
+    setTargetUrls,
+    setUrlFolderMap,
+    getUrlFolderMap,
+} from './state.js';
+import { initBlacklist } from './blacklist.js';
+import { fetchDatabaseSilently, pushDatabaseToRemote } from './sync.js';
+import { loadPresetsSilently, getPresets, getPresetSummary, saveWorkspaceToPreset } from './presets.js';
+import { populateBookmarkFolderSelect } from './folders.js';
+import {
+    buildStreamPanel, refreshPanelLayerScope, updateRenderedPanel, updatePanelHistoryButtons,
+    updatePanelToolbar, navigatePanelTo, LAYER_MESSAGE_SOURCE, LAYER_SCOPED_ACTIONS,
+    RUNTIME_LAUNCH_MESSAGE_SOURCE, MASTER_LAYER_ACTIONS,
+} from './launch.js';
+import {
+    initGridSession, updateGridSession, setGridSessionSilently, createAssignedUrlPanel, getSessionPanels, getSessionUrls,
+    getSessionFolderMap, getSourceWorkspaceInfo, setSessionSource,
+    getSessionLayout,
+    canUndoGridSession, undoGridSession, canRedoGridSession, redoGridSession,
+    canUndoPanelHistory, canRedoPanelHistory, undoPanelHistory, redoPanelHistory,
+    getSessionArrangement, setSessionArrangement, setSessionLayout,
+    beginGridAction, pushGridSessionCheckpoint,
+} from './grid-session.js';
+import {
+    getLayoutSlotOrder, getMirroredLayoutArrangement, listPositions, resolvePositionOfSlot, resolveSlotAtPosition,
+} from './positions.js';
+import { GRID_LAYOUT_IDS, GRID_LAYOUTS, getLayoutIconMarkup } from './grid-layouts.js';
+import {
+    classifyRuntimeExecutorUrl, LAYER_1, LAYER_2,
+    getGridLayoutShortcutOrder, getGridLayoutShortcutCount,
+} from './hotswap-chrome.js';
+import {
+    resetPanelNavigation, canNavigateBack, canNavigateForward,
+    navigateBack, navigateForward,
+} from './panel-navigation.js';
+import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
+import { unregisterFillPanelCapability } from './capability-bridge.js';
+
+const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
+const LAYOUT_IDS = GRID_LAYOUT_IDS;
+const DEFAULT_LAYOUT = 'lefttall';
+
+/**
+ * Embedding depth is a browser fact this page reads about itself, read once
+ * before any Runtime logic runs — never Runtime Session state (000-INVARIANTS
+ * § Runtime Shell Ownership). It decides two things: whether this page's own
+ * local Position labels read "L2 · P#" instead of "Position #" (011-HOTSWAP-
+ * CHROME.md § Nested local labels), and whether this page constructs its own
+ * global Master Bar / Orchestration Dock at all (§ Runtime Shell Ownership —
+ * one shell, owned by whoever owns the viewport).
+ */
+const IS_NESTED = typeof document !== 'undefined' && document.documentElement.classList.contains('is-nested');
+
+// Describes each layout's grid tracks (content vs resizer) and where its
+// draggable handle(s) sit. Shared by the resizer-injection and drag-math code
+// below so there's one definition per layout instead of separate cases.
+const LAYOUT_GRID_CONFIG = {
+    top2:      { columns: ['content', 'resizer', 'content'], rows: ['content', 'resizer', 'content'],
+                 resizers: [{ area: 'vres', axis: 'col', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'hres', axis: 'row', beforeIdx: 0, afterIdx: 2 }] },
+    bottom2:   { columns: ['content', 'resizer', 'content'], rows: ['content', 'resizer', 'content'],
+                 resizers: [{ area: 'vres', axis: 'col', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'hres', axis: 'row', beforeIdx: 0, afterIdx: 2 }] },
+    '3col':    { columns: ['content', 'resizer', 'content', 'resizer', 'content'], rows: ['content'],
+                 resizers: [{ area: 'vres1', axis: 'col', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'vres2', axis: 'col', beforeIdx: 2, afterIdx: 4 }] },
+    lefttall:  { columns: ['content', 'resizer', 'content'], rows: ['content', 'resizer', 'content'],
+                 resizers: [{ area: 'vres', axis: 'col', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'hres', axis: 'row', beforeIdx: 0, afterIdx: 2 }] },
+    righttall: { columns: ['content', 'resizer', 'content'], rows: ['content', 'resizer', 'content'],
+                 resizers: [{ area: 'vres', axis: 'col', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'hres', axis: 'row', beforeIdx: 0, afterIdx: 2 }] },
+    vsplit:    { columns: ['content', 'resizer', 'content'], rows: ['content'],
+                 resizers: [{ area: 'vres', axis: 'col', beforeIdx: 0, afterIdx: 2 }] },
+    hsplit:    { columns: ['content'], rows: ['content', 'resizer', 'content'],
+                 resizers: [{ area: 'hres', axis: 'row', beforeIdx: 0, afterIdx: 2 }] },
+    // 4-way grid needs TWO row-resizer handles (left half / right half of the
+    // horizontal divider) since the vertical divider splits it in two, but
+    // both reference the same row tracks — so dragging either one moves the
+    // whole horizontal line, same as a single continuous "+" divider.
+    '4grid':   { columns: ['content', 'resizer', 'content'], rows: ['content', 'resizer', 'content'],
+                 resizers: [{ area: 'vres',  axis: 'col', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'hresL', axis: 'row', beforeIdx: 0, afterIdx: 2 },
+                            { area: 'hresR', axis: 'row', beforeIdx: 0, afterIdx: 2 }] },
+};
+
+const MIN_TRACK_SIZE = 80; // px-equivalent floor so a dragged panel can't collapse to nothing
+
+// LAYOUT_POSITION_ORDER (the clockwise visual ordering of each layout's slots,
+// and therefore the definition of its fixed Positions) lives in positions.js so
+// there is exactly one copy of this geometry in the app. It is imported above.
+
+// Session-only memory of custom drag positions, keyed by layout name. Never
+// written to Store — a fresh visit to this page (including navigating back to
+// index.html and returning) starts with none of this, by design.
+const _customLayoutSizes = {};
+let _currentLayout = DEFAULT_LAYOUT;
+let _dragOverlayEl = null;
+
+let _activeFolder = '';
+
+const GRID_TRACE = '[Grid boot trace]';
+function _traceGrid(stage, details) {
+    console.groupCollapsed(`${GRID_TRACE} ${stage}`);
+    Object.entries(details).forEach(([key, value]) => {
+        // JSON snapshots keep DevTools from displaying a later-mutated object.
+        const snapshot = JSON.parse(JSON.stringify(value ?? null));
+        console.log(key, snapshot);
+    });
+    console.groupEnd();
+}
+
+function _pickRandom(arr) {
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function _pickFromFolder(db, folderName) {
+    if (!db || !folderName || !Array.isArray(db[folderName]) || db[folderName].length === 0) return null;
+    return _pickRandom(db[folderName]);
+}
+
+function _pickFromAnyFolder(db) {
+    if (!db) return { url: null, folder: null };
+    const folders = Object.keys(db).filter((folder) => Array.isArray(db[folder]) && db[folder].length > 0);
+    const folder = _pickRandom(folders);
+    if (!folder) return { url: null, folder: null };
+    return { url: _pickRandom(db[folder]), folder };
+}
+
+function _inferFolderForUrl(db, url) {
+    if (!db || !url) return null;
+    const folder = Object.keys(db).find((name) => Array.isArray(db[name]) && db[name].includes(url));
+    return folder || null;
+}
+
+function _buildTripleSet(db, preferredFolder = '') {
+    const panels = getSessionPanels();
+    const stored = getSessionUrls();
+    const urls = Array.isArray(stored) ? stored.slice(0, SLOT_IDS.length) : [];
+    const map = {};
+
+    while (urls.length < SLOT_IDS.length) urls.push('');
+
+    if (db && preferredFolder && db[preferredFolder]?.length) {
+        for (let i = 0; i < SLOT_IDS.length; i += 1) {
+            urls[i] = _pickFromFolder(db, preferredFolder) || urls[i] || 'https://example.com';
+            map[i] = preferredFolder;
+        }
+        return { urls, map };
+    }
+
+    for (let i = 0; i < SLOT_IDS.length; i += 1) {
+        if (!isEmptyPanel(panels[i])) continue;
+        const pick = _pickFromAnyFolder(db);
+        urls[i] = pick.url || 'https://example.com';
+        if (pick.folder) map[i] = pick.folder;
+    }
+
+    for (let i = 0; i < SLOT_IDS.length; i += 1) {
+        if (!map[i]) {
+            const inferred = _inferFolderForUrl(db, urls[i]);
+            if (inferred) map[i] = inferred;
+        }
+    }
+
+    return { urls, map };
+}
+
+/**
+ * 🎲 Shuffle — reshuffle every slot independently, each pulling a fresh random
+ * URL from the folder it's CURRENTLY assigned to (per getUrlFolderMap()), same
+ * as index.html's per-row assignment. A slot with no assigned folder falls
+ * back to a random pick so it never dead-ends.
+ */
+function _reshuffleOwnFolders(db) {
+    const currentMap = getUrlFolderMap();
+    const urls = [];
+    const map = {};
+
+    for (let i = 0; i < SLOT_IDS.length; i += 1) {
+        const folder = currentMap[i];
+        const pickedUrl = folder ? _pickFromFolder(db, folder) : null;
+
+        if (pickedUrl) {
+            urls[i] = pickedUrl;
+            map[i] = folder;
+        } else {
+            const pick = _pickFromAnyFolder(db);
+            urls[i] = pick.url || 'https://example.com';
+            if (pick.folder) map[i] = pick.folder;
+        }
+    }
+
+    return { urls, map };
+}
+
+/**
+ * 🎲🎲 Shuffle All — ignore each slot's assigned folder entirely; every slot
+ * gets a brand new random folder + link, independently of the others.
+ */
+function _reshuffleRandomFolders(db) {
+    const urls = [];
+    const map = {};
+
+    for (let i = 0; i < SLOT_IDS.length; i += 1) {
+        const pick = _pickFromAnyFolder(db);
+        urls[i] = pick.url || 'https://example.com';
+        if (pick.folder) map[i] = pick.folder;
+    }
+
+    return { urls, map };
+}
+
+function _bindBookmarkModal() {
+    const modalEl = document.getElementById('bookmark-modal');
+    const cancelBtn = document.getElementById('btn-bm-cancel');
+    const saveBtn = document.getElementById('btn-bm-save');
+
+    const closeModal = () => modalEl.classList.remove('open');
+
+    cancelBtn.onclick = closeModal;
+    modalEl.onclick = (e) => {
+        if (e.target === modalEl) closeModal();
+    };
+
+    saveBtn.onclick = async () => {
+        const selectedFolder = document.getElementById('bm-folder-select').value;
+        const newFolder = document.getElementById('bm-new-folder-input').value.trim().replace(/[^a-zA-Z0-9_\- ]/g, '');
+        const targetFolder = newFolder || selectedFolder;
+        const targetUrl = State.get('bookmarkTargetUrl');
+
+        if (!targetFolder) {
+            alert('Please choose an existing folder or enter a new folder name.');
+            return;
+        }
+        if (!targetUrl) {
+            closeModal();
+            return;
+        }
+
+        const db = getDatabaseStructure() || {};
+        if (!db[targetFolder]) db[targetFolder] = [];
+        if (!db[targetFolder].includes(targetUrl)) {
+            db[targetFolder].push(targetUrl);
+            setDatabaseStructure(db);
+            await pushDatabaseToRemote(`Bookmarked 1 link into playlist: ${targetFolder}`);
+        }
+
+        const starBtn = State.get('bookmarkStarBtn');
+        if (starBtn) {
+            starBtn.classList.add('saved');
+            starBtn.textContent = '★';
+        }
+
+        closeModal();
+    };
+}
+
+function _openBookmarkModal(url, starBtn) {
+    const db = getDatabaseStructure();
+    if (!db) {
+        alert('Connect your GitHub database first to use the playlist feature.');
+        return;
+    }
+
+    State.set('bookmarkTargetUrl', url);
+    State.set('bookmarkStarBtn', starBtn);
+
+    document.getElementById('bm-url-preview').textContent = url;
+    document.getElementById('bm-new-folder-input').value = '';
+    populateBookmarkFolderSelect();
+
+    const modalEl = document.getElementById('bookmark-modal');
+    modalEl.classList.add('open');
+    document.getElementById('bm-new-folder-input').focus();
+}
+
+function _ensureDragOverlay() {
+    if (_dragOverlayEl) return _dragOverlayEl;
+    _dragOverlayEl = document.createElement('div');
+    _dragOverlayEl.id = 'resizer-drag-overlay';
+    document.body.appendChild(_dragOverlayEl);
+    return _dragOverlayEl;
+}
+
+function _clearResizers(tripleLayoutEl) {
+    tripleLayoutEl.querySelectorAll('.resizer').forEach((el) => el.remove());
+}
+
+/**
+ * Handles a single drag gesture on one resizer handle. Reads the CURRENT
+ * computed track sizes (so it naturally picks up wherever a previous drag —
+ * or the layout's default — left things), adjusts only the two tracks
+ * adjacent to this handle, and writes the result back as an inline style
+ * override (never to Store). On release, saves the result into the
+ * in-memory per-layout cache so switching orientations and back restores it.
+ */
+function _startResizeDrag(e, resizerEl, axis, beforeIdx, afterIdx, trackTypes, tripleLayoutEl) {
+    e.preventDefault();
+    const propName = axis === 'col' ? 'gridTemplateColumns' : 'gridTemplateRows';
+    const computed = getComputedStyle(tripleLayoutEl)[propName].split(' ').map(parseFloat);
+    const startBefore = computed[beforeIdx];
+    const startAfter  = computed[afterIdx];
+    const startPos = axis === 'col' ? e.clientX : e.clientY;
+
+    const overlay = _ensureDragOverlay();
+    overlay.style.cursor = axis === 'col' ? 'col-resize' : 'row-resize';
+    overlay.classList.add('active');
+    resizerEl.classList.add('active');
+
+    const onMove = (moveEvt) => {
+        const pos = axis === 'col' ? moveEvt.clientX : moveEvt.clientY;
+        const delta = pos - startPos;
+        let newBefore = startBefore + delta;
+        let newAfter  = startAfter - delta;
+
+        if (newBefore < MIN_TRACK_SIZE) { newAfter -= (MIN_TRACK_SIZE - newBefore); newBefore = MIN_TRACK_SIZE; }
+        if (newAfter  < MIN_TRACK_SIZE) { newBefore -= (MIN_TRACK_SIZE - newAfter); newAfter = MIN_TRACK_SIZE; }
+        newBefore = Math.max(newBefore, 1);
+        newAfter  = Math.max(newAfter, 1);
+
+        computed[beforeIdx] = newBefore;
+        computed[afterIdx]  = newAfter;
+
+        const rebuilt = computed.map((val, i) => (trackTypes[i] === 'resizer' ? '6px' : `${val}fr`));
+        tripleLayoutEl.style[propName] = rebuilt.join(' ');
+    };
+
+    const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        overlay.classList.remove('active');
+        resizerEl.classList.remove('active');
+
+        // Remember this layout's custom sizing for the rest of the session
+        if (!_customLayoutSizes[_currentLayout]) _customLayoutSizes[_currentLayout] = {};
+        _customLayoutSizes[_currentLayout][propName] = tripleLayoutEl.style[propName];
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+
+/**
+ * Handles a simultaneous two-axis drag gesture on the seam junction handle.
+ * Reads the CURRENT computed track sizes for both columns and rows, adjusts
+ * the tracks adjacent to track 2 on both axes (before: index 0, after: index 2),
+ * and writes the results back as inline style overrides on tripleLayoutEl.
+ * On release, saves both resulting properties into _customLayoutSizes[_currentLayout].
+ */
+function _startCombinedResizeDrag(e, juncEl, config, tripleLayoutEl) {
+    e.preventDefault();
+    const computedCols = getComputedStyle(tripleLayoutEl).gridTemplateColumns.split(' ').map(parseFloat);
+    const computedRows = getComputedStyle(tripleLayoutEl).gridTemplateRows.split(' ').map(parseFloat);
+    const startColBefore = computedCols[0];
+    const startColAfter  = computedCols[2];
+    const startRowBefore = computedRows[0];
+    const startRowAfter  = computedRows[2];
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    const overlay = _ensureDragOverlay();
+    overlay.style.cursor = 'all-scroll';
+    overlay.classList.add('active');
+    juncEl.classList.add('active');
+
+    const onMove = (moveEvt) => {
+        const deltaX = moveEvt.clientX - startX;
+        let newColBefore = startColBefore + deltaX;
+        let newColAfter  = startColAfter - deltaX;
+
+        if (newColBefore < MIN_TRACK_SIZE) { newColAfter -= (MIN_TRACK_SIZE - newColBefore); newColBefore = MIN_TRACK_SIZE; }
+        if (newColAfter  < MIN_TRACK_SIZE) { newColBefore -= (MIN_TRACK_SIZE - newColAfter); newColAfter = MIN_TRACK_SIZE; }
+        newColBefore = Math.max(newColBefore, 1);
+        newColAfter  = Math.max(newColAfter, 1);
+
+        const deltaY = moveEvt.clientY - startY;
+        let newRowBefore = startRowBefore + deltaY;
+        let newRowAfter  = startRowAfter - deltaY;
+
+        if (newRowBefore < MIN_TRACK_SIZE) { newRowAfter -= (MIN_TRACK_SIZE - newRowBefore); newRowBefore = MIN_TRACK_SIZE; }
+        if (newRowAfter  < MIN_TRACK_SIZE) { newRowBefore -= (MIN_TRACK_SIZE - newRowAfter); newRowAfter = MIN_TRACK_SIZE; }
+        newRowBefore = Math.max(newRowBefore, 1);
+        newRowAfter  = Math.max(newRowAfter, 1);
+
+        const colsCopy = [...computedCols];
+        colsCopy[0] = newColBefore;
+        colsCopy[2] = newColAfter;
+
+        const rowsCopy = [...computedRows];
+        rowsCopy[0] = newRowBefore;
+        rowsCopy[2] = newRowAfter;
+
+        const rebuiltCols = colsCopy.map((val, i) => (config.columns[i] === 'resizer' ? '6px' : `${val}fr`));
+        const rebuiltRows = rowsCopy.map((val, i) => (config.rows[i] === 'resizer' ? '6px' : `${val}fr`));
+        tripleLayoutEl.style.gridTemplateColumns = rebuiltCols.join(' ');
+        tripleLayoutEl.style.gridTemplateRows = rebuiltRows.join(' ');
+    };
+
+    const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        overlay.classList.remove('active');
+        juncEl.classList.remove('active');
+
+        // Remember this layout's custom sizing for the rest of the session
+        if (!_customLayoutSizes[_currentLayout]) _customLayoutSizes[_currentLayout] = {};
+        _customLayoutSizes[_currentLayout].gridTemplateColumns = tripleLayoutEl.style.gridTemplateColumns;
+        _customLayoutSizes[_currentLayout].gridTemplateRows = tripleLayoutEl.style.gridTemplateRows;
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+
+/** Build the draggable handle(s) for whichever layout is currently active. */
+function _injectResizers(layoutName, tripleLayoutEl) {
+    _clearResizers(tripleLayoutEl);
+    const config = LAYOUT_GRID_CONFIG[layoutName];
+    if (!config) return;
+
+    config.resizers.forEach(({ area, axis, beforeIdx, afterIdx }) => {
+        const trackTypes = axis === 'col' ? config.columns : config.rows;
+        const el = document.createElement('div');
+        el.className = `resizer resizer-${axis === 'col' ? 'v' : 'h'}`;
+        el.style.gridArea = area;
+        el.addEventListener('mousedown', (e) => _startResizeDrag(e, el, axis, beforeIdx, afterIdx, trackTypes, tripleLayoutEl));
+        tripleLayoutEl.appendChild(el);
+    });
+
+    if (config.columns.includes('resizer') && config.rows.includes('resizer')) {
+        const juncEl = document.createElement('div');
+        juncEl.className = 'resizer resizer-junc';
+        juncEl.addEventListener('mousedown', (e) => _startCombinedResizeDrag(e, juncEl, config, tripleLayoutEl));
+        tripleLayoutEl.appendChild(juncEl);
+    }
+}
+
+// The slot-index -> grid-area arrangement now lives in grid-session.js
+// (getSessionArrangement/setSessionArrangement), so it's owned by the runtime
+// session and travels into Save Session As, rather than being a local that the
+// UI privately owns. This file only reads/writes it through the session.
+
+/**
+ * Move the panel in `slotIndex` to the FIXED PHYSICAL Position `position`,
+ * swapping it with whichever panel currently occupies that Position.
+ *
+ * "Position 3" always means the layout's third physical place — never "the slot
+ * that started out third". positions.js resolves the Position to a fixed
+ * grid-area name and then to the slot currently rendering as that area, so this
+ * lands correctly no matter how many swaps preceded it.
+ *
+ * This NEVER touches the panel/iframe DOM or its src — it only swaps which
+ * grid-area name the two slot *containers* render as (via inline style,
+ * overriding their default CSS). Each panel stays in its original, untouched
+ * parent the whole time, so whatever is playing live inside (video, slideshow,
+ * etc.) keeps running — pure CSS, zero DOM manipulation of the iframe itself.
+ *
+ * A move is PRESENTATION only: it mutates the session's arrangement, never its
+ * content. URLs and folder assignments stay bound to their slot-index, not to
+ * the visual position — so this deliberately does NOT swap the folder map (a
+ * later "own folder" Shuffle acts on the slot's own assignment, matching how
+ * URLs stay put). The arrangement is owned by the runtime session
+ * (grid-session.js). One move is ONE history action listing BOTH occupants, so
+ * either panel can undo it — once.
+ */
+function _moveSlotToPosition(slotIndex, position) {
+    const arrangement = getSessionArrangement();
+    const targetSlot = resolveSlotAtPosition(_currentLayout, arrangement, position);
+    if (targetSlot === null || targetSlot === slotIndex) return;
+
+    const slotAEl = document.getElementById(SLOT_IDS[slotIndex]);
+    const slotBEl = document.getElementById(SLOT_IDS[targetSlot]);
+    if (!slotAEl || !slotBEl) return;
+
+    beginGridAction('position');
+
+    const held = arrangement[slotIndex];
+    arrangement[slotIndex] = arrangement[targetSlot];
+    arrangement[targetSlot] = held;
+    setSessionArrangement(arrangement);
+
+    slotAEl.style.gridArea = arrangement[slotIndex];
+    slotBEl.style.gridArea = arrangement[targetSlot];
+    _refreshPositionLabels();
+    _refreshHistoryButtons();
+}
+
+/**
+ * Rewrite each visible slot's on-screen badge to the FIXED PHYSICAL Position it
+ * is currently rendering in. Because a slot's grid-area is what decides its
+ * physical place, and the badge lives inside that slot, re-deriving the badge
+ * after every arrangement or layout change means a given physical place always
+ * shows the same Position number — which is the whole promise of the model:
+ * "Position 1 is that place", not "Position 1 is wherever screen 1 went".
+ */
+/**
+ * BREADCRUMBS — WHY nested labels read differently: this Runtime's own
+ * Position labels and its HOST's Master conductor selector answer two
+ * different questions that happened to share the word "Position 1" — a human
+ * tester found both readable as the same fact even though they are not. The
+ * compact "L2 · P#" form (long-form "Layer 2 · Position #" in the tooltip)
+ * states unambiguously that this numbering is INTERNAL to this Layer-2
+ * Runtime, never the outer conductor's L2-P# HOST addressing (see
+ * 006-TERMINOLOGY.md). Only IS_NESTED changes the wording — the underlying
+ * fixed-Position resolution is identical either way.
+ */
+function _positionLabelFor(slotIndex) {
+    const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
+    if (position === null) return '';
+    return IS_NESTED ? `L2 · P${position}` : `Position ${position}`;
+}
+
+function _positionLongLabelFor(slotIndex) {
+    const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
+    if (position === null) return '';
+    return IS_NESTED ? `Layer 2 · Position ${position}` : `Position ${position}`;
+}
+
+function _refreshPositionLabels() {
+    SLOT_IDS.forEach((id, slotIndex) => {
+        const slot = document.getElementById(id);
+        if (!slot) return;
+        const text = _positionLabelFor(slotIndex);
+        const label = slot.querySelector('.slot-label');
+        if (label) { label.textContent = text; label.title = _positionLongLabelFor(slotIndex); }
+        // The toolbar states the PHYSICAL Position it is sitting in. When two
+        // panels swap, Position 1 stays Position 1 and the panel under that
+        // label changes — so this is re-derived, never carried by the panel.
+        updatePanelToolbar(slot.querySelector('.stream-panel'), { positionLabel: text });
+        const panel = slot.querySelector('.stream-panel');
+        const positionBtn = panel?.querySelector('.hotswap-position-btn');
+        if (positionBtn) positionBtn.title = _positionLongLabelFor(slotIndex);
+    });
+}
+
+/** The complete, stable Position list for the current layout, flagging which
+ *  one `slotIndex` is sitting in right now. Both pickers render from this, so
+ *  the numbering the user sees is the layout's own fixed numbering. */
+function _getPositionOptions(slotIndex) {
+    const arrangement = getSessionArrangement();
+    const current = resolvePositionOfSlot(_currentLayout, arrangement, slotIndex);
+    return listPositions(_currentLayout).map((position) => ({ position, isCurrent: position === current }));
+}
+
+/**
+ * 📋 Copy to Position — put the SOURCE panel's current URL into whichever panel
+ * currently occupies `position`.
+ *
+ * Content assignment includes URL + ROOT folder. The source is untouched and
+ * only the destination iframe reloads; every other live document keeps running.
+ */
+function _copyUrlToPosition(sourceSlotIndex, position, ctx) {
+    const arrangement = getSessionArrangement();
+    const destSlot = resolveSlotAtPosition(_currentLayout, arrangement, position);
+    if (destSlot === null || destSlot === sourceSlotIndex) return;
+
+    // The runtime session is authoritative for "what is this panel playing" —
+    // never the iframe's own src attribute.
+    const panels = getSessionPanels();
+    const folderMap = getSessionFolderMap();
+    const sourcePanel = panels[sourceSlotIndex];
+    const sourceUrl = getPanelRenderUrl(sourcePanel);
+    const sourceFolder = folderMap[sourceSlotIndex] || '';
+    const destFolder = folderMap[destSlot] || '';
+    if (isEmptyPanel(sourcePanel) || (JSON.stringify(panels[destSlot]) === JSON.stringify(sourcePanel) && destFolder === sourceFolder)) return;
+
+    beginGridAction('copy');
+    panels[destSlot] = normalizePanel(sourcePanel);
+    if (sourceFolder) folderMap[destSlot] = sourceFolder;
+    else delete folderMap[destSlot];
+    updateGridSession(panels, folderMap);
+    setTargetUrls(getSessionUrls());
+    setUrlFolderMap(folderMap);
+
+    const destPanel = document.getElementById(SLOT_IDS[destSlot])?.querySelector('.stream-panel');
+    if (destPanel) {
+        updateRenderedPanel(destPanel, { url: sourceUrl, folder: sourceFolder });
+    } else {
+        const slot = document.getElementById(SLOT_IDS[destSlot]);
+        if (slot) slot.appendChild(buildStreamPanel(sourceUrl, destSlot, 'stream-panel triple-fill', '100%', ctx));
+    }
+    _refreshHistoryButtons();
+}
+
+/**
+ * Switch the visual arrangement of the 3 screen slots. This only ever touches
+ * the CSS class on #triple-layout — the panels/iframes themselves are never
+ * rebuilt or moved, since each slot's grid-area (screen1/screen2/screen3) is
+ * fixed in CSS regardless of which layout is active. Also restores any custom
+ * border-drag sizing this layout had earlier in the session, or falls back to
+ * the layout's clean default if it hasn't been customized yet.
+ */
+function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
+    const shortcutEl = document.getElementById('master-layout-shortcuts');
+    const gateway = document.getElementById('btn-master-layout-overflow');
+    if (!shortcutEl) return;
+    const order = getGridLayoutShortcutOrder();
+    const visible = order.slice(0, getGridLayoutShortcutCount());
+    shortcutEl.innerHTML = '';
+    visible.forEach((name) => {
+        const definition = GRID_LAYOUTS.find((layout) => layout.id === name);
+        if (!definition) return;
+        const button = document.createElement('button');
+        button.className = 'master-btn layout-btn layout-shortcut';
+        button.dataset.layout = name;
+        button.title = definition.title;
+        // The SAME mini-floorplan grammar the permanent overflow buttons use —
+        // a readable tiny arrangement, never an abstract single glyph.
+        button.innerHTML = getLayoutIconMarkup(name);
+        button.classList.toggle('active', name === activeLayout);
+        button.onclick = () => _doMasterLayout(name);
+        shortcutEl.appendChild(button);
+    });
+    if (gateway) {
+        const overflowActive = !visible.includes(activeLayout);
+        gateway.classList.toggle('active', overflowActive);
+        gateway.classList.toggle('has-overflow-active', overflowActive);
+        // A neutral "there are more layouts" mark when the active layout is
+        // already visible; the active layout's own readable floorplan when it
+        // is hidden in overflow, so the gateway never goes dead-looking.
+        gateway.innerHTML = overflowActive ? (getLayoutIconMarkup(activeLayout) || '▦') : '▦';
+        gateway.title = overflowActive ? `More layouts · ${activeLayout}` : 'More layouts';
+    }
+}
+
+function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
+    const safeName = LAYOUT_IDS.includes(layoutName) ? layoutName : DEFAULT_LAYOUT;
+    const previousLayout = _currentLayout;
+    const mirroredArrangement = getMirroredLayoutArrangement(
+        previousLayout, safeName, getSessionArrangement());
+    _currentLayout = safeName;
+
+    LAYOUT_IDS.forEach((name) => tripleLayoutEl.classList.remove(`layout-${name}`));
+    tripleLayoutEl.classList.add(`layout-${safeName}`);
+
+    const saved = _customLayoutSizes[safeName];
+    tripleLayoutEl.style.gridTemplateColumns = saved?.gridTemplateColumns || '';
+    tripleLayoutEl.style.gridTemplateRows    = saved?.gridTemplateRows    || '';
+
+    _injectResizers(safeName, tripleLayoutEl);
+
+    // A swap made via 🖥 was specific to the previous arrangement — reset it on
+    // any orientation change so slots don't carry a stale swap into a layout it
+    // was never set up for. setSessionLayout() records the new orientation on
+    // the session AND resets its arrangement to identity in one call; the slot
+    // elements' own inline grid-area is cleared just below, so DOM and session
+    // agree. (Store.set('tripleLayout') below is a separate concern: the global
+    // default orientation for brand-new sessions, not this session's own truth.)
+    // Top2 and Bottom2 are the one explicit mirrored pair whose roles map
+    // directly: wide stays wide; left-short stays left-short; right-short
+    // stays right-short.  Every other layout retains the established reset.
+    setSessionLayout(safeName, mirroredArrangement || undefined);
+
+    // Show only the slots this layout actually uses (2-screen splits only use
+    // 2 of the 4 slots, 3-screen layouts use 3, only the 4-way grid uses all 4).
+    const activeSlots = getLayoutSlotOrder(safeName);
+    SLOT_IDS.forEach((id, i) => {
+        const slotEl = document.getElementById(id);
+        if (!slotEl) return;
+        // The explicit Top2/Bottom2 mapping is presentation state, so apply
+        // it directly to the persistent slot containers. Other layouts retain
+        // the established identity-area CSS binding.
+        slotEl.style.gridArea = mirroredArrangement ? mirroredArrangement[i] : '';
+        slotEl.style.display = activeSlots.includes(i) ? '' : 'none';
+    });
+
+    _refreshPositionLabels();
+
+    Object.entries(layoutBtns).forEach(([name, btn]) => {
+        if (btn) btn.classList.toggle('active', name === safeName);
+    });
+    _renderLayoutShortcuts(safeName, tripleLayoutEl, layoutBtns);
+
+    Store.set('tripleLayout', safeName);
+    _traceGrid('shared Store write', {
+        key: 'tripleLayout',
+        value: safeName,
+        note: 'Layout preference only; not workspace URLs or folder assignments.',
+    });
+}
+
+/** Keep every history control's enabled/disabled state in sync with the one
+ * canonical session history: the master-bar Undo button, and each panel's own
+ * ↩/↪ pair (tray buttons and their Quick Action mirrors alike).
+ *
+ * Called from _renderPanels() itself so every render path (initial load,
+ * Shuffle, Shuffle All, folder selection, undo) keeps it correct automatically,
+ * and after every individual history mutation — one action can change several
+ * panels' availability at once (a Position move affects both occupants; a
+ * master Undo can empty a panel's own undo pool), so this always refreshes ALL
+ * of them rather than just the panel that was clicked. */
+/**
+ * What a panel's own ↩/↪ can currently do, across BOTH of its histories: the
+ * browsing it did inside its content, and the GS3 actions that affected it.
+ * The single definition both the buttons and the click handlers read, so an
+ * enabled button and the operation it performs can never disagree.
+ */
+function _panelHistoryState(slotIndex) {
+    return {
+        canUndo: canNavigateBack(slotIndex) || canUndoPanelHistory(slotIndex),
+        canRedo: canNavigateForward(slotIndex) || canRedoPanelHistory(slotIndex),
+    };
+}
+
+function _refreshHistoryButtons() {
+    // Master Undo is Runtime-action-only and deliberately ignores browsing.
+    const btn = document.getElementById('btn-master-undo');
+    if (btn) btn.disabled = !canUndoGridSession();
+    const redoBtn = document.getElementById('btn-master-redo');
+    if (redoBtn) redoBtn.disabled = !canRedoGridSession();
+    _refreshMasterLayerSelector();
+
+    SLOT_IDS.forEach((id, index) => {
+        const panel = document.getElementById(id)?.querySelector('.stream-panel');
+        if (!panel) return;
+        updatePanelHistoryButtons(panel, _panelHistoryState(index));
+        refreshPanelLayerScope(panel);
+    });
+}
+
+function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
+    _traceGrid('render request', {
+        source: getSourceWorkspaceInfo(),
+        skipUndoSnapshot,
+        requestedUrls: urls,
+        requestedFolderMap: map,
+        sessionUrlsBefore: getSessionUrls(),
+        sessionFolderMapBefore: getSessionFolderMap(),
+        persistedUrlsBefore: Store.get('matrixUrls'),
+        persistedFolderMapBefore: Store.get('folderMap'),
+        note: 'This function must not write matrixUrls or folderMap to Store.',
+    });
+
+    // Phase 4B: this used to call Store.set('matrixUrls', urls) here, which
+    // silently overwrote whatever workspace was active on index.html on
+    // every single render (initial load, every Shuffle, every folder
+    // reassignment) — that's the bug this phase fixes. Now this only ever
+    // touches the isolated in-memory working copy; nothing here can leak
+    // back into a saved preset or Live Builder unless the user explicitly
+    // uses 💾 Save Session As... later.
+    //
+    // skipUndoSnapshot=true is only for the very first (boot) render, where
+    // initGridSession() has already set the session's starting data — there
+    // being nothing meaningful to undo back to yet, this just re-syncs
+    // state.js's compatibility view without pushing a spurious undo point.
+    if (skipUndoSnapshot) {
+        setGridSessionSilently(urls, map);
+    } else {
+        // updateGridSession() no longer pushes undo on its own, so the master-bar
+        // actions that re-render through here (Shuffle, Shuffle All, folder
+        // select) take an explicit checkpoint first — mirroring the old coupled
+        // behavior exactly, just made explicit. Per-panel actions never reach
+        // this path: launch.js pushes its own checkpoint before setIframeUrl ->
+        // onPanelContentChanged, so there's no double checkpoint.
+        pushGridSessionCheckpoint();
+        updateGridSession(urls, map);
+    }
+    // These calls update index3.html's own state.js module instance only.
+    // They do not persist to Store and cannot share object identity with index.html.
+    setTargetUrls(getSessionUrls());
+    setUrlFolderMap(map);
+
+    _traceGrid('render state applied', {
+        sessionUrlsAfter: getSessionUrls(),
+        sessionFolderMapAfter: getSessionFolderMap(),
+        persistedUrlsAfter: Store.get('matrixUrls'),
+        persistedFolderMapAfter: Store.get('folderMap'),
+        note: 'Persisted values above should match their pre-render values.',
+    });
+
+    SLOT_IDS.forEach((id, index) => {
+        const slot = document.getElementById(id);
+        // Clean existing content but keep label
+        const existing = slot.querySelector('.stream-panel');
+        if (existing) {
+            unregisterFillPanelCapability(existing);
+            existing.remove();
+        }
+
+        const panel = buildStreamPanel(
+            getPanelRenderUrl(getSessionPanels()[index]) || 'https://example.com',
+            index,
+            'stream-panel triple-fill', // Using your specific CSS class from index3.html
+            '100%',
+            ctx
+        );
+
+        slot.appendChild(panel);
+    });
+
+    const visibleSlots = getLayoutSlotOrder(_currentLayout).length;
+    const active = urls.slice(0, visibleSlots).filter(Boolean).length;
+    ctx.statusEl.textContent = `${active} streams`;
+
+    _refreshHistoryButtons();
+}
+
+/** Restore an Undo snapshot without treating unaffected live panels as disposable DOM. */
+function _reconcileUndo(restored, ctx) {
+    const changedUrls = new Set(restored.changedUrlIndices);
+    const changedFolders = new Set(restored.changedFolderIndices);
+    const changedIndices = new Set([...changedUrls, ...changedFolders]);
+
+    changedIndices.forEach((index) => {
+        const slot = document.getElementById(SLOT_IDS[index]);
+        if (!slot) return;
+        let panel = slot.querySelector('.stream-panel');
+        if (!panel && changedUrls.has(index)) {
+            panel = buildStreamPanel(
+                getPanelRenderUrl(getSessionPanels()[index]) || 'https://example.com',
+                index,
+                'stream-panel triple-fill',
+                '100%',
+                ctx
+            );
+            slot.appendChild(panel);
+        } else if (panel) {
+            updateRenderedPanel(panel, {
+                url: changedUrls.has(index) ? (getPanelRenderUrl(getSessionPanels()[index]) || 'https://example.com') : undefined,
+                folder: changedFolders.has(index) ? (restored.folderMap[index] || '') : undefined,
+            });
+        }
+    });
+
+    if (restored.arrangementChanged) {
+        restored.arrangement.forEach((area, slotIndex) => {
+            const slotEl = document.getElementById(SLOT_IDS[slotIndex]);
+            if (slotEl) slotEl.style.gridArea = area;
+        });
+        _refreshPositionLabels();
+    }
+
+    const visibleSlots = getLayoutSlotOrder(_currentLayout).length;
+    const active = restored.urls.slice(0, visibleSlots).filter(Boolean).length;
+    if (ctx.statusEl) ctx.statusEl.textContent = `${active} streams`;
+    _refreshHistoryButtons();
+}
+
+/**
+ * Apply one history restoration (master Undo, Panel Undo, Panel Redo — all
+ * three return the same descriptor) to the runtime. Restoration is surgical:
+ * only the slots the action itself recorded are written, and only those
+ * iframes can reload. Everything else keeps its node, its parent, its document
+ * and its playback.
+ */
+function _applyRestoredHistory(restored, ctx) {
+    if (!restored) return null;
+    setTargetUrls(restored.urls);
+    setUrlFolderMap(restored.folderMap);
+    _reconcileUndo(restored, ctx);
+    return restored;
+}
+
+function _panelEl(slotIndex) {
+    return document.getElementById(SLOT_IDS[slotIndex])?.querySelector('.stream-panel') || null;
+}
+
+/**
+ * SMART PANEL UNDO — "take THIS panel back to the last thing I was looking at
+ * or doing", whichever history that came from.
+ *
+ * Navigation first. A panel's browsing entries only exist inside its CURRENT
+ * content generation, which the most recent GS3 content action on that panel
+ * opened — so a pending navigation step is always something the user did after
+ * that action, and is what they mean by "back". Only once this panel has been
+ * returned to the content GS3 loaded does Undo fall through to the canonical
+ * action history and start reversing GS3's own mutations.
+ *
+ * This ordering holds even when a newer GS3 action exists that did not replace
+ * content (a Position move): moving a panel elsewhere on screen does not undo
+ * the user's place inside it, so Undo still steps the browsing back first and
+ * the panel stays where it is.
+ *
+ * Master Undo deliberately does NOT come through here — it stays purely
+ * Runtime-action-scoped and never traverses a website's browsing history.
+ */
+function _undoPanelSmart(slotIndex, ctx) {
+    if (canNavigateBack(slotIndex)) {
+        const panel = _panelEl(slotIndex);
+        // Only commit the cursor move if the panel is really there to navigate.
+        if (panel) {
+            const step = navigateBack(slotIndex);
+            if (step && navigatePanelTo(panel, step.url)) {
+                _refreshHistoryButtons();
+                return null;
+            }
+        }
+    }
+    return _applyRestoredHistory(undoPanelHistory(slotIndex), ctx);
+}
+
+/** SMART PANEL REDO — the mirror of _undoPanelSmart. */
+function _redoPanelSmart(slotIndex, ctx) {
+    if (canNavigateForward(slotIndex)) {
+        const panel = _panelEl(slotIndex);
+        if (panel) {
+            const step = navigateForward(slotIndex);
+            if (step && navigatePanelTo(panel, step.url)) {
+                _refreshHistoryButtons();
+                return null;
+            }
+        }
+    }
+    return _applyRestoredHistory(redoPanelHistory(slotIndex), ctx);
+}
+
+/**
+ * Build the 🌐 Folder dropup list (matches .dropup-item / .dropup-count CSS in
+ * index3.html). `onPick(folderName)` — '' means "Any Folder" — decides what a
+ * click actually does: act locally, or forward to a targeted nested Runtime.
+ */
+function _renderFolderDropup(folderDropupEl, onPick) {
+    const db = getDatabaseStructure();
+    folderDropupEl.innerHTML = '';
+
+    const anyItem = document.createElement('div');
+    anyItem.className = 'dropup-item' + (_activeFolder ? '' : ' selected');
+    anyItem.textContent = 'Any Folder (global random)';
+    anyItem.onclick = () => {
+        folderDropupEl.classList.remove('open');
+        onPick('');
+    };
+    folderDropupEl.appendChild(anyItem);
+
+    if (!db) return;
+
+    Object.keys(db).forEach((folderName) => {
+        const item = document.createElement('div');
+        item.className = 'dropup-item' + (_activeFolder === folderName ? ' selected' : '');
+        const label = document.createElement('span');
+        label.textContent = folderName;
+        const count = document.createElement('span');
+        count.className = 'dropup-count';
+        count.textContent = db[folderName].length;
+        item.append(label, count);
+        item.onclick = () => {
+            folderDropupEl.classList.remove('open');
+            onPick(folderName);
+        };
+        folderDropupEl.appendChild(item);
+    });
+}
+
+// ── Master layer scope ───────────────────────────────────────────────────────
+// BREADCRUMBS — WAS: a nested Grid moved its whole master cluster to the
+// opposite side of the screen so it would not sit under the outer session's;
+// later, a generic [L2][L1] selector broadcast every Layer-scoped action to
+// EVERY nested Runtime at once — honest breadth ("Master means all panels at
+// L1, so at L2 it means every nested runtime, one layer down") but not
+// addressable: with two nested Runtimes there was no way to aim at just one.
+// IS: explicit per-HOST-Position addressing. `[L2-P1] [L2-P3] [L1]` — one
+// button per outer Position that truthfully hosts an active nested Runtime,
+// plus L1. Selecting `L2-P1` targets ONLY the nested Runtime entered through
+// outer Position 1; it never fans out.
+// WHY: 006-TERMINOLOGY.md — L2-P# in the Master conductor names WHICH nested
+// Runtime, the same way Position already names a physical place. A control
+// that silently addressed "all of them" could not honestly represent two
+// simultaneous nested Runtimes at once.
+let _masterLayerTarget = null; // null = "not yet chosen, follow the first nested Runtime"; 'L1'; or a slot index
+
+/** Declared nested Panels occupying visible Positions; shared visibility/dispatch authority. */
+function _sessionLayerTwoSlots() {
+    return getSessionPanels().flatMap((panel, index) =>
+        getPanelRuntimeLayer(panel) === 2 && resolvePositionOfSlot(_currentLayout, getSessionArrangement(), index) !== null ? [index] : []);
+}
+
+/**
+ * Resolve what the selector currently means, without ever fabricating a
+ * target. An explicit L1 pick is sticky. An explicit slot pick is sticky as
+ * long as that Runtime is still truthfully nested at a visible Position;
+ * if it vanishes (content replaced, Position hidden by a layout change) this
+ * falls back to the first remaining nested Runtime rather than silently
+ * targeting nothing — the same "absence never rewrites the stored choice,
+ * dispatch handles absence" rule 011-HOTSWAP-CHROME.md already uses for the
+ * panel-level selector, applied to a set instead of a single boolean.
+ */
+function _effectiveMasterLayerTarget() {
+    const slots = _sessionLayerTwoSlots();
+    if (_masterLayerTarget === 'L1') return 'L1';
+    if (typeof _masterLayerTarget === 'number' && slots.includes(_masterLayerTarget)) return _masterLayerTarget;
+    return slots.length > 0 ? slots[0] : 'L1';
+}
+
+function _refreshMasterLayerSelector() {
+    const selector = document.getElementById('master-layer-selector');
+    if (!selector) return;
+    const slots = _sessionLayerTwoSlots();
+    // Same rule as the panel's own selector: hidden entirely when there is no
+    // choice to present — a lone permanently-lit L1 would be pure clutter.
+    selector.hidden = slots.length === 0;
+    if (slots.length === 0) { selector.innerHTML = ''; return; }
+    const effective = _effectiveMasterLayerTarget();
+    selector.innerHTML = '';
+    slots.forEach((slotIndex) => {
+        const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), slotIndex);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'hotswap-layer-btn';
+        button.dataset.layer = LAYER_2;
+        button.dataset.slot = String(slotIndex);
+        button.textContent = `L2-P${position}`;
+        button.title = `Target the nested Runtime hosted at outer Position ${position}`;
+        const isActive = effective === slotIndex;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+        button.onclick = () => { _masterLayerTarget = slotIndex; _refreshMasterLayerSelector(); _refreshMasterNestedStatus(); };
+        selector.appendChild(button);
+    });
+    const l1Button = document.createElement('button');
+    l1Button.type = 'button';
+    l1Button.className = 'hotswap-layer-btn';
+    l1Button.dataset.layer = LAYER_1;
+    l1Button.textContent = LAYER_1;
+    l1Button.title = 'Target this Runtime';
+    const l1Active = effective === 'L1';
+    l1Button.classList.toggle('active', l1Active);
+    l1Button.setAttribute('aria-pressed', String(l1Active));
+    l1Button.onclick = () => { _masterLayerTarget = 'L1'; _refreshMasterLayerSelector(); _refreshMasterNestedStatus(); };
+    selector.appendChild(l1Button);
+    _refreshMasterNestedStatus();
+}
+
+/**
+ * Hand a master action to the ONE nested Runtime the selector currently
+ * targets. `payload` carries data for MASTER_LAYER_ACTIONS (folder/layout/
+ * saveSessionAs); LAYER_SCOPED_ACTIONS remain key-only. Same-origin by
+ * construction. Returns true when the action was forwarded.
+ */
+function _dispatchMasterToLayerTwo(actionKey, payload) {
+    if (!LAYER_SCOPED_ACTIONS.has(actionKey) && !MASTER_LAYER_ACTIONS.has(actionKey)) return false;
+    const target = _effectiveMasterLayerTarget();
+    if (target === 'L1') return false;
+    const iframe = document.getElementById(SLOT_IDS[target])?.querySelector('.stream-panel iframe');
+    if (!iframe) return false;
+    try {
+        iframe.contentWindow?.postMessage(
+            { source: LAYER_MESSAGE_SOURCE, action: actionKey, ...payload }, window.location.origin);
+        return true;
+    } catch {
+        return false; // a nested runtime that has gone away is simply skipped
+    }
+}
+
+// ── Nested status reporting (Stage C route 3) ───────────────────────────────
+// A nested Runtime cannot render its own global shell (see IS_NESTED
+// suppression below), so its status must reach the user through the PARENT's
+// shell instead. Reuses the existing #master-status pathway rather than
+// building a second status system: a small sibling span shows the reported
+// text only for whichever nested Runtime the selector currently targets.
+let _nestedStatusBySlot = {};
+
+function _refreshMasterNestedStatus() {
+    const el = document.getElementById('master-nested-status');
+    if (!el) return;
+    const target = _effectiveMasterLayerTarget();
+    const text = typeof target === 'number' ? _nestedStatusBySlot[target] : undefined;
+    if (typeof target === 'number' && text) {
+        const position = resolvePositionOfSlot(_currentLayout, getSessionArrangement(), target);
+        el.textContent = `· L2-P${position}: ${text}`;
+        el.hidden = false;
+    } else {
+        el.textContent = '';
+        el.hidden = true;
+    }
+}
+
+/** Nested-side: mirror this Runtime's own status text out to whichever parent hosts it. */
+function _installNestedStatusReporter(statusEl) {
+    if (!IS_NESTED || !statusEl || window.top === window) return;
+    const report = () => {
+        try {
+            window.parent.postMessage(
+                { source: LAYER_MESSAGE_SOURCE, action: 'nestedStatus', text: statusEl.textContent },
+                window.location.origin);
+        } catch { /* parent gone or cross-origin: nothing to report to */ }
+    };
+    if (typeof MutationObserver === 'function') {
+        new MutationObserver(report).observe(statusEl, { childList: true, characterData: true, subtree: true });
+    }
+    report();
+}
+
+/**
+ * Receive an action forwarded from the runtime one layer OUT, and run it as if
+ * the user had pressed this session's own master control.
+ *
+ * BREADCRUMBS — WHY a message rather than reaching into the frame: even though
+ * Layer 2 targets are declared by session Panel identity, a message keeps the boundary explicit and one-directional, and is the
+ * same seam a future native/WebView host would speak. The origin is checked and
+ * the payload is a fixed action key from the canonical registry — never code,
+ * never a URL.
+ */
+function _normalizeLaunchWorkspace(workspace) {
+    if (workspace === 'live') return 'live';
+    if (typeof workspace !== 'string' && typeof workspace !== 'number') return null;
+    const id = String(workspace);
+    if (!/^\d+$/.test(id)) return null;
+    return getPresets().some((preset) => String(preset.id) === id) ? id : null;
+}
+
+function _handleRuntimeLaunchRequest(event, data, ctx) {
+    if (data?.action !== 'launchRuntime' || data.kind !== 'grid') return;
+    const workspace = _normalizeLaunchWorkspace(data.workspace);
+    if (workspace === null) return;
+
+    const slotIndex = SLOT_IDS.findIndex((id) =>
+        document.getElementById(id)?.querySelector('.stream-panel iframe')?.contentWindow === event.source);
+    if (slotIndex === -1) return;
+
+    // Same-origin is necessary but not sufficient. Only a Panel GS3 deliberately
+    // assigned Design-Time content to may ask its host to launch a Runtime.
+    const panel = getSessionPanels()[slotIndex];
+    const entry = classifyRuntimeExecutorUrl(panel?.source, { base: window.location.href });
+    if (entry?.role !== 'design-time') return;
+
+    const destination = `index3.html?workspace=${encodeURIComponent(workspace)}`;
+    const hostPanel = document.getElementById(SLOT_IDS[slotIndex])?.querySelector('.stream-panel');
+    if (!hostPanel) return;
+
+    ctx.pushUndoCheckpoint();
+    ctx.onPanelContentChanged(slotIndex, destination, '');
+    updateRenderedPanel(hostPanel, { url: destination, folder: '' });
+}
+
+/** Resolve a message's sending frame to the slot that hosts it, or -1. */
+function _slotForSource(source) {
+    return SLOT_IDS.findIndex((id) =>
+        document.getElementById(id)?.querySelector('.stream-panel iframe')?.contentWindow === source);
+}
+
+function _installLayerScopeReceiver(handlers, ctx) {
+    window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) return;
+        const data = event.data;
+        if (!data) return;
+        if (data.source === RUNTIME_LAUNCH_MESSAGE_SOURCE) {
+            _handleRuntimeLaunchRequest(event, data, ctx);
+            return;
+        }
+        if (data.source !== LAYER_MESSAGE_SOURCE) return;
+        if (data.action === 'nestedStatus') {
+            const slotIndex = _slotForSource(event.source);
+            if (slotIndex === -1) return;
+            _nestedStatusBySlot[slotIndex] = typeof data.text === 'string' ? data.text : '';
+            _refreshMasterNestedStatus();
+            return;
+        }
+        if (LAYER_SCOPED_ACTIONS.has(data.action) || MASTER_LAYER_ACTIONS.has(data.action)) {
+            handlers[data.action]?.(data);
+        }
+    });
+}
+
+/**
+ * Build the 💾 Save Session As... dropup — one row per preset, each showing
+ * enough context (rows/streams, or "Empty", plus when it was last saved) to
+ * avoid overwriting the wrong one by accident. The preset this session is
+ * currently saved-as (if any) is visually marked as current.
+ */
+function _renderSaveSessionDropup(dropupEl, statusEl) {
+    dropupEl.innerHTML = '';
+    const source = getSourceWorkspaceInfo();
+
+    getPresets().forEach((preset) => {
+        const summary = getPresetSummary(preset);
+        const isCurrent = source.type === 'preset' && Number(source.id) === Number(preset.id);
+
+        const item = document.createElement('div');
+        item.className = 'save-session-item' + (isCurrent ? ' current' : '');
+        item.innerHTML = `
+            <div class="save-session-item-main">
+                <span>📁 ${preset.name}</span>
+                ${isCurrent ? '<span class="save-session-current-badge">current</span>' : ''}
+            </div>
+            <div class="save-session-item-meta">${summary.isEmpty ? 'Empty' : `${summary.rowsLabel} · ${summary.streamsLabel}`}</div>
+            <div class="save-session-item-saved">${summary.savedLabel}</div>
+        `;
+        item.onclick = () => {
+            dropupEl.classList.remove('open');
+            _doMasterSaveSessionAs(preset.id);
+        };
+        dropupEl.appendChild(item);
+    });
+}
+
+/**
+ * The ONLY path anything from a running Grid session reaches a saved
+ * preset. Reads the session's own in-memory working copy (never Store,
+ * never the shared editing surface) and hands it to presets.js directly.
+ * lockState is reset for the target — a Grid session has no lock-state
+ * concept of its own to contribute, and carrying over the target preset's
+ * OLD lockState (indexed against whatever it used to contain) wouldn't
+ * meaningfully correspond to this session's content anyway.
+ */
+async function _handleSaveSessionAs(presetId, statusEl) {
+    const panels = getSessionPanels();
+    const folderMap = getSessionFolderMap();
+    const layout = getSessionLayout();
+
+    if (statusEl) statusEl.textContent = 'Saving…';
+
+    const { updated, synced } = await saveWorkspaceToPreset(presetId, {
+        panels,
+        folderMap,
+        lockState: {},
+        layout,
+    });
+
+    setSessionSource(presetId);
+
+    if (statusEl) {
+        statusEl.textContent = synced ? `Saved to ${updated.name}` : `Saved locally — sync pending`;
+    }
+}
+
+/**
+ * The Dock is the single writer for the shell's legal right-hand reserve.
+ * ResizeObserver covers dynamic Dock content, zoom, font metrics, and layout
+ * changes without every Master consumer guessing at the Dock's width.
+ */
+function _installDockReserve(dockEl) {
+    if (!dockEl) return;
+    const publish = () => {
+        const width = Math.ceil(dockEl.getBoundingClientRect().width);
+        document.documentElement.style.setProperty('--gs3-dock-reserve', `${width + 16}px`);
+    };
+    publish();
+    if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(publish);
+        observer.observe(dockEl);
+    }
+}
+
+// Module-level handles set once at boot, so the routed action functions below
+// (shared by button wiring and _installLayerScopeReceiver's forwarded-action
+// handlers) don't need every caller to thread ctx/tripleLayoutEl/layoutBtns/
+// statusEl through explicitly.
+let _ctx = null;
+let _tripleLayoutEl = null;
+let _layoutBtns = null;
+let _statusEl = null;
+
+/**
+ * One place per Master action: check whether the selector currently targets a
+ * specific nested Grid Runtime and forward there; otherwise act locally. Used
+ * by button/menu clicks AND by _installLayerScopeReceiver's own handlers, so a
+ * doubly-nested Runtime falls through correctly with no special-casing.
+ */
+function _doMasterShuffle() {
+    if (_dispatchMasterToLayerTwo('shuffle')) return;
+    const set = _reshuffleOwnFolders(getDatabaseStructure());
+    _renderPanels(set.urls, set.map, _ctx);
+}
+function _doMasterShuffleAll() {
+    if (_dispatchMasterToLayerTwo('shuffleAll')) return;
+    _activeFolder = '';
+    const set = _reshuffleRandomFolders(getDatabaseStructure());
+    _renderPanels(set.urls, set.map, _ctx);
+}
+function _doMasterUndo() {
+    if (_dispatchMasterToLayerTwo('undo')) return;
+    _applyRestoredHistory(undoGridSession(), _ctx);
+}
+function _doMasterRedo() {
+    if (_dispatchMasterToLayerTwo('redo')) return;
+    _applyRestoredHistory(redoGridSession(), _ctx);
+}
+function _doMasterFolder(folderName) {
+    if (_dispatchMasterToLayerTwo('folder', { folder: folderName || '' })) return;
+    _activeFolder = folderName || '';
+    const db = getDatabaseStructure();
+    const set = _activeFolder ? _buildTripleSet(db, _activeFolder) : _reshuffleRandomFolders(db);
+    _renderPanels(set.urls, set.map, _ctx);
+}
+function _doMasterLayout(layoutName) {
+    if (_dispatchMasterToLayerTwo('layout', { layout: layoutName })) return;
+    _applyLayout(layoutName, _tripleLayoutEl, _layoutBtns);
+}
+async function _doMasterSaveSessionAs(presetId) {
+    if (_dispatchMasterToLayerTwo('saveSessionAs', { presetId })) return;
+    await _handleSaveSessionAs(presetId, _statusEl);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    Store.warmCache();
+    initBlacklist();
+
+    // NOTE: this page's master-bar markup has no git-token / git-repo / connect
+    // inputs — those live on index.html. Credentials are already in Store by
+    // the time this page loads, so we just read the database directly.
+    const statusEl        = document.getElementById('master-status');
+    const orchestrationDock = document.getElementById('orchestration-dock');
+    const toggleMasterBtn = document.getElementById('btn-toggle-master');
+    const masterBarEl     = document.getElementById('master-bar');
+    const closeMasterBtn  = document.getElementById('btn-master-close');
+    const layoutOverflowBtn = document.getElementById('btn-master-layout-overflow');
+    const layoutMenuEl = document.getElementById('master-layout-menu');
+    const generalOverflowBtn = document.getElementById('btn-master-overflow');
+    const generalMenuEl = document.getElementById('master-general-menu');
+    const folderBtn       = document.getElementById('btn-master-folder');
+    const folderDropupEl  = document.getElementById('master-folder-dropup');
+    const shuffleBtn      = document.getElementById('btn-master-shuffle');
+    const shuffleAllBtn   = document.getElementById('btn-master-shuffle-all');
+    const undoBtn         = document.getElementById('btn-master-undo');
+    const redoBtn         = document.getElementById('btn-master-redo');
+    const saveSessionBtn  = document.getElementById('btn-master-save');
+    const copyDiagnosticsBtn = document.getElementById('btn-master-copy-diagnostics');
+    const saveDropupEl    = document.getElementById('master-save-dropup');
+    const tripleLayoutEl  = document.getElementById('triple-layout');
+    const layoutBtns = {
+        top2:      document.getElementById('btn-layout-top2'),
+        bottom2:   document.getElementById('btn-layout-bottom2'),
+        '3col':    document.getElementById('btn-layout-3col'),
+        lefttall:  document.getElementById('btn-layout-lefttall'),
+        righttall: document.getElementById('btn-layout-righttall'),
+        vsplit:    document.getElementById('btn-layout-vsplit'),
+        hsplit:    document.getElementById('btn-layout-hsplit'),
+        '4grid':   document.getElementById('btn-layout-4grid'),
+    };
+
+    // ── Runtime Shell Ownership (000-INVARIANTS.md) ─────────────────────────
+    // A Runtime executing inside a Panel does not own the browser viewport,
+    // so it renders no global shell. "Suppressed" means NOT CONSTRUCTED —
+    // never relocated, never merely hidden: a nested Runtime cannot see the
+    // true viewport, so it cannot avoid a collision by moving, only relocate
+    // it (see the retired html.is-nested #orchestration-dock relocation
+    // rule, deleted from index3.html in this same pass). The nodes are
+    // removed outright, before anything below can wire a handler to them.
+    if (IS_NESTED) {
+        masterBarEl?.remove();
+        orchestrationDock?.remove();
+    } else {
+        _installDockReserve(orchestrationDock);
+    }
+
+    _bindBookmarkModal();
+
+    const ctx = {
+        feedContainerEl: document.getElementById('triple-layout'),
+        dirDropdownEl: null,
+        statusEl,
+        openBookmarkModal: _openBookmarkModal,
+        // Fixed Positions — the complete, stable Position list for this layout,
+        // plus the two Position-targeting actions. See positions.js.
+        getPanelIdentity: (slotIndex) => getSessionPanels()[slotIndex],
+        getPositionLabel: (slotIndex) => _positionLabelFor(slotIndex),
+        getPositionOptions: (slotIndex) => _getPositionOptions(slotIndex),
+        moveToPosition: (slotIndex, position) => _moveSlotToPosition(slotIndex, position),
+        copyUrlToPosition: (slotIndex, position) => _copyUrlToPosition(slotIndex, position, ctx),
+        // Panel-scoped history — reads and writes the SAME canonical session
+        // history master Undo uses, so an action undone here is instantly
+        // invisible to master Undo and can never be undone a second time.
+        // Availability spans BOTH histories — a panel can have somewhere to go
+        // back to because of browsing, because of a GS3 action, or both.
+        getPanelHistory: (slotIndex) => _panelHistoryState(slotIndex),
+        undoPanel: (slotIndex) => _undoPanelSmart(slotIndex, ctx),
+        redoPanel: (slotIndex) => _redoPanelSmart(slotIndex, ctx),
+        // A panel navigated inside its own content: nothing in the Runtime
+        // Session changed, but this panel's ↩/↪ availability did.
+        onPanelNavigated: () => _refreshHistoryButtons(),
+        // Runtime-session write-backs for launch.js's per-panel overlay. These
+        // are how a single panel's own hotswap action (manual URL edit, folder
+        // assign, per-panel Shuffle / Shuffle All, Delete, Purge, Kill, 🚀)
+        // reaches the authoritative session without the panel ever writing to
+        // Store. launch.js pushes its own checkpoint before the content-changing
+        // actions, so onPanelContentChanged/onPanelRemoved don't checkpoint again.
+        onPanelContentChanged: (idx, newUrl, newFolder) => {
+            const urls = getSessionPanels();
+            const folderMap = getSessionFolderMap();
+            urls[idx] = createAssignedUrlPanel(newUrl);
+            if (newFolder !== undefined) folderMap[idx] = newFolder;
+            updateGridSession(urls, folderMap); // commits the pending action
+            setTargetUrls(getSessionUrls());      // keep state.js's compat view in sync
+            setUrlFolderMap(folderMap);
+            _refreshHistoryButtons();
+        },
+        onPanelRemoved: (idx) => {
+            const urls = getSessionPanels();
+            urls[idx] = normalizePanel('');
+            updateGridSession(urls, getSessionFolderMap()); // commits the pending action
+            setTargetUrls(getSessionUrls());
+            _refreshHistoryButtons();
+        },
+        // Opens the recording window only. The action itself doesn't exist —
+        // and no history control can change state — until the mutation that
+        // follows commits it, so the button refresh lives on the commit side
+        // (onPanelContentChanged / onPanelRemoved / _renderPanels) instead.
+        pushUndoCheckpoint: () => pushGridSessionCheckpoint(),
+    };
+
+    _ctx = ctx;
+    _tripleLayoutEl = tripleLayoutEl;
+    _layoutBtns = layoutBtns;
+    _statusEl = statusEl;
+    _installNestedStatusReporter(statusEl);
+
+    if (!IS_NESTED) {
+        // 🎬 toggle open/close for the master control bar
+        const closeMasterBar = () => {
+            masterBarEl.classList.remove('open');
+            toggleMasterBtn.classList.remove('active');
+            folderDropupEl.classList.remove('open');
+            layoutMenuEl?.classList.remove('open');
+            generalMenuEl?.classList.remove('open');
+        };
+        toggleMasterBtn.onclick = () => {
+            if (masterBarEl.classList.contains('open')) {
+                closeMasterBar();
+            } else {
+                masterBarEl.classList.add('open');
+                toggleMasterBtn.classList.add('active');
+            }
+        };
+        closeMasterBtn.onclick = closeMasterBar;
+
+        // 🖥 Layout switcher — wire each button now. The INITIAL layout is
+        // applied after the session loads (below): initGridSession() resolves
+        // it from the source workspace's own saved layout, so it can't be
+        // known until then. Routed through _doMasterLayout so a selector
+        // targeting a specific nested Grid forwards instead of acting locally.
+        Object.entries(layoutBtns).forEach(([name, btn]) => {
+            if (btn) btn.onclick = () => _doMasterLayout(name);
+        });
+
+        layoutOverflowBtn.onclick = () => {
+            const open = !layoutMenuEl.classList.contains('open');
+            layoutMenuEl.classList.toggle('open', open);
+            generalMenuEl?.classList.remove('open');
+        };
+        generalOverflowBtn.onclick = () => {
+            const open = !generalMenuEl.classList.contains('open');
+            generalMenuEl.classList.toggle('open', open);
+            layoutMenuEl?.classList.remove('open');
+        };
+        // BREADCRUMBS — WHY .contains() rather than === : the gateway's own icon is
+        // itself an element (a mini-floorplan <span> when it is showing the active
+        // overflow layout), so a genuine mouse/Playwright click on the gateway can
+        // land on that child, never on the button reference itself. A strict `!==`
+        // check would then treat the click that OPENED the menu as an outside click
+        // and immediately close it again on the same event.
+        document.addEventListener('click', (event) => {
+            if (layoutMenuEl?.classList.contains('open') && !layoutMenuEl.contains(event.target) && !layoutOverflowBtn.contains(event.target)) layoutMenuEl.classList.remove('open');
+            if (generalMenuEl?.classList.contains('open') && !generalMenuEl.contains(event.target) && !generalOverflowBtn.contains(event.target)) generalMenuEl.classList.remove('open');
+        });
+
+        // 🌐 Folder dropup — items route through _doMasterFolder.
+        folderBtn.onclick = () => {
+            const willOpen = !folderDropupEl.classList.contains('open');
+            if (willOpen) _renderFolderDropup(folderDropupEl, _doMasterFolder);
+            folderDropupEl.classList.toggle('open', willOpen);
+        };
+        document.addEventListener('click', (e) => {
+            if (folderDropupEl.classList.contains('open')
+                && !folderDropupEl.contains(e.target)
+                && e.target !== folderBtn) {
+                folderDropupEl.classList.remove('open');
+            }
+        });
+
+        // RM-1 must observe the live Grid document, not a later Settings page.
+        // This is the same generator, renderer, and clipboard transport as
+        // Settings; it makes no Runtime or persistence mutation.
+        if (copyDiagnosticsBtn) {
+            copyDiagnosticsBtn.onclick = async () => {
+                try {
+                    const artifact = await generateDiagnosticArtifact();
+                    await copyDiagnosticArtifact(artifact);
+                    if (statusEl) statusEl.textContent = 'Diagnostics copied';
+                } catch {
+                    if (statusEl) statusEl.textContent = 'Could not copy diagnostics.';
+                }
+            };
+        }
+    }
+
+    if (statusEl) statusEl.textContent = 'Loading database…';
+    await fetchDatabaseSilently(() => {
+        if (!statusEl) return;
+        const db = getDatabaseStructure();
+        statusEl.textContent = db
+            ? `Connected — ${Object.keys(db).length} folders`
+            : 'Not connected';
+    });
+
+    // Grid sessions can be launched directly in a fresh tab, so this page
+    // must load presets.json before resolving ?workspace=<id> — otherwise
+    // getPresetById() falls back to an empty default preset and Grid fills
+    // every slot with random picks instead of the actual saved workspace.
+    await loadPresetsSilently();
+
+    resetPanelNavigation(); // a new Runtime session starts with no browsing history
+    const initialSession = initGridSession(DEFAULT_LAYOUT); // Phase 4B/4D: load working copy + resolved layout from the URL-selected workspace
+    // Now that the session exists, apply its resolved layout (preset.layout, or
+    // the global tripleLayout preference, or DEFAULT_LAYOUT — decided inside
+    // initGridSession). This is the single initial _applyLayout call for boot,
+    // and it runs before the first render so _renderPanels reads the right
+    // _currentLayout for its visible-slot count.
+    _applyLayout(initialSession.layout, tripleLayoutEl, layoutBtns);
+    _traceGrid('after session initialization', {
+        source: getSourceWorkspaceInfo(),
+        initialSession,
+        sessionUrls: getSessionUrls(),
+        sessionFolderMap: getSessionFolderMap(),
+        presetsLoadedBeforeSession: getSourceWorkspaceInfo().type === 'live' ? 'not required' : 'inspect the preset source log above',
+    });
+
+    const initialDb = getDatabaseStructure();
+    const initialSet = _buildTripleSet(initialDb, _activeFolder);
+    _traceGrid('initial triple set', {
+        sessionBeforeRender: initialSession,
+        databaseFolders: initialDb ? Object.keys(initialDb) : [],
+        generatedUrls: initialSet.urls,
+        generatedFolderMap: initialSet.map,
+    });
+    _renderPanels(initialSet.urls, initialSet.map, ctx, { skipUndoSnapshot: true });
+
+    if (!IS_NESTED) {
+        // 🎲 Shuffle / 🎲🎲 Shuffle All — routed through _doMaster* so a
+        // selector targeting a specific nested Grid forwards there instead of
+        // reshuffling this Runtime's own panels.
+        shuffleBtn.onclick = () => _doMasterShuffle();
+        shuffleAllBtn.onclick = () => _doMasterShuffleAll();
+
+        // ↩ Master Undo / ↪ Master Redo — steps back through this SESSION's
+        // own history only (Shuffle, Shuffle All, folder reassignment,
+        // Position moves, Copy to Position). Never touches index.html's Undo
+        // — those are two entirely separate histories.
+        //
+        // Master Undo and each panel's own ↩ read the SAME canonical action
+        // list, differing only in which action they select: master takes the
+        // most recent still-applied action anywhere, a panel takes the most
+        // recent still-applied action affecting itself. Undoing marks the
+        // action itself as undone, so whichever control ran second simply
+        // doesn't see it any more — the same change can never be undone twice.
+        if (undoBtn) undoBtn.onclick = () => _doMasterUndo();
+        if (redoBtn) redoBtn.onclick = () => _doMasterRedo();
+    }
+    _refreshHistoryButtons();
+
+    // Layer scope: the selector appears only once a Layer 2 Runtime exists,
+    // and is rebuilt (buttons and handlers alike) on every refresh — see
+    // _refreshMasterLayerSelector.
+    _refreshMasterLayerSelector();
+
+    // This session can itself be somebody's Layer 2 — respond to whatever the
+    // PARENT's own selector targets us with. Handlers call the SAME _doMaster*
+    // functions the local buttons use, so a forwarded action that this session
+    // itself further forwards (double nesting) falls through correctly.
+    _installLayerScopeReceiver({
+        shuffle: () => _doMasterShuffle(),
+        shuffleAll: () => _doMasterShuffleAll(),
+        undo: () => _doMasterUndo(),
+        redo: () => _doMasterRedo(),
+        reload: () => { window.location.reload(); },
+        folder: (data) => _doMasterFolder(typeof data.folder === 'string' ? data.folder : ''),
+        layout: (data) => { if (LAYOUT_IDS.includes(data.layout)) _doMasterLayout(data.layout); },
+        saveSessionAs: (data) => {
+            if (getPresets().some((preset) => String(preset.id) === String(data.presetId))) {
+                _doMasterSaveSessionAs(data.presetId);
+            }
+        },
+    }, ctx);
+
+    // 💾 Save Session As... — the ONLY way this session's changes ever reach
+    // a real preset. Nothing else in this file writes to presets.json.
+    if (!IS_NESTED && saveSessionBtn && saveDropupEl) {
+        saveSessionBtn.onclick = () => {
+            const willOpen = !saveDropupEl.classList.contains('open');
+            if (willOpen) _renderSaveSessionDropup(saveDropupEl, statusEl);
+            saveDropupEl.classList.toggle('open', willOpen);
+        };
+        document.addEventListener('click', (e) => {
+            if (saveDropupEl.classList.contains('open')
+                && !saveDropupEl.contains(e.target)
+                && e.target !== saveSessionBtn) {
+                saveDropupEl.classList.remove('open');
+            }
+        });
+    }
+});

@@ -59,6 +59,7 @@
       "6": 1,
       "7": 2
     },
+    "layout": null,
     "rowCount": 7,
     "streamCount": 6,
     "isEmpty": false,
@@ -96,6 +97,7 @@
       "3": "Image_Galleries"
     },
     "lockState": {},
+    "layout": null,
     "rowCount": 4,
     "streamCount": 4,
     "isEmpty": false,
@@ -132,6 +134,7 @@
       "7": "IMAGES___EliteBabes___CURATED__Fav__"
     },
     "lockState": {},
+    "layout": null,
     "rowCount": 3,
     "streamCount": 3,
     "isEmpty": false,
@@ -172,6 +175,7 @@
       "0": 1,
       "2": 1
     },
+    "layout": null,
     "rowCount": 4,
     "streamCount": 4,
     "isEmpty": false,
@@ -209,9 +213,58 @@
       "3": "cleaned_bookmarks"
     },
     "lockState": {},
+    "layout": null,
     "rowCount": 4,
     "streamCount": 4,
     "isEmpty": false,
     "savedAt": "2026-07-29T07:08:06.848Z"
+  },
+  {
+    "id": 6,
+    "name": "Preset 6",
+    "panels": [],
+    "folderMap": {},
+    "lockState": {},
+    "layout": null,
+    "rowCount": 0,
+    "streamCount": 0,
+    "isEmpty": true,
+    "savedAt": null
+  },
+  {
+    "id": 7,
+    "name": "Preset 7",
+    "panels": [],
+    "folderMap": {},
+    "lockState": {},
+    "layout": null,
+    "rowCount": 0,
+    "streamCount": 0,
+    "isEmpty": true,
+    "savedAt": null
+  },
+  {
+    "id": 8,
+    "name": "Preset 8",
+    "panels": [],
+    "folderMap": {},
+    "lockState": {},
+    "layout": null,
+    "rowCount": 0,
+    "streamCount": 0,
+    "isEmpty": true,
+    "savedAt": null
+  },
+  {
+    "id": 9,
+    "name": "Preset 9",
+    "panels": [],
+    "folderMap": {},
+    "lockState": {},
+    "layout": null,
+    "rowCount": 0,
+    "streamCount": 0,
+    "isEmpty": true,
+    "savedAt": null
   }
 ]
