@@ -3,10 +3,12 @@ export function createToolbarDisclosure(root) {
     const groups = new Map();
     let active = null;
     function closeAll() {
-        for (const { group, trigger, body } of groups.values()) {
+        for (const { group, trigger, body, onClose } of groups.values()) {
+            const wasOpen = group.dataset.open === 'true';
             group.dataset.open = 'false';
             trigger.setAttribute('aria-expanded', 'false');
             body.hidden = true;
+            if (wasOpen) onClose?.();
         }
         active = null;
     }
@@ -23,11 +25,11 @@ export function createToolbarDisclosure(root) {
         if (active === id) closeAll();
         else open(id);
     }
-    function register(group, trigger) {
+    function register(group, trigger, { onClose } = {}) {
         const body = group.querySelector('.tool-group-body');
         if (!group.id || !body?.id || groups.has(group.id)) throw new Error('Invalid toolbar group');
         const onClick = () => toggle(group.id);
-        groups.set(group.id, { group, trigger, body, onClick });
+        groups.set(group.id, { group, trigger, body, onClick, onClose });
         trigger.setAttribute('aria-controls', body.id);
         trigger.setAttribute('aria-expanded', 'false');
         group.dataset.open = 'false';

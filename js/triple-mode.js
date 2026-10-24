@@ -601,6 +601,13 @@ function _copyUrlToPosition(sourceSlotIndex, position, ctx) {
 function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
     const shortcutEl = document.getElementById('master-layout-shortcuts');
     const gateway = document.getElementById('btn-master-layout-overflow');
+    const trigger = document.getElementById('btn-master-layout-toggle');
+    if (trigger) {
+        trigger.innerHTML = getLayoutIconMarkup(activeLayout);
+        const title = GRID_LAYOUTS.find((layout) => layout.id === activeLayout)?.title || 'Layouts';
+        trigger.title = `Layouts · ${title}`;
+        trigger.setAttribute('aria-label', `Layouts: ${title}`);
+    }
     if (!shortcutEl) return;
     const order = getGridLayoutShortcutOrder();
     const visible = order.slice(0, getGridLayoutShortcutCount());
@@ -1405,6 +1412,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!IS_NESTED) {
         const disclosure = createToolbarDisclosure(masterBarEl);
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
+        disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
+            onClose: () => layoutMenuEl?.classList.remove('open'),
+        });
         // 🎬 toggle open/close for the master control bar
         const closeMasterBar = () => {
             disclosure.closeAll();

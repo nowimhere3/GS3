@@ -185,6 +185,7 @@
         .tool-group-body[hidden] { display: none; }
         .tool-group[data-dir="left"] .tool-group-body { border-left: 0; padding-left: 0; border-right: 1px solid #444; padding-right: 8px; }
         .tool-group-trigger { gap: 4px; }
+        #btn-master-layout-toggle { height: 40px; }
         #master-bar .master-history-btn { width: 28px; height: 28px; padding: 0; border-radius: 10px; font-size: 14px; justify-content: center; background: #1a1620; border: 1px solid #4a3a6a; color: #b39ae0; }
         #master-bar .master-history-btn:hover:not(:disabled) { background: #262030; color: #fff; }
         #master-bar .master-history-btn:disabled { opacity: 0.32; cursor: default; }
@@ -707,8 +708,13 @@
         </div>
         <div class="master-layer-spacer"></div>
         <div class="master-region master-contextual">
-        <div id="master-layout-shortcuts" class="master-layout-shortcuts"></div>
-        <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts">▦</button>
+        <div class="tool-group" id="master-layout-group" data-dir="left" data-open="false">
+            <button type="button" class="master-btn layout-btn tool-group-trigger" id="btn-master-layout-toggle" title="Layouts" aria-label="Layouts" aria-expanded="false" aria-controls="master-layout-body"></button>
+            <div class="tool-group-body" id="master-layout-body" hidden>
+                <div id="master-layout-shortcuts" class="master-layout-shortcuts"></div>
+                <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts">▦</button>
+            </div>
+        </div>
         <button class="master-btn overflow-gateway" id="btn-master-overflow" title="More controls">⋯</button>
         </div>
         </div>

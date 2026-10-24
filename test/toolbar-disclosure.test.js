@@ -201,7 +201,7 @@ test('Shuffle remains inline with no Dock overlap or extra rows at narrow widths
             assert.ok(Math.max(...geo.centers) - Math.min(...geo.centers) < 2, `wrapping at ${width}`);
             await page.locator('#btn-master-shuffle-all').scrollIntoViewIfNeeded();
             assert.equal(await page.locator('#btn-master-shuffle-all').isVisible(), true);
-            for (const selector of ['#btn-master-shuffle-all', '#btn-master-undo', '#btn-master-redo', '#btn-master-layout-overflow', '#btn-master-overflow']) {
+            for (const selector of ['#btn-master-shuffle-all', '#btn-master-undo', '#btn-master-redo', '#btn-master-layout-toggle', '#btn-master-overflow']) {
                 await page.locator(selector).scrollIntoViewIfNeeded();
                 assert.ok(await page.locator(selector).evaluate((n) => {
                     const r = n.getBoundingClientRect();

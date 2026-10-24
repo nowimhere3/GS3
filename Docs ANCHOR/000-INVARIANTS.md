@@ -20,8 +20,12 @@ Stage B keeps Grid's Shuffle, Shuffle All, Undo, and Redo structurally
 reachable. Shuffle and Shuffle All are reachable within one inline disclosure
 click; Undo and Redo remain directly visible. Disclosure changes presentation
 only: it never writes preferences, checkpoints history, or changes media.
-Grid layout shortcuts are a preference over the canonical eight
-layout vocabulary (1-4 visible, default 2); visible slots never reshuffle
+Grid layout shortcuts select 1-4 entries (default 2) from the canonical eight
+layouts, reached through the left-expanding Layouts disclosure whose trigger
+always shows the active canonical floorplan. The adjacent layout gateway
+continues to open its existing external menu until the separately approved
+second-tier slice. Opening or closing Layouts is presentation-only.
+Configured slots never reshuffle
 merely because another layout becomes active. Layout overflow and general
 control overflow are separate gateways, and the layout gateway stays DOM- and
 visually-adjacent to the visible shortcuts — never drifting toward the fixed

@@ -2213,6 +2213,7 @@ test('the Layer target sits centrally, apart from the contiguous right-side layo
         await page.waitForFunction(() => document.getElementById('master-layer-selector').hidden === false);
         await page.evaluate(() => document.getElementById('btn-toggle-master').click());
         await page.waitForTimeout(250);
+        await page.locator('#btn-master-layout-toggle').click();
 
         const geo = await page.evaluate(() => {
             const rect = (el) => el.getBoundingClientRect();
@@ -4612,6 +4613,7 @@ test('Stage B Grid layout shortcuts stay ordered, configurable, and complete', a
         await page.evaluate(() => document.getElementById('btn-layout-righttall').click());
         await page.waitForFunction(() => document.querySelector('#triple-layout').className.includes('layout-righttall'));
         assert.deepEqual(await page.locator('#master-layout-shortcuts .layout-shortcut').evaluateAll((buttons) => buttons.map((button) => button.dataset.layout)), ['lefttall', '3col']);
+        await page.locator('#btn-master-layout-toggle').click();
         await page.locator('#btn-master-layout-overflow').click();
         assert.equal(await page.locator('#master-layout-menu.open .layout-btn').count(), 8);
         assert.ok(await page.locator('#btn-master-layout-overflow.has-overflow-active').count());
@@ -4648,6 +4650,7 @@ test('B.1 Grid layout shortcuts extend to 1-4, stay readable floorplans, and the
         await page.waitForFunction(() => document.querySelectorAll('#master-layout-shortcuts .layout-shortcut').length === 4);
         await page.locator('#btn-toggle-master').click();
         await page.waitForTimeout(300);
+        await page.locator('#btn-master-layout-toggle').click();
 
         // Exactly N (4) visible shortcuts, in the configured order, each a
         // readable mini-floorplan — the SAME li-<id> grammar the permanent
@@ -4668,7 +4671,7 @@ test('B.1 Grid layout shortcuts extend to 1-4, stay readable floorplans, and the
         // layout cluster, not drifted toward Settings/Dock/general overflow —
         // and the whole cluster still sits in the right-anchored contextual
         // region, immediately before the reserved Dock padding.
-        const domOrder = await page.evaluate(() => [...document.querySelector('.master-contextual').children]
+        const domOrder = await page.evaluate(() => [...document.querySelector('#master-layout-body').children]
             .map((el) => el.id || el.className));
         const shortcutsIndex = domOrder.indexOf('master-layout-shortcuts');
         assert.ok(shortcutsIndex >= 0);
