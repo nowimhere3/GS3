@@ -44,6 +44,7 @@ import { unregisterGalleryFavoriteCapability } from './gallery-favorite-bridge.j
 import {
     getGalleryFavoriteCapability, isGalleryFavoriteCapable,
     requestGalleryFavoriteCurrent, GALLERY_CAPABILITY_CHANGED,
+    getGalleryFavoriteState, GALLERY_FAVORITE_STATE_CHANGED,
 } from './gallery-favorite-bridge.js';
 import { createToolbarDisclosure } from './toolbar-disclosure.js';
 
@@ -1293,13 +1294,34 @@ function _renderHearts() {
             button.type = 'button';
             button.className = 'master-btn';
             button.dataset.position = String(position);
-            button.textContent = '❤' + position;
-            button.title = 'Favorite current media in Position ' + position;
-            button.setAttribute('aria-label', button.title);
             button.onclick = () => _favoriteAtPosition(position);
         }
-        const busy = _busyHeartPositions.has(position) || _busyHeartPanels.has(_heartPanel(position));
-        button.disabled = busy;
+        // Favorite truth is Gallery's last CURRENT_FAVORITE_STATE for the Panel NOW at this
+        // Position (read at render, never stored by Position/Slot, never from action results).
+        const panel = _heartPanel(position);
+        const known = getGalleryFavoriteState(panel);
+        const mode = !known ? 'unknown' : !known.hasMedia ? 'no-media' : known.isFavorite ? 'favorited' : 'unfavorited';
+        const glyph = ({ favorited: '♥', unfavorited: '♡' })[mode] || '❤';
+        const label = ({
+            favorited: 'Current item in Position ' + position + ' is favorited',
+            unfavorited: 'Favorite current item in Position ' + position + ' (not currently favorited)',
+            'no-media': 'No current media in Position ' + position,
+            unknown: 'Favorite current media in Position ' + position,
+        })[mode];
+        if (button.dataset.favoriteState !== mode) {
+            button.dataset.favoriteState = mode;
+            button.classList.toggle('is-favorite', mode === 'favorited');
+            button.replaceChildren();
+            const glyphEl = document.createElement('span');
+            glyphEl.className = 'heart-glyph';
+            glyphEl.setAttribute('aria-hidden', 'true');
+            glyphEl.textContent = glyph;
+            button.append(glyphEl, String(position));
+            button.title = label;
+            button.setAttribute('aria-label', label);
+        }
+        const busy = _busyHeartPositions.has(position) || _busyHeartPanels.has(panel);
+        button.disabled = busy || mode === 'no-media';
         button.setAttribute('aria-busy', String(busy));
         if (body.children[index] !== button) body.insertBefore(button, body.children[index] || null);
     }
@@ -1472,6 +1494,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         _toolbarDisclosure = disclosure;
         disclosure.register(document.getElementById('master-hearts-group'), document.getElementById('btn-master-hearts-toggle'));
         document.addEventListener(GALLERY_CAPABILITY_CHANGED, _renderHearts);
+        document.addEventListener(GALLERY_FAVORITE_STATE_CHANGED, _renderHearts);
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
             onClose: () => {

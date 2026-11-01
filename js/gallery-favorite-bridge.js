@@ -10,6 +10,8 @@ import {
 
 export const GALLERY_FAVORITE_CAPABILITY = 'GALLERY_FAVORITE';
 export const GALLERY_CAPABILITY_CHANGED = 'gs3:gallery-favorite-capability-changed';
+export const GALLERY_FAVORITE_STATE_CHANGED = 'gs3:gallery-favorite-state-changed';
+const MAX_MEDIA_KEY_LENGTH = 256;
 const states = new WeakMap();
 const pending = new WeakMap();
 export const GALLERY_FAVORITE_TIMEOUT_MS = 1500;
@@ -86,6 +88,28 @@ function notify(panel) {
     panel.dispatchEvent(new CustomEvent(GALLERY_CAPABILITY_CHANGED, { bubbles: true }));
 }
 
+function notifyState(panel) {
+    panel.dispatchEvent(new CustomEvent(GALLERY_FAVORITE_STATE_CHANGED, { bubbles: true }));
+}
+
+/** Gallery owns favorite truth. This is its last accepted snapshot, nothing GS3 inferred. */
+function parseFavoriteState(data) {
+    if (typeof data.hasMedia !== 'boolean' || typeof data.isFavorite !== 'boolean') return null;
+    if (data.hasMedia) {
+        if (typeof data.mediaKey !== 'string' || data.mediaKey === ''
+            || data.mediaKey.length > MAX_MEDIA_KEY_LENGTH) return null;
+        return { hasMedia: true, mediaKey: data.mediaKey, isFavorite: data.isFavorite };
+    }
+    if (data.mediaKey !== null || data.isFavorite !== false) return null;
+    return { hasMedia: false, mediaKey: null, isFavorite: false };
+}
+
+function dropFavoriteState(panel, state) {
+    if (!state.favoriteState) return;
+    state.favoriteState = null;
+    notifyState(panel);
+}
+
 export function registerGalleryFavoriteCapability(panel) {
     if (!listening) {
         window.addEventListener('message', handleGalleryFavoriteMessage);
@@ -103,8 +127,10 @@ export function resetGalleryFavoriteCapability(panel, { acceptingReports = false
         acceptingReports: Boolean(acceptingReports),
         capable: false,
         features: [],
+        favoriteState: null, // generation-scoped: a new state object starts with no snapshot
     };
     states.set(panel, state);
+    if (previous?.favoriteState) notifyState(panel);
     if (previous?.capable) notify(panel);
     if (state.acceptingReports) {
         queryGalleryFavoriteCapability(panel);
@@ -118,6 +144,7 @@ export function unregisterGalleryFavoriteCapability(panel) {
     complete(panel);
     stopQueryRetries(previous);
     states.delete(panel);
+    if (previous?.favoriteState) notifyState(panel);
     if (previous?.capable) notify(panel);
 }
 
@@ -142,12 +169,23 @@ export function handleGalleryFavoriteMessage(event) {
     const data = event?.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)
         || data.source !== CAPABILITY_BRIDGE_SOURCE || data.version !== CAPABILITY_BRIDGE_VERSION
-        || !['CAPABILITY_PRESENT', 'FAVORITE_RESULT'].includes(data.type)
+        || !['CAPABILITY_PRESENT', 'FAVORITE_RESULT', 'CURRENT_FAVORITE_STATE'].includes(data.type)
         || data.capability !== GALLERY_FAVORITE_CAPABILITY
         || typeof data.generation !== 'string' || !allowedOrigin(event.origin)) return false;
     const panel = findPanelForSourceWindow(event.source);
     const state = panel && states.get(panel);
     if (!state?.acceptingReports || data.generation !== state.generation) return false;
+    if (data.type === 'CURRENT_FAVORITE_STATE') {
+        const next = parseFavoriteState(data);
+        if (!next || !state.capable || event.origin !== state.origin
+            || !state.features.includes('favoriteState')) return false;
+        const prev = state.favoriteState;
+        if (prev && prev.hasMedia === next.hasMedia && prev.mediaKey === next.mediaKey
+            && prev.isFavorite === next.isFavorite) return true; // identical: no redundant event
+        state.favoriteState = next;
+        notifyState(panel);
+        return true;
+    }
     if (data.type === 'FAVORITE_RESULT') {
         const request = pending.get(panel);
         if (!state.capable || event.origin !== state.origin || !request
@@ -165,6 +203,7 @@ export function handleGalleryFavoriteMessage(event) {
         state.capable = true;
         state.features = features;
         stopQueryRetries(state);
+        if (!features.includes('favoriteState')) dropFavoriteState(panel, state);
         notify(panel);
     }
     return true;
@@ -181,4 +220,16 @@ export function getGalleryFavoriteCapability(panel) {
 
 export function isGalleryFavoriteCapable(panel) {
     return Boolean(panel?.isConnected && states.get(panel)?.capable);
+}
+
+/**
+ * Latest accepted CURRENT_FAVORITE_STATE for this live Panel generation, as a copy.
+ * null = unknown (unregistered, no favoriteState feature, or nothing received yet).
+ * Action results (FAVORITE_RESULT) never feed this; only Gallery's own snapshots do.
+ */
+export function getGalleryFavoriteState(panel) {
+    const state = states.get(panel);
+    if (!panel?.isConnected || !state?.capable || !state.favoriteState
+        || !state.features.includes('favoriteState')) return null;
+    return { generation: state.generation, ...state.favoriteState };
 }

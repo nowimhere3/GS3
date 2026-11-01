@@ -14,6 +14,14 @@ window.report = (features = [], generation = window.queries.at(-1)?.generation) 
         generation, features,
     }, '*');
 };
+// Publishes Gallery's authoritative current favorite snapshot (S7A shape).
+window.publishState = (partial = {}, generation = window.queries.at(-1)?.generation) => {
+    parent.postMessage({
+        source: 'gs3-capability-bridge', version: 1,
+        type: 'CURRENT_FAVORITE_STATE', capability: 'GALLERY_FAVORITE',
+        generation, hasMedia: true, mediaKey: 'k1', isFavorite: false, ...partial,
+    }, '*');
+};
 // ?lateMs=N installs the listener N ms after load, like a module with top-level await.
 const lateMs = Number(new URLSearchParams(location.search).get('lateMs')) || 0;
 const install = () => addEventListener('message', event => {
@@ -28,7 +36,12 @@ const install = () => addEventListener('message', event => {
         && data.version === 1 && data.capability === 'GALLERY_FAVORITE'
         && data.type === 'QUERY_CAPABILITY') {
         window.queries.push(data);
-        if (new URLSearchParams(location.search).has('auto')) window.report(['favoriteCurrent'], data.generation);
+        const params = new URLSearchParams(location.search);
+        if (params.has('state')) {
+            // Realistic S7A child: advertise favoriteState, then publish immediately after handshake.
+            window.report(['favoriteCurrent', 'favoriteState'], data.generation);
+            window.publishState({ isFavorite: params.get('state') === 'fav' }, data.generation);
+        } else if (params.has('auto')) window.report(['favoriteCurrent'], data.generation);
     }
 });
 if (lateMs) setTimeout(install, lateMs); else install();

@@ -90,9 +90,17 @@ MultiHeart is a left-expanding top-level inline disclosure before Layouts and
 More Controls. It is hidden without actionable Gallery Panels. Hearts label
 physical Positions in ascending order and resolve the current occupant at click
 time through positions.js, independent of Layer targeting. Eligibility requires
-current GALLERY_FAVORITE plus favoriteCurrent. Buttons express action availability,
-never authoritative favorite state. Results use the existing status region;
-favorites remain Gallery-owned and never enter GS3 Runtime history.
+current GALLERY_FAVORITE plus favoriteCurrent. Results use the existing status
+region; favorites remain Gallery-owned and never enter GS3 Runtime history.
+
+Heart glyphs project favorite state only from Gallery's own CURRENT_FAVORITE_STATE
+snapshot (requires the favoriteState feature), never from FAVORITE_CURRENT results
+or prior clicks. The snapshot is in-memory, belongs to the live Panel and its
+capability generation (cleared on reset, replacement, unregister or feature loss;
+stale generations are refused), and is projected through the current Position at
+render, so it follows the Panel. Known media shows ♡N or red ♥N; no media is a
+disabled neutral ❤N; unknown or favoriteState-less Galleries keep the neutral ❤N
+action heart. Clicking a favorited heart is still the idempotent action, never a toggle.
 
 ## Runtime Memory diagnostics
 

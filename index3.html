@@ -185,6 +185,9 @@
         #master-hearts-group[data-open="true"] .hearts-closed { display: none; }
         #master-hearts-group[data-open="true"] .hearts-open { display: inline; }
         #master-hearts-body button:disabled { opacity: 0.5; cursor: wait; }
+        #master-hearts-body button[data-favorite-state="no-media"]:disabled { cursor: default; }
+        #master-hearts-body .heart-glyph { margin-right: 1px; }
+        #master-hearts-body button.is-favorite .heart-glyph { color: #ff3b4e; }
         .tool-group[data-dir="left"] { flex-direction: row-reverse; }
         .tool-group-body { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; scrollbar-width: none; border-left: 1px solid #444; padding-left: 8px; }
         .tool-group-body[hidden] { display: none; }
