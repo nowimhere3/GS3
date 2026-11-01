@@ -18,20 +18,20 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.kill(); });
 
-async function boot(auto = false) {
+async function boot(auto = false, extra = '') {
     const page = await browser.newPage();
     page.setDefaultTimeout(6000);
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:4203|localhost:4203).*/, r => r.fulfill({ status: 204, body: '' }));
-    await page.addInitScript(auto => {
+    await page.addInitScript(({ auto, extra }) => {
         if (window !== top) return;
         localStorage.clear();
         window.autoChanges = 0;
         document.addEventListener('gs3:gallery-favorite-capability-changed', () => window.autoChanges++);
         localStorage.setItem('loop_matrix_urls', JSON.stringify([
-            'http://localhost:4203/test/fixtures/gallery-capability-stub.html' + (auto ? '?auto=1' : ''),
+            'http://localhost:4203/test/fixtures/gallery-capability-stub.html' + (auto ? '?auto=1' + extra : ''),
             '/test/fixtures/canary.html?id=gallery-lookalike',
         ]));
-    }, auto);
+    }, { auto, extra });
     await page.goto(ORIGIN + '/index3.html?workspace=live', { waitUntil: 'networkidle' });
     await page.evaluate(async () => {
         window.gallery = await import('./js/gallery-favorite-bridge.js');
@@ -342,5 +342,39 @@ test('Gallery rejects malformed, unfenced, disallowed-origin and unrelated-windo
         }, '*'));
         await page.waitForTimeout(30);
         assert.equal((await state(page)).capable, false);
+    } finally { await page.close(); }
+});
+
+test('MultiHeart appears automatically when the child installs its listener after iframe load', async () => {
+    // Field failure: the real Gallery registers its message listener after top-level
+    // await, so the one query sent on load was lost and the group stayed hidden.
+    const { page, frame } = await boot(true, '&lateMs=900');
+    try {
+        // boot() returned only after the late listener first saw a query.
+        // No manual render or re-query helper: the lifecycle alone must discover it.
+        await page.waitForFunction(() => !document.querySelector('#master-hearts-group').hidden, null, { timeout: 5000 });
+        assert.equal(await page.locator('#master-hearts-group').isVisible(), true);
+        assert.match(await page.locator('#btn-master-hearts-toggle').textContent(), /◀ ❤/);
+        await page.locator('#btn-toggle-master').click();
+        await page.locator('#btn-master-hearts-toggle').click();
+        assert.deepEqual(await page.locator('#master-hearts-body button').allTextContents(), ['❤1']);
+        // Discovery stops once answered: no further queries accumulate.
+        const settled = await frame.evaluate(() => queries.length);
+        await page.waitForTimeout(700);
+        assert.equal(await frame.evaluate(() => queries.length), settled);
+    } finally { await page.close(); }
+});
+
+test('Gallery discovery retries stop when the generation is replaced or the child never answers', async () => {
+    const { page, frame } = await boot(false);
+    try {
+        const first = await frame.evaluate(() => queries.length);
+        await page.waitForTimeout(800);
+        const during = await frame.evaluate(() => queries.length);
+        assert.ok(during > first, 'unanswered discovery retries');
+        await page.evaluate(() => gallery.unregisterGalleryFavoriteCapability(panels[0]));
+        const stopped = await frame.evaluate(() => queries.length);
+        await page.waitForTimeout(700);
+        assert.equal(await frame.evaluate(() => queries.length), stopped);
     } finally { await page.close(); }
 });

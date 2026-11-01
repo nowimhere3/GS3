@@ -14,7 +14,9 @@ window.report = (features = [], generation = window.queries.at(-1)?.generation) 
         generation, features,
     }, '*');
 };
-addEventListener('message', event => {
+// ?lateMs=N installs the listener N ms after load, like a module with top-level await.
+const lateMs = Number(new URLSearchParams(location.search).get('lateMs')) || 0;
+const install = () => addEventListener('message', event => {
     const data = event.data;
     if (event.source === parent && data?.source === 'gs3-capability-bridge'
         && data.version === 1 && data.capability === 'GALLERY_FAVORITE'
@@ -29,4 +31,5 @@ addEventListener('message', event => {
         if (new URLSearchParams(location.search).has('auto')) window.report(['favoriteCurrent'], data.generation);
     }
 });
+if (lateMs) setTimeout(install, lateMs); else install();
 </script>

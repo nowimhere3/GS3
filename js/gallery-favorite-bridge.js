@@ -14,8 +14,30 @@ const states = new WeakMap();
 const pending = new WeakMap();
 export const GALLERY_FAVORITE_TIMEOUT_MS = 1500;
 const statuses = new Set(['favorited', 'already-favorite', 'no-media', 'unavailable']);
+// A child may install its message listener AFTER the iframe `load` event (a module
+// with top-level await, e.g. Gallery reading its preferences first). A single query
+// sent on load is then silently lost, so discovery repeats, bounded, until the
+// child answers or this generation is replaced.
+export const GALLERY_QUERY_RETRY_DELAYS_MS = [150, 300, 600, 1200, 2400, 4800, 9600];
 let requestSequence = 0;
 let listening = false;
+
+function stopQueryRetries(state) {
+    if (!state) return;
+    clearTimeout(state.queryTimer);
+    state.queryTimer = null;
+}
+
+function scheduleQueryRetry(panel, state, attempt = 0) {
+    if (attempt >= GALLERY_QUERY_RETRY_DELAYS_MS.length) return;
+    state.queryTimer = setTimeout(() => {
+        state.queryTimer = null;
+        // Only the live, still-undiscovered generation keeps asking.
+        if (states.get(panel) !== state || state.capable || !state.acceptingReports || !panel.isConnected) return;
+        queryGalleryFavoriteCapability(panel);
+        scheduleQueryRetry(panel, state, attempt + 1);
+    }, GALLERY_QUERY_RETRY_DELAYS_MS[attempt]);
+}
 
 function complete(panel, status = 'unavailable') {
     const request = pending.get(panel);
@@ -75,6 +97,7 @@ export function registerGalleryFavoriteCapability(panel) {
 export function resetGalleryFavoriteCapability(panel, { acceptingReports = false } = {}) {
     const previous = states.get(panel);
     complete(panel);
+    stopQueryRetries(previous);
     const state = {
         generation: [...crypto.getRandomValues(new Uint32Array(4))].map(n => n.toString(16).padStart(8, '0')).join(''),
         acceptingReports: Boolean(acceptingReports),
@@ -83,13 +106,17 @@ export function resetGalleryFavoriteCapability(panel, { acceptingReports = false
     };
     states.set(panel, state);
     if (previous?.capable) notify(panel);
-    if (state.acceptingReports) queryGalleryFavoriteCapability(panel);
+    if (state.acceptingReports) {
+        queryGalleryFavoriteCapability(panel);
+        scheduleQueryRetry(panel, state);
+    }
     return state.generation;
 }
 
 export function unregisterGalleryFavoriteCapability(panel) {
     const previous = states.get(panel);
     complete(panel);
+    stopQueryRetries(previous);
     states.delete(panel);
     if (previous?.capable) notify(panel);
 }
@@ -137,6 +164,7 @@ export function handleGalleryFavoriteMessage(event) {
     if (!state.capable || JSON.stringify(features) !== JSON.stringify(state.features)) {
         state.capable = true;
         state.features = features;
+        stopQueryRetries(state);
         notify(panel);
     }
     return true;
