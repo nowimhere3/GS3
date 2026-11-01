@@ -13,6 +13,9 @@ addEventListener('message', event => {
     const data = event.data;
     if (event.source === parent && data?.source === 'gs3-capability-bridge'
         && data.version === 1 && data.capability === 'GALLERY_FAVORITE'
-        && data.type === 'QUERY_CAPABILITY') window.queries.push(data);
+        && data.type === 'QUERY_CAPABILITY') {
+        window.queries.push(data);
+        if (new URLSearchParams(location.search).has('auto')) window.report(['favoriteCurrent'], data.generation);
+    }
 });
 </script>

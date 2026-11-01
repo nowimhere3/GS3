@@ -18,18 +18,20 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.kill(); });
 
-async function boot() {
+async function boot(auto = false) {
     const page = await browser.newPage();
     page.setDefaultTimeout(6000);
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:4203|localhost:4203).*/, r => r.fulfill({ status: 204, body: '' }));
-    await page.addInitScript(() => {
+    await page.addInitScript(auto => {
         if (window !== top) return;
         localStorage.clear();
+        window.autoChanges = 0;
+        document.addEventListener('gs3:gallery-favorite-capability-changed', () => window.autoChanges++);
         localStorage.setItem('loop_matrix_urls', JSON.stringify([
-            'http://localhost:4203/test/fixtures/gallery-capability-stub.html',
+            'http://localhost:4203/test/fixtures/gallery-capability-stub.html' + (auto ? '?auto=1' : ''),
             '/test/fixtures/canary.html?id=gallery-lookalike',
         ]));
-    });
+    }, auto);
     await page.goto(ORIGIN + '/index3.html?workspace=live', { waitUntil: 'networkidle' });
     await page.evaluate(async () => {
         window.gallery = await import('./js/gallery-favorite-bridge.js');
@@ -43,6 +45,17 @@ async function boot() {
 }
 const state = page => page.evaluate(() => gallery.getGalleryFavoriteCapability(panels[0]));
 const waitPresent = page => page.waitForFunction(() => gallery.isGalleryFavoriteCapable(panels[0]));
+
+test('automatic Gallery handshake completes on cold-start load without trailing registration reset', async () => {
+    const { page, frame } = await boot(true);
+    try {
+        await waitPresent(page);
+        assert.equal(await page.evaluate(() => autoChanges), 1);
+        const generation = await frame.evaluate(() => queries.at(-1).generation);
+        assert.equal((await state(page)).generation, generation);
+        assert.equal((await state(page)).acceptingReports, true);
+    } finally { await page.close(); }
+});
 
 test('Gallery explicit cross-origin handshake is panel-local, retains features and deduplicates notifications', async () => {
     const { page, frame } = await boot();

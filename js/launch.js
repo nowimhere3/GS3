@@ -322,6 +322,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     // Slot index, never Position — a panel keeps its browsing history when it
     // moves to another Position.
     panel.dataset.slotIndex = String(index);
+    registerGalleryFavoriteCapability(panel);
     panel.getPanelIdentity = () => ctx.getPanelIdentity?.(index);
 
     // ── iframe ───────────────────────────────────────────────────────────────
@@ -1335,7 +1336,6 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     syncHistoryButtons();
     updatePanelActionAvailability(panel);
     registerFillPanelCapability(panel);
-    registerGalleryFavoriteCapability(panel);
     registerCurrentUrlObservation(panel);
 
     return panel;
