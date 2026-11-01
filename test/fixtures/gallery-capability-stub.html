@@ -2,6 +2,11 @@
 <title>Capability protocol test peer</title>
 <script>
 window.queries = [];
+window.commands = [];
+window.resultStatus = 'favorited';
+window.reply = (command, status = window.resultStatus) => parent.postMessage({
+    ...command, type: 'FAVORITE_RESULT', status,
+}, '*');
 window.report = (features = [], generation = window.queries.at(-1)?.generation) => {
     parent.postMessage({
         source: 'gs3-capability-bridge', version: 1,
@@ -11,6 +16,12 @@ window.report = (features = [], generation = window.queries.at(-1)?.generation) 
 };
 addEventListener('message', event => {
     const data = event.data;
+    if (event.source === parent && data?.source === 'gs3-capability-bridge'
+        && data.version === 1 && data.capability === 'GALLERY_FAVORITE'
+        && data.type === 'FAVORITE_CURRENT') {
+        window.commands.push(data);
+        if (!window.holdResults) window.reply(data);
+    }
     if (event.source === parent && data?.source === 'gs3-capability-bridge'
         && data.version === 1 && data.capability === 'GALLERY_FAVORITE'
         && data.type === 'QUERY_CAPABILITY') {

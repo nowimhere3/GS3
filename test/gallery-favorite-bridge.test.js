@@ -46,6 +46,97 @@ async function boot(auto = false) {
 const state = page => page.evaluate(() => gallery.getGalleryFavoriteCapability(panels[0]));
 const waitPresent = page => page.waitForFunction(() => gallery.isGalleryFavoriteCapable(panels[0]));
 
+test('favorite intent preserves all statuses, exact envelope and Runtime state', async () => {
+    const { page, frame } = await boot(true);
+    try {
+        await waitPresent(page);
+        const before = await page.evaluate(async () => {
+            window.s = await import('./js/grid-session.js');
+            window.snap = () => JSON.stringify([s.getSessionPanels(), s.getSessionLayout(), s.getSessionArrangement(), s.getGridHistory(), { ...localStorage }]);
+            return snap();
+        });
+        assert.deepEqual(await page.evaluate(() => gallery.requestGalleryFavoriteCurrent(panels[1])), { status: 'unavailable' });
+        for (const status of ['favorited', 'already-favorite', 'no-media', 'unavailable']) {
+            await frame.evaluate(status => window.resultStatus = status, status);
+            assert.deepEqual(await page.evaluate(() => gallery.requestGalleryFavoriteCurrent(panels[0])), { status });
+        }
+        const commands = await frame.evaluate(() => commands);
+        assert.equal(new Set(commands.map(c => c.requestId)).size, 4);
+        for (const c of commands) {
+            assert.deepEqual(Object.keys(c).sort(), ['capability', 'generation', 'requestId', 'source', 'type', 'version']);
+            assert.equal(c.source, 'gs3-capability-bridge');
+            assert.equal(c.version, 1);
+            assert.equal(c.type, 'FAVORITE_CURRENT');
+            assert.equal(c.capability, 'GALLERY_FAVORITE');
+            assert.equal(c.generation, (await state(page)).generation);
+        }
+        assert.equal(await page.evaluate(() => snap()), before);
+        await frame.evaluate(() => report([]));
+        await page.waitForFunction(() => gallery.getGalleryFavoriteCapability(panels[0]).features.length === 0);
+        assert.deepEqual(await page.evaluate(() => gallery.requestGalleryFavoriteCurrent(panels[0])), { status: 'unavailable' });
+        assert.equal(await frame.evaluate(() => commands.length), 4);
+    } finally { await page.close(); }
+});
+
+test('favorite rejects mismatches, limits in-flight work, times out and invalidates on reset', async () => {
+    const { page, frame } = await boot(true);
+    try {
+        await waitPresent(page);
+        await frame.evaluate(() => window.holdResults = true);
+        await page.evaluate(() => {
+            window.result = null;
+            window.promise = gallery.requestGalleryFavoriteCurrent(panels[0]).then(r => window.result = r);
+        });
+        await frame.waitForFunction(() => commands.length === 1);
+        assert.deepEqual(await page.evaluate(() => gallery.requestGalleryFavoriteCurrent(panels[0])), { status: 'unavailable' });
+        const command = await frame.evaluate(() => commands[0]);
+        const rejected = await page.evaluate(c => {
+            const data = { ...c, type: 'FAVORITE_RESULT', status: 'favorited' };
+            const source = panels[0].querySelector('iframe').contentWindow;
+            const origin = 'http://localhost:4203';
+            return [
+                [{ ...data, requestId: 'unknown' }, source, origin],
+                [{ ...data, generation: 'old' }, source, origin],
+                [{ ...data, status: true }, source, origin],
+                [{ ...data, status: 'success' }, source, origin],
+                [data, panels[1].querySelector('iframe').contentWindow, origin],
+                [data, source, 'https://evil.test'],
+                [{ ...data, version: 2 }, source, origin],
+            ].map(([data, source, origin]) => gallery.handleGalleryFavoriteMessage({ data, source, origin }));
+        }, command);
+        assert.ok(rejected.every(r => !r));
+        assert.equal(await page.evaluate(() => result), null);
+        assert.deepEqual(await page.evaluate(() => promise), { status: 'unavailable' });
+        await page.evaluate(() => window.promise = gallery.requestGalleryFavoriteCurrent(panels[0]));
+        await frame.waitForFunction(() => commands.length === 2);
+        await frame.evaluate(() => reply(commands[0]));
+        await page.evaluate(() => gallery.resetGalleryFavoriteCapability(panels[0]));
+        assert.deepEqual(await page.evaluate(() => promise), { status: 'unavailable' });
+        assert.equal(await page.evaluate(c => gallery.handleGalleryFavoriteMessage({
+            data: { ...c, type: 'FAVORITE_RESULT', status: 'favorited' },
+            source: panels[0].querySelector('iframe').contentWindow, origin: 'http://localhost:4203',
+        }), command), false);
+    } finally { await page.close(); }
+});
+
+test('independent Gallery Panels may each complete a pending favorite', async () => {
+    const { page, frame } = await boot(true);
+    try {
+        await waitPresent(page);
+        await page.evaluate(async () => (await import('./js/launch.js')).updateRenderedPanel(panels[1], {
+            url: '/test/fixtures/gallery-capability-stub.html?auto=1&second=1',
+        }));
+        await page.waitForFunction(() => gallery.isGalleryFavoriteCapable(panels[1]));
+        const second = page.frames().find(f => f.url().includes('second=1'));
+        for (const f of [frame, second]) await f.evaluate(() => window.holdResults = true);
+        await page.evaluate(() => window.both = [0, 1].map(i => gallery.requestGalleryFavoriteCurrent(panels[i])));
+        for (const f of [frame, second]) await f.waitForFunction(() => commands.length === 1);
+        await second.evaluate(() => reply(commands[0], 'no-media'));
+        await frame.evaluate(() => reply(commands[0], 'already-favorite'));
+        assert.deepEqual(await page.evaluate(() => Promise.all(both)), [{ status: 'already-favorite' }, { status: 'no-media' }]);
+    } finally { await page.close(); }
+});
+
 test('automatic Gallery handshake completes on cold-start load without trailing registration reset', async () => {
     const { page, frame } = await boot(true);
     try {
