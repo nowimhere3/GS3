@@ -102,6 +102,14 @@ render, so it follows the Panel. Known media shows ♡N or red ♥N; no media is
 disabled neutral ❤N; unknown or favoriteState-less Galleries keep the neutral ❤N
 action heart. Clicking a favorited heart is still the idempotent action, never a toggle.
 
+The floating MultiHeart bar is a second surface over the same projection and action
+path (one heart model, `_favoriteAtPosition`), never a second truth. It is a
+position:fixed overlay: it reserves no layout space, leaves the Dock reserve, Grid
+geometry and Runtime Session/history untouched, and is a permanent station that
+stays present with zero Gallery Panels (it simply shows no Position hearts). Its
+open state and its own opacity (`floating_heart_bar_opacity`, Settings → Ghost Mode,
+0 is a valid stored value) are shell preferences in Store, not Runtime state.
+
 ## Runtime Memory diagnostics
 
 GS3 adopts RUNTIME MEMORY RM-1 for runtime truth. Tier 2 is an on-demand,

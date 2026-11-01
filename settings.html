@@ -741,6 +741,15 @@
         </div>
         <p class="subtitle">Fade these overlays to the Runway's Resting Opacity until you hover them. The Hotswap toolbar is not listed: it retracts completely when unused, so it has nothing to fade.</p>
         <div class="hotswap-toggle-list" id="ghost-toggle-list" style="margin-top:8px;"></div>
+        <div class="input-group" style="margin-top:14px;">
+            <label>Floating Heart Bar Opacity</label>
+            <div class="ghost-opacity-row">
+                <input type="range" id="floating-heart-opacity-slider" min="0" max="100" step="1">
+                <input type="number" id="floating-heart-opacity-input" min="0" max="100" step="1">
+                <span class="ghost-opacity-pct">%</span>
+            </div>
+            <p class="subtitle">Fades only the floating MultiHeart bar (shown from Runtime → More Controls). It returns to full opacity while hovered or focused; set it back here at any time.</p>
+        </div>
     </div>
 
     <div class="config-card diagnostics-panel" data-section="diagnostics">

@@ -462,6 +462,9 @@ function _initGhostMode() {
     wireOpacity('hover-opacity-slider', 'hover-opacity-input',
         (value) => setChromeOpacity({ hover: value }), opacity.hover);
 
+    wireOpacity('floating-heart-opacity-slider', 'floating-heart-opacity-input',
+        (value) => Store.set('floatingHeartOpacity', value), Store.get('floatingHeartOpacity'));
+
     const targets = { ...Store.get('ghostTargets') };
     GHOST_TARGETS.forEach(({ key, emoji, title }) => {
         const row = document.createElement('div');

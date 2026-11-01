@@ -98,6 +98,9 @@ export const KEYS = Object.freeze({
     ghostOpacity:            'hotswap_ghost_opacity',        // resting
     hotswapHoverOpacity:     'hotswap_hover_opacity',        // hover
     ghostTargets:            'hotswap_ghost_targets',
+    // Floating MultiHeart bar: shell presentation only (never Runtime Session).
+    floatingHeartOpacity:    'floating_heart_bar_opacity',
+    floatingHeartOpen:       'floating_heart_bar_open',
 
     // Workspace Tabs
     activeWorkspaceId:       'workspace_active_id',
@@ -149,6 +152,8 @@ const DEFAULTS = {
     [KEYS.ghostOpacity]: 12,
     [KEYS.hotswapHoverOpacity]: 100,
     [KEYS.ghostTargets]: { trigger: false, master: false, stream: false, solo: false },
+    [KEYS.floatingHeartOpacity]: 100,
+    [KEYS.floatingHeartOpen]: false,
     [KEYS.activeWorkspaceId]: 'live',
     [KEYS.settingsSectionState]: {},
 };
@@ -190,6 +195,8 @@ const TYPES = {
     [KEYS.ghostOpacity]:            'number',
     [KEYS.hotswapHoverOpacity]:     'number',
     [KEYS.ghostTargets]:            'json',
+    [KEYS.floatingHeartOpacity]:    'number_allow_zero',
+    [KEYS.floatingHeartOpen]:       'boolean',
     [KEYS.activeWorkspaceId]:       'string',
     [KEYS.settingsSectionState]:    'json',
 };
@@ -209,6 +216,11 @@ function _readRaw(rawKey) {
     switch (type) {
         case 'number':
             return parseFloat(raw) || def;
+        case 'number_allow_zero': {
+            // 0 is a real value here (e.g. a fully transparent overlay); only garbage falls back.
+            const n = parseFloat(raw);
+            return Number.isNaN(n) ? def : n;
+        }
         case 'boolean':
             return raw === 'true';
         case 'boolean_default_true':
@@ -231,6 +243,7 @@ function _serialize(rawKey, value) {
         case 'boolean_default_true':
             return String(value);
         case 'number':
+        case 'number_allow_zero':
             return String(value);
         default:
             return value;

@@ -41,6 +41,10 @@
                 document.documentElement.style.setProperty('--chrome-resting-opacity', restingPct / 100);
                 document.documentElement.style.setProperty('--chrome-hover-opacity', hoverPct / 100);
 
+                // Floating MultiHeart bar opacity: its own value, applied to that surface only.
+                document.documentElement.style.setProperty('--floating-heart-opacity',
+                    readPct('floating_heart_bar_opacity', 100) / 100);
+
                 var targetsRaw = localStorage.getItem('hotswap_ghost_targets');
                 var targets = targetsRaw ? JSON.parse(targetsRaw) : {};
                 if (targets.trigger) document.documentElement.classList.add('ghost-trigger');
@@ -184,10 +188,24 @@
         #btn-master-hearts-toggle .hearts-open { display: none; }
         #master-hearts-group[data-open="true"] .hearts-closed { display: none; }
         #master-hearts-group[data-open="true"] .hearts-open { display: inline; }
-        #master-hearts-body button:disabled { opacity: 0.5; cursor: wait; }
-        #master-hearts-body button[data-favorite-state="no-media"]:disabled { cursor: default; }
-        #master-hearts-body .heart-glyph { margin-right: 1px; }
-        #master-hearts-body button.is-favorite .heart-glyph { color: #ff3b4e; }
+        .heart-strip button:disabled { opacity: 0.5; cursor: wait; }
+        .heart-strip button[data-favorite-state="no-media"]:disabled { cursor: default; }
+        .heart-strip .heart-glyph { margin-right: 1px; }
+        .heart-strip button.is-favorite .heart-glyph { color: #ff3b4e; }
+        /* Floating MultiHeart bar: an in-page overlay. position:fixed, so it takes no layout
+           space, never moves the Dock reserve or the Grid. Only IT uses --floating-heart-opacity. */
+        #btn-master-floating-hearts[aria-pressed="true"] { border-color: #ff3b4e; }
+        #floating-hearts { position: fixed; right: 16px; bottom: 120px; z-index: 29500; display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: rgba(10,10,10,0.92); border: 1px solid #333; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); opacity: var(--floating-heart-opacity, 1); touch-action: none; }
+        #floating-hearts[hidden] { display: none; }
+        #floating-hearts:hover, #floating-hearts:focus-within { opacity: 1; }
+        #floating-hearts .fh-grip { cursor: grab; color: #666; font-size: 14px; padding: 0 2px; user-select: none; }
+        #floating-hearts.dragging .fh-grip { cursor: grabbing; }
+        #floating-hearts .fh-btn { padding: 4px 8px; font-size: 12px; }
+        #floating-hearts-body { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        #floating-hearts-body[hidden] { display: none; }
+        #floating-hearts .hearts-open { display: none; }
+        #floating-hearts[data-open="true"] .hearts-closed { display: none; }
+        #floating-hearts[data-open="true"] .hearts-open { display: inline; }
         .tool-group[data-dir="left"] { flex-direction: row-reverse; }
         .tool-group-body { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; scrollbar-width: none; border-left: 1px solid #444; padding-left: 8px; }
         .tool-group-body[hidden] { display: none; }
@@ -714,7 +732,7 @@
         <div class="master-region master-contextual">
         <div class="tool-group" id="master-hearts-group" data-dir="left" data-open="false" hidden>
             <button type="button" class="master-btn tool-group-trigger" id="btn-master-hearts-toggle" title="Favorite current Gallery media" aria-label="MultiHeart" aria-expanded="false" aria-controls="master-hearts-body"><span class="hearts-closed">◀ ❤</span><span class="hearts-open">▶</span></button>
-            <div class="tool-group-body" id="master-hearts-body" hidden></div>
+            <div class="tool-group-body heart-strip" id="master-hearts-body" hidden></div>
         </div>
         <div class="tool-group" id="master-layout-group" data-dir="left" data-open="false">
             <button type="button" class="master-btn layout-btn tool-group-trigger" id="btn-master-layout-toggle" title="Layouts" aria-label="Layouts" aria-expanded="false" aria-controls="master-layout-body"></button>
@@ -734,6 +752,7 @@
             <button class="master-btn save-btn" id="btn-master-save">💾 Save Session As...</button>
         </div>
         <button type="button" class="master-btn" id="btn-master-copy-diagnostics">Copy Diagnostics</button>
+        <button type="button" class="master-btn" id="btn-master-floating-hearts" aria-pressed="false" aria-label="Floating hearts" title="Show or hide the floating MultiHeart bar">❤</button>
         <button class="master-btn close-btn" id="btn-master-close">🎬 Close</button>
         <a href="index.html" class="master-btn back-btn">⚙ Launchpad</a>
             </div>
@@ -742,6 +761,14 @@
         </div>
         </div>
         </div>
+    </div>
+
+    <!-- Floating MultiHeart bar (UI shell only; same favorite state/action seams as the bottom MultiHeart) -->
+    <div id="floating-hearts" data-open="false" hidden>
+        <span class="fh-grip" id="floating-hearts-grip" title="Drag" aria-hidden="true">⋮⋮</span>
+        <button type="button" class="master-btn fh-btn" id="btn-floating-hearts-close" title="Hide floating hearts" aria-label="Hide floating hearts">✕</button>
+        <div class="heart-strip" id="floating-hearts-body" hidden></div>
+        <button type="button" class="master-btn fh-btn" id="btn-floating-hearts-toggle" title="MultiHeart" aria-label="Floating MultiHeart" aria-expanded="false" aria-controls="floating-hearts-body"><span class="hearts-closed">◀ ❤</span><span class="hearts-open">▶</span></button>
     </div>
 
     <!-- Bookmark modal -->

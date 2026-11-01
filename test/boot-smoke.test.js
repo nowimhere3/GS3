@@ -2081,8 +2081,8 @@ test('Settings drives all three collections and the runway-only opacity pair', a
     await page.locator('#hover-opacity-input').blur();
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_ghost_opacity')), '0');
     assert.equal(await page.evaluate(() => localStorage.getItem('hotswap_hover_opacity')), '100');
-    assert.equal(await page.locator('input[type="range"][id$="opacity-slider"]').count(), 2,
-        'no third opacity control exists');
+    assert.equal(await page.locator('input[type="range"][id$="opacity-slider"]:not(#floating-heart-opacity-slider)').count(), 2,
+        'no third Hotswap Chrome opacity control exists (the Floating Heart Bar has its own, separate one)');
     assert.equal(await page.evaluate(() =>
         document.getElementById('ghost-opacity-slider').closest('#quick-actions-config') !== null), true,
         'the opacity pair belongs to the runway, not the toolbar');

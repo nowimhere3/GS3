@@ -1277,17 +1277,28 @@ function _heartEligible(panel) {
         && getGalleryFavoriteCapability(panel)?.features.includes('favoriteCurrent');
 }
 
-function _renderHearts() {
-    const group = document.getElementById('master-hearts-group');
-    if (!group) return; // Nested Runtime owns no global shell.
-    const body = document.getElementById('master-hearts-body');
-    const positions = listPositions(_currentLayout).filter(p => _heartEligible(_heartPanel(p)));
-    group.hidden = positions.length === 0;
-    if (group.hidden) _toolbarDisclosure?.close(group.id);
+/**
+ * The ONE MultiHeart projection. Both the bottom group and the floating bar render this
+ * list; neither has its own eligibility rule. Favorite truth is Gallery's last
+ * CURRENT_FAVORITE_STATE for the Panel NOW at each Position (resolved at render, never
+ * stored by Position/Slot, never derived from action results).
+ */
+function _heartModel() {
+    return listPositions(_currentLayout).flatMap((position) => {
+        const panel = _heartPanel(position);
+        if (!_heartEligible(panel)) return [];
+        const known = getGalleryFavoriteState(panel);
+        const mode = !known ? 'unknown' : !known.hasMedia ? 'no-media' : known.isFavorite ? 'favorited' : 'unfavorited';
+        return [{ position, panel, mode }];
+    });
+}
+
+function _syncHeartButtons(body, model) {
+    const positions = model.map(m => m.position);
     for (const button of [...body.children]) {
         if (!positions.includes(Number(button.dataset.position))) button.remove();
     }
-    for (const [index, position] of positions.entries()) {
+    for (const [index, { position, panel, mode }] of model.entries()) {
         let button = body.querySelector('[data-position="' + position + '"]');
         if (!button) {
             button = document.createElement('button');
@@ -1296,11 +1307,6 @@ function _renderHearts() {
             button.dataset.position = String(position);
             button.onclick = () => _favoriteAtPosition(position);
         }
-        // Favorite truth is Gallery's last CURRENT_FAVORITE_STATE for the Panel NOW at this
-        // Position (read at render, never stored by Position/Slot, never from action results).
-        const panel = _heartPanel(position);
-        const known = getGalleryFavoriteState(panel);
-        const mode = !known ? 'unknown' : !known.hasMedia ? 'no-media' : known.isFavorite ? 'favorited' : 'unfavorited';
         const glyph = ({ favorited: '♥', unfavorited: '♡' })[mode] || '❤';
         const label = ({
             favorited: 'Current item in Position ' + position + ' is favorited',
@@ -1325,6 +1331,84 @@ function _renderHearts() {
         button.setAttribute('aria-busy', String(busy));
         if (body.children[index] !== button) body.insertBefore(button, body.children[index] || null);
     }
+}
+
+function _renderHearts() {
+    const model = _heartModel();
+    const group = document.getElementById('master-hearts-group');
+    if (group) { // Nested Runtime owns no global shell.
+        group.hidden = model.length === 0;
+        if (group.hidden) _toolbarDisclosure?.close(group.id);
+        _syncHeartButtons(document.getElementById('master-hearts-body'), model);
+    }
+    // The floating bar is a permanent station: it never hides for lack of Galleries, it
+    // just has no Position hearts to show.
+    const floatingBody = document.getElementById('floating-hearts-body');
+    if (floatingBody) _syncHeartButtons(floatingBody, model);
+}
+
+/**
+ * Floating MultiHeart bar: UI shell only. Open/closed is a Store preference; collapse and
+ * drag position are in-memory. It renders _heartModel() through _renderHearts() and acts
+ * through _favoriteAtPosition(), so it can never hold favorite truth of its own and never
+ * touches Runtime Session or history.
+ */
+function _installFloatingHearts() {
+    const bar = document.getElementById('floating-hearts');
+    if (!bar) return;
+    const body = document.getElementById('floating-hearts-body');
+    const toggle = document.getElementById('btn-floating-hearts-toggle');
+    const closeBtn = document.getElementById('btn-floating-hearts-close');
+    const grip = document.getElementById('floating-hearts-grip');
+    const menuBtn = document.getElementById('btn-master-floating-hearts');
+    const setExpanded = (open) => {
+        bar.dataset.open = String(open);
+        body.hidden = !open;
+        toggle.setAttribute('aria-expanded', String(open));
+    };
+    const setVisible = (visible) => {
+        bar.hidden = !visible;
+        menuBtn?.setAttribute('aria-pressed', String(visible));
+        Store.set('floatingHeartOpen', visible);
+        if (visible) _renderHearts();
+    };
+    toggle.onclick = () => setExpanded(bar.dataset.open !== 'true');
+    closeBtn.onclick = () => setVisible(false);
+    if (menuBtn) menuBtn.onclick = () => setVisible(bar.hidden);
+    bar.hidden = !Store.get('floatingHeartOpen');
+    menuBtn?.setAttribute('aria-pressed', String(!bar.hidden));
+    setExpanded(false);
+
+    // Opacity is set before first paint by the head script; follow Settings changes made
+    // while this Runtime is open (the Settings page writes the same Store key).
+    window.addEventListener('storage', (event) => {
+        if (event.key !== 'floating_heart_bar_opacity') return;
+        const pct = Math.max(0, Math.min(100, parseFloat(event.newValue ?? '100')));
+        document.documentElement.style.setProperty('--floating-heart-opacity', String((Number.isNaN(pct) ? 100 : pct) / 100));
+    });
+
+    // Minimal drag: pointer capture on the grip, clamped to the viewport.
+    let drag = null;
+    grip.addEventListener('pointerdown', (event) => {
+        const rect = bar.getBoundingClientRect();
+        drag = { dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+        bar.style.left = rect.left + 'px'; bar.style.top = rect.top + 'px';
+        bar.style.right = 'auto'; bar.style.bottom = 'auto';
+        bar.classList.add('dragging');
+        grip.setPointerCapture(event.pointerId);
+        event.preventDefault();
+    });
+    grip.addEventListener('pointermove', (event) => {
+        if (!drag) return;
+        const rect = bar.getBoundingClientRect();
+        const x = Math.max(0, Math.min(window.innerWidth - rect.width, event.clientX - drag.dx));
+        const y = Math.max(0, Math.min(window.innerHeight - rect.height, event.clientY - drag.dy));
+        bar.style.left = x + 'px'; bar.style.top = y + 'px';
+    });
+    const endDrag = () => { drag = null; bar.classList.remove('dragging'); };
+    grip.addEventListener('pointerup', endDrag);
+    grip.addEventListener('pointercancel', endDrag);
+    _renderHearts();
 }
 
 async function _favoriteAtPosition(position) {
@@ -1425,6 +1509,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (IS_NESTED) {
         masterBarEl?.remove();
         orchestrationDock?.remove();
+        document.getElementById('floating-hearts')?.remove();
     } else {
         _installDockReserve(orchestrationDock);
     }
@@ -1495,6 +1580,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         disclosure.register(document.getElementById('master-hearts-group'), document.getElementById('btn-master-hearts-toggle'));
         document.addEventListener(GALLERY_CAPABILITY_CHANGED, _renderHearts);
         document.addEventListener(GALLERY_FAVORITE_STATE_CHANGED, _renderHearts);
+        _installFloatingHearts();
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
             onClose: () => {
