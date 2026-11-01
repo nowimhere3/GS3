@@ -101,6 +101,8 @@ export const KEYS = Object.freeze({
     // Floating MultiHeart bar: shell presentation only (never Runtime Session).
     floatingHeartOpacity:    'floating_heart_bar_opacity',
     floatingHeartOpen:       'floating_heart_bar_open',
+    // MultiHeart keyboard preset: 'off' | 'numbers' | 'zxcv' (Settings → MultiHeart Shortcuts).
+    multiHeartShortcuts:     'multi_heart_shortcuts',
 
     // Workspace Tabs
     activeWorkspaceId:       'workspace_active_id',
@@ -154,6 +156,7 @@ const DEFAULTS = {
     [KEYS.ghostTargets]: { trigger: false, master: false, stream: false, solo: false },
     [KEYS.floatingHeartOpacity]: 100,
     [KEYS.floatingHeartOpen]: false,
+    [KEYS.multiHeartShortcuts]: 'off',
     [KEYS.activeWorkspaceId]: 'live',
     [KEYS.settingsSectionState]: {},
 };
@@ -197,6 +200,7 @@ const TYPES = {
     [KEYS.ghostTargets]:            'json',
     [KEYS.floatingHeartOpacity]:    'number_allow_zero',
     [KEYS.floatingHeartOpen]:       'boolean',
+    [KEYS.multiHeartShortcuts]:     'string',
     [KEYS.activeWorkspaceId]:       'string',
     [KEYS.settingsSectionState]:    'json',
 };

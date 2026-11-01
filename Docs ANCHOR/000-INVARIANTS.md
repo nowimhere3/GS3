@@ -110,6 +110,16 @@ stays present with zero Gallery Panels (it simply shows no Position hearts). Its
 open state and its own opacity (`floating_heart_bar_opacity`, Settings → Ghost Mode,
 0 is a valid stored value) are shell preferences in Store, not Runtime state.
 
+MultiHeart keyboard shortcuts are a third way to reach the same action, not a third
+favorite system. A Settings preset (`multi_heart_shortcuts`: off | numbers | zxcv,
+default off) maps physical key codes (Digit1-4 / KeyZ,X,C,V) to physical Position
+NUMBERS only. One parent keydown handler resolves Position -> Slot -> Panel at keypress
+time and calls `_favoriteAtPosition`; it never caches a key against a Slot or Panel, never
+toggles, never sets heart glyphs, and never touches Runtime Session/history. Plain keys
+only (Ctrl/Meta/Alt/Shift, repeats and editable targets are ignored). Keys typed while
+focus is inside a child iframe do not reach the parent document; delivering them is a
+separate child-forwarding contract in which GS3 still owns the Position.
+
 ## Runtime Memory diagnostics
 
 GS3 adopts RUNTIME MEMORY RM-1 for runtime truth. Tier 2 is an on-demand,

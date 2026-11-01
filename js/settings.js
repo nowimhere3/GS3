@@ -11,6 +11,7 @@ import { getDatabaseStructure, setDatabaseStructure } from './state.js';
 import { initDropzone } from './parser.js';
 import { initBlacklist, initBlacklistUI, renderBlacklistDisplay } from './blacklist.js';
 import { HOTSWAP_ACTIONS } from './launch.js';
+import { MULTIHEART_SHORTCUT_PRESETS, normalizeMultiHeartShortcutPreset } from './multiheart-shortcuts.js';
 import { GRID_LAYOUTS, getLayoutIconMarkup } from './grid-layouts.js';
 import {
     generateDiagnosticArtifact, copyDiagnosticArtifact, downloadDiagnosticArtifact,
@@ -60,6 +61,7 @@ async function bootSettings() {
     // ── Hotswap Overlay Controls ───────────────────────────────────────────────
     _initHotswapControls();
     _initGhostMode();
+    _initMultiHeartShortcuts();
     _initDiagnostics();
     initBlacklist();
     initBlacklistUI();
@@ -95,7 +97,7 @@ function _initIngest() {
 
 function _initCollapsibleSections() {
     const screen = document.getElementById('settings-screen');
-    const order = ['github', 'ingest', 'hotswap', 'grid-layouts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
+    const order = ['github', 'ingest', 'hotswap', 'grid-layouts', 'multiheart-shortcuts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
     const state = { ...(Store.get('settingsSectionState') || {}) };
     const cards = new Map([...screen.querySelectorAll(':scope > .config-card[data-section]')]
         .map((card) => [card.dataset.section, card]));
@@ -430,6 +432,25 @@ function _initHotswapControls() {
  * Make a list of rows drag-reorderable. Presentation order only — the rows are
  * views over the canonical action registry, never copies of it.
  */
+/** MultiHeart keyboard preset: Off | 1 2 3 4 | Z X C V, persisted through Store. */
+function _initMultiHeartShortcuts() {
+    const rowEl = document.getElementById('multiheart-shortcuts-row');
+    if (!rowEl) return;
+    const render = () => {
+        const current = normalizeMultiHeartShortcutPreset(Store.get('multiHeartShortcuts'));
+        rowEl.querySelectorAll('[data-preset]').forEach((btn) => {
+            const on = btn.dataset.preset === current;
+            btn.classList.toggle('active', on);
+            btn.setAttribute('aria-checked', String(on));
+        });
+    };
+    rowEl.querySelectorAll('[data-preset]').forEach((btn) => {
+        if (!Object.hasOwn(MULTIHEART_SHORTCUT_PRESETS, btn.dataset.preset)) return;
+        btn.onclick = () => { Store.set('multiHeartShortcuts', btn.dataset.preset); render(); };
+    });
+    render();
+}
+
 function _initGhostMode() {
     const toggleListEl = document.getElementById('ghost-toggle-list');
     if (!toggleListEl) return;

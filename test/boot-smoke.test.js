@@ -4049,9 +4049,9 @@ test('Part 1-2 Settings major cards collapse persistently and administrative UI 
         return route.fulfill({ status: 404, body: '{}' });
     });
     await page.goto(`${ORIGIN}/settings.html`, { waitUntil: 'networkidle' });
-    const expected = ['github', 'ingest', 'hotswap', 'grid-layouts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
+    const expected = ['github', 'ingest', 'hotswap', 'grid-layouts', 'multiheart-shortcuts', 'folders', 'frame-heights', 'ghost', 'diagnostics', 'blacklist'];
     assert.deepEqual(await page.locator('#settings-screen > .config-card').evaluateAll((cards) => cards.map((c) => c.dataset.section)), expected);
-    assert.equal(await page.locator('.config-card .section-toggle').count(), 9);
+    assert.equal(await page.locator('.config-card .section-toggle').count(), 10);
     assert.equal(await page.locator('.hotswap-surface .section-toggle, .hotswap-subsection .section-toggle').count(), 0);
     assert.ok((await page.locator('#ingest-folder-select option').allTextContents()).some((text) => text.includes('Alpha')));
     assert.equal(await page.locator('#file-dropzone').count(), 1);

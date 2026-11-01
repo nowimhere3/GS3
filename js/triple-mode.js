@@ -41,6 +41,7 @@ import {
 import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
 import { unregisterFillPanelCapability } from './capability-bridge.js';
 import { unregisterGalleryFavoriteCapability } from './gallery-favorite-bridge.js';
+import { resolveMultiHeartShortcut } from './multiheart-shortcuts.js';
 import {
     getGalleryFavoriteCapability, isGalleryFavoriteCapable,
     requestGalleryFavoriteCurrent, GALLERY_CAPABILITY_CHANGED,
@@ -1411,6 +1412,28 @@ function _installFloatingHearts() {
     _renderHearts();
 }
 
+/**
+ * The ONE MultiHeart keyboard engine (Settings → MultiHeart Shortcuts). Only a Position
+ * NUMBER comes out of the preset; Position → Slot → Panel is resolved here at keypress time
+ * and the action is the same _favoriteAtPosition() the bottom and floating hearts use, so
+ * busy state, idempotent FAVORITE_CURRENT and the S7 truth law (glyphs change only when
+ * Gallery publishes CURRENT_FAVORITE_STATE) all apply unchanged. Runs whether or not either
+ * heart surface is expanded, and touches no Runtime Session/history.
+ */
+function _onMultiHeartKeydown(event) {
+    // Fresh read every press: the preset is changed from the Settings page (another document).
+    Store.invalidate('multiHeartShortcuts');
+    const position = resolveMultiHeartShortcut(event, Store.get('multiHeartShortcuts'));
+    if (position === null) return;
+    event.preventDefault(); // only this plain, matched, non-editable key is consumed
+    if (event.repeat) return; // one physical press = one favorite attempt
+    if (!_heartEligible(_heartPanel(position))) {
+        if (_statusEl) _statusEl.textContent = 'No Gallery favorite action in Position ' + position;
+        return;
+    }
+    _favoriteAtPosition(position);
+}
+
 async function _favoriteAtPosition(position) {
     // Resolve now, never retain the Panel that occupied this Position at render.
     const panel = _heartPanel(position);
@@ -1581,6 +1604,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.addEventListener(GALLERY_CAPABILITY_CHANGED, _renderHearts);
         document.addEventListener(GALLERY_FAVORITE_STATE_CHANGED, _renderHearts);
         _installFloatingHearts();
+        document.addEventListener('keydown', _onMultiHeartKeydown);
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
             onClose: () => {
