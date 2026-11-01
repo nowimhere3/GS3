@@ -1,0 +1,18 @@
+<!doctype html>
+<title>Capability protocol test peer</title>
+<script>
+window.queries = [];
+window.report = (features = [], generation = window.queries.at(-1)?.generation) => {
+    parent.postMessage({
+        source: 'gs3-capability-bridge', version: 1,
+        type: 'CAPABILITY_PRESENT', capability: 'GALLERY_FAVORITE',
+        generation, features,
+    }, '*');
+};
+addEventListener('message', event => {
+    const data = event.data;
+    if (event.source === parent && data?.source === 'gs3-capability-bridge'
+        && data.version === 1 && data.capability === 'GALLERY_FAVORITE'
+        && data.type === 'QUERY_CAPABILITY') window.queries.push(data);
+});
+</script>

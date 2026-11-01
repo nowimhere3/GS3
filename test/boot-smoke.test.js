@@ -2609,7 +2609,10 @@ test('Stage C: the selector targets exactly ONE nested Runtime, never broadcasti
             window.__sent = { 0: [], 2: [] };
             [0, 2].forEach((slot) => {
                 const iframe = document.querySelectorAll('.stream-panel iframe')[slot];
-                iframe.contentWindow.postMessage = (message) => window.__sent[slot].push(message);
+                // Discovery is independent of Layer-scoped action routing.
+                iframe.contentWindow.postMessage = (message) => {
+                    if (message.source === 'gs3-layer-scope') window.__sent[slot].push(message);
+                };
             });
         });
         const sent = () => page.evaluate(() => window.__sent);
@@ -2647,7 +2650,10 @@ test('Stage C: Folder, Layout and Save Session As route to the targeted nested R
             window.__sent = { 0: [], 2: [] };
             [0, 2].forEach((slot) => {
                 const iframe = document.querySelectorAll('.stream-panel iframe')[slot];
-                iframe.contentWindow.postMessage = (message) => window.__sent[slot].push(message);
+                // Discovery is independent of Layer-scoped action routing.
+                iframe.contentWindow.postMessage = (message) => {
+                    if (message.source === 'gs3-layer-scope') window.__sent[slot].push(message);
+                };
             });
         });
         await spy();

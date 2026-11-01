@@ -41,13 +41,17 @@ import { Store } from './storage.js';
 import { getDatabaseStructure, setDatabaseStructure, getDatabaseSha, setDatabaseSha, getUrlFolderMap, setUrlFolderMap } from './state.js';
 import { isBlacklisted, addToBlacklist } from './blacklist.js';
 import { pushDatabaseToRemote } from './sync.js';
-import { beginPanelContent, notePanelLoad } from './panel-navigation.js';
+import { beginPanelContent, notePanelLoad, getPanelNavigationState } from './panel-navigation.js';
 import { getPresentationUrl } from './presentation-url.js';
 import {
     registerFillPanelCapability, requestFillPanelToggle, resetFillPanelCapability,
     unregisterFillPanelCapability, refreshFillPanelPresentation, exitFillEmbed,
 } from './capability-bridge.js';
 import { registerCurrentUrlObservation, noteCurrentUrlPanelLoad } from './current-url-observation.js';
+import {
+    registerGalleryFavoriteCapability, resetGalleryFavoriteCapability,
+    unregisterGalleryFavoriteCapability,
+} from './gallery-favorite-bridge.js';
 import {
     getHotswapTrayOrder, getActiveQuickActions, getActiveTopShortcuts,
     getVisibleTopDeepActions, getTopShortcutCount,
@@ -86,6 +90,7 @@ export function updateRenderedPanel(panel, { url, folder } = {}) {
         const slotIndex = Number(panel.dataset.slotIndex);
         if (Number.isInteger(slotIndex)) beginPanelContent(slotIndex, url);
         resetFillPanelCapability(panel, { acceptingReports: false });
+        resetGalleryFavoriteCapability(panel);
         iframe.src = getPresentationUrl(url); // presentation only; data-last-src below stays the assigned URL
         iframe.setAttribute('data-last-src', url);
         refreshFillPanelPresentation(panel); // Fill availability follows the NEW assigned URL
@@ -339,6 +344,9 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         notePanelLoad(index, _readFrameUrl(iframe));
         noteCurrentUrlPanelLoad(panel); // after notePanelLoad: needs this load's pending-count result
         resetFillPanelCapability(panel, { acceptingReports: true });
+        resetGalleryFavoriteCapability(panel, {
+            acceptingReports: getPanelNavigationState(index).pendingLoads === 0,
+        });
         if (typeof ctx.onPanelNavigated === 'function') ctx.onPanelNavigated(index);
     });
 
@@ -966,6 +974,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         // then the URL) and neither is user navigation.
         beginPanelContent(index, savedSrc, 2);
         resetFillPanelCapability(panel, { acceptingReports: false });
+        resetGalleryFavoriteCapability(panel);
         iframe.src = 'about:blank';
         setTimeout(() => { iframe.src = getPresentationUrl(savedSrc); }, 80);
     };
@@ -986,6 +995,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
         panel.style.transform  = 'scaleY(0.8)';
         setTimeout(() => {
             unregisterFillPanelCapability(panel);
+            unregisterGalleryFavoriteCapability(panel);
             panel.remove();
             const remaining = ctx.feedContainerEl?.querySelectorAll('.stream-panel').length ?? 0;
             if (ctx.statusEl) ctx.statusEl.textContent = `${remaining} streams`;
@@ -1325,6 +1335,7 @@ function _buildPanel(url, index, panelClass, panelHeight, ctx) {
     syncHistoryButtons();
     updatePanelActionAvailability(panel);
     registerFillPanelCapability(panel);
+    registerGalleryFavoriteCapability(panel);
     registerCurrentUrlObservation(panel);
 
     return panel;
@@ -1368,7 +1379,10 @@ export function launchMatrix(urls, ctx) {
     if (ctx.loopScreenEl)    ctx.loopScreenEl.style.display   = 'block';
     if (ctx.feedContainerEl) {
         ctx.feedContainerEl.querySelectorAll('.stream-panel')
-            .forEach((panel) => unregisterFillPanelCapability(panel));
+            .forEach((panel) => {
+                unregisterFillPanelCapability(panel);
+                unregisterGalleryFavoriteCapability(panel);
+            });
         ctx.feedContainerEl.innerHTML = '';
     }
 

@@ -40,6 +40,7 @@ import {
 } from './panel-navigation.js';
 import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
 import { unregisterFillPanelCapability } from './capability-bridge.js';
+import { unregisterGalleryFavoriteCapability } from './gallery-favorite-bridge.js';
 import { createToolbarDisclosure } from './toolbar-disclosure.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
@@ -790,6 +791,7 @@ function _renderPanels(urls, map, ctx, { skipUndoSnapshot = false } = {}) {
         const existing = slot.querySelector('.stream-panel');
         if (existing) {
             unregisterFillPanelCapability(existing);
+            unregisterGalleryFavoriteCapability(existing);
             existing.remove();
         }
 

@@ -92,12 +92,13 @@ async function bootGrid({ reporter = false, providerFixtures = false } = {}) {
             '/test/fixtures/canary.html?id=P3',
         ]));
     });
-    // Every child records what GS3 sends it on the capability bridge.
+    // Record Current URL traffic only; Gallery discovery is independent.
     await page.addInitScript(() => {
         if (window === window.top) return;
         window.__bridgeInbox = [];
         addEventListener('message', (event) => {
-            if (event.data?.source === 'gs3-capability-bridge') window.__bridgeInbox.push(event.data);
+            if (event.data?.source === 'gs3-capability-bridge'
+                && event.data.capability === 'CURRENT_URL') window.__bridgeInbox.push(event.data);
         });
     });
     if (reporter) {
@@ -350,7 +351,7 @@ test('without any reporter GS3 runs normally and observation stays null', async 
         assert.equal(child.url(), `${CANARY}?id=Q`);
         await new Promise((resolve) => setTimeout(resolve, 100));
         assert.deepEqual(await child.evaluate(() => window.__bridgeInbox), [],
-            'a child without a reporter is never messaged');
+            'a child without a Current URL reporter receives no Current URL query');
         assert.deepEqual(page.__errors, []);
     } finally { await page.close(); }
 });

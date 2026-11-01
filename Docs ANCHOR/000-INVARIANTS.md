@@ -369,6 +369,14 @@ See docs/010-PANEL-NAVIGATION.md.
 
 # Honest Capability
 
+Gallery favorite integration is an explicit child capability, never a URL or
+Current URL inference. Host discovery uses the existing capability envelope
+with GALLERY_FAVORITE and a fresh opaque generation echoed by the child.
+Only live Panel WindowProxy senders at allowed origins may advertise features.
+Assignment, each iframe load and removal invalidate prior Gallery truth.
+Discovery state is ephemeral and never enters Runtime Session or persistence.
+See GALLERY-CAPABILITY-HOST.md for the host-only wire contract and read API.
+
 ## Layer Identity
 
 A Panel hosts a Layer 2 Runtime only when the Runtime Session recorded that GS3 assigned one, or the Panel is an explicit Workspace Panel. Resemblance is never evidence. No fallback or projection may create Layer identity that was not assigned. A lossy compatibility projection may render state; it may never decide state. Position changes never fabricate or destroy Layer identity.
