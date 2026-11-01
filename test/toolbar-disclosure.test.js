@@ -42,6 +42,74 @@ async function boot() {
 }
 const trigger = '#btn-master-shuffle-toggle';
 
+test('S4 More Controls shares disclosure ownership and preserves picker, Close and Launchpad actions', async () => {
+    const page = await boot();
+    const more = page.locator('#btn-master-overflow');
+    try {
+        assert.equal(await page.locator('#master-general-menu').count(), 0);
+        for (const sibling of [trigger, '#btn-master-layout-toggle']) {
+            await page.locator(sibling).click();
+            await more.click();
+            assert.equal(await page.locator(sibling).getAttribute('aria-expanded'), 'false');
+            await page.locator(sibling).click();
+            assert.equal(await more.getAttribute('aria-expanded'), 'false');
+            await page.keyboard.press('Escape');
+        }
+        await more.click();
+        await page.locator('#btn-master-folder').click();
+        assert.equal(await page.locator('#master-folder-dropup').isVisible(), true);
+        await page.locator('#master-folder-dropup .dropup-item').first().click();
+        assert.equal(await more.getAttribute('aria-expanded'), 'true');
+        await page.locator('#btn-master-save').click();
+        assert.equal(await page.locator('#master-save-dropup').isVisible(), true);
+        await page.keyboard.press('Escape');
+        assert.equal(await more.getAttribute('aria-expanded'), 'false');
+        assert.equal(await page.locator('#master-save-dropup').isVisible(), false);
+        await more.click();
+        await page.locator('#master-status').click();
+        assert.equal(await more.getAttribute('aria-expanded'), 'false');
+        for (const close of ['#btn-master-close', '#btn-toggle-master']) {
+            await more.click();
+            await page.locator('#btn-master-save').click();
+            await page.locator(close).click();
+            assert.equal(await more.getAttribute('aria-expanded'), 'false');
+            assert.equal(await page.locator('#master-save-dropup').isVisible(), false);
+            await page.locator('#btn-toggle-master').click();
+        }
+        await more.click();
+        await page.locator('#master-more-body a').click();
+        await page.waitForURL('**/index.html');
+        assert.deepEqual(page.errors, []);
+    } finally { await page.close(); }
+});
+
+test('S4 inline More Controls stays one row and preserves Runtime panel geometry', async () => {
+    const page = await boot();
+    try {
+        for (const width of [1280, 700, 360]) {
+            await page.setViewportSize({ width, height: 800 });
+            const snapshot = () => page.evaluate(() => JSON.stringify([
+                document.querySelector('#master-bar').getBoundingClientRect().height,
+                ...[...document.querySelectorAll('.stream-panel')].map(n => n.getBoundingClientRect().toJSON()),
+            ]));
+            const before = await snapshot();
+            await page.locator('#btn-master-overflow').click();
+            assert.equal(await snapshot(), before);
+            const body = await page.locator('#master-more-body').boundingBox();
+            const gateway = await page.locator('#btn-master-overflow').boundingBox();
+            assert.ok(body.x + body.width <= gateway.x);
+            for (const button of await page.locator('#master-more-body .master-btn').all()) {
+                await button.scrollIntoViewIfNeeded();
+                assert.ok(await button.evaluate(n => {
+                    const r = n.getBoundingClientRect();
+                    return n.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+                }));
+            }
+            await page.keyboard.press('Escape');
+        }
+    } finally { await page.close(); }
+});
+
 test('S1 disclosure opens right, dismisses, and preserves session, Store and iframe lifecycles', async () => {
     const page = await boot();
     try {
@@ -69,7 +137,7 @@ test('S1 disclosure opens right, dismisses, and preserves session, Store and ifr
         await page.locator(trigger).click();
         await page.locator('#btn-master-overflow').click();
         assert.equal(await page.locator(trigger).getAttribute('aria-expanded'), 'false');
-        assert.equal(await page.locator('#master-general-menu').isVisible(), true);
+        assert.equal(await page.locator('#master-more-body').isVisible(), true);
         for (const id of ['btn-master-folder', 'btn-master-save', 'btn-master-copy-diagnostics', 'btn-master-close']) {
             assert.equal(await page.locator(`#${id}`).isVisible(), true, id);
         }

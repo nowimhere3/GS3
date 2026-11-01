@@ -4619,8 +4619,8 @@ test('Stage B Grid layout shortcuts stay ordered, configurable, and complete', a
         assert.ok(await page.locator('#btn-master-layout-overflow.has-overflow-active').count());
         await page.locator('#btn-master-overflow').click();
         assert.equal(await page.locator('#master-layout-tier2:not([hidden])').count(), 0);
-        assert.equal(await page.locator('#master-general-menu.open #btn-master-folder').count(), 1);
-        assert.equal(await page.locator('.master-shell-content #btn-master-folder').count(), 0);
+        assert.equal(await page.locator('#master-more-group[data-open="true"] #btn-master-folder').count(), 1);
+        assert.equal(await page.locator('.master-shell-content #btn-master-folder').count(), 1);
     } finally { await page.close(); }
 });
 
@@ -4915,7 +4915,7 @@ test('Bottom Runtime Shell Stage A keeps the Master outside closed and outside t
             if ([1280, 560, 420].includes(width)) {
                 await page.locator('#btn-master-overflow').click();
                 for (const buttonId of ['btn-master-folder', 'btn-master-save']) {
-                    await page.locator(`#master-general-menu #${buttonId}`).click();
+                    await page.locator(`#master-more-body #${buttonId}`).click();
                     await page.waitForTimeout(20);
                     const dropup = await page.evaluate((id) => {
                         const menu = document.getElementById(id).getBoundingClientRect();
@@ -4966,7 +4966,7 @@ test('Bottom Runtime Shell Stage A keeps the Master outside closed and outside t
         assert.ok(withLongStatus.controls.every((control) => !intersects(control, withLongStatus.dock)), 'long status remains inside the legal shell region');
 
         await page.locator('#btn-master-overflow').click();
-        await page.locator('#master-general-menu #btn-master-folder').click();
+        await page.locator('#master-more-body #btn-master-folder').click();
         await page.waitForTimeout(20);
         const folderDropup = await page.evaluate(() => {
             const dropup = document.getElementById('master-folder-dropup').getBoundingClientRect();

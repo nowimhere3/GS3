@@ -204,10 +204,6 @@
         #master-layout-tier2[hidden] { display: none; }
         .layout-gateway, .overflow-gateway { min-width: 42px; justify-content: center; font-size: 18px; }
         .layout-gateway.has-overflow-active { color: #4ab0f5; border-color: #0095f6; }
-        .master-menu { position: absolute; bottom: calc(100% + 8px); display: none; flex-wrap: wrap; gap: 8px; padding: 10px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); z-index: 30001; max-width: min(620px, calc(100% - 32px)); }
-        .master-menu.open { display: flex; }
-        #master-general-menu { right: calc(62px + var(--gs3-dock-reserve, 140px)); }
-        .master-menu .master-btn { flex: 0 0 auto; }
         .master-btn { border: 1px solid #333; padding: 9px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px; background: #1a1a1a; color: #eee; transition: background 0.15s, border-color 0.15s; white-space: nowrap; flex-shrink: 0; text-decoration: none; display: inline-flex; align-items: center; }
         .master-btn:hover { background: #252525; border-color: #555; }
         .master-btn.folder-btn  { background: #0e1e2e; border-color: #0095f6; color: #4ab0f5; }
@@ -716,10 +712,9 @@
                 <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts" aria-label="More layouts" aria-controls="master-layout-tier2" aria-expanded="false">▦</button>
             </div>
         </div>
-        <button class="master-btn overflow-gateway" id="btn-master-overflow" title="More controls">⋯</button>
-        </div>
-        </div>
-        <div id="master-general-menu" class="master-menu" aria-label="More controls">
+        <div class="tool-group" id="master-more-group" data-dir="left" data-open="false">
+            <button type="button" class="master-btn overflow-gateway tool-group-trigger" id="btn-master-overflow" title="More controls" aria-label="More controls" aria-controls="master-more-body" aria-expanded="false">⋯</button>
+            <div class="tool-group-body" id="master-more-body" hidden>
         <div>
             <button class="master-btn folder-btn" id="btn-master-folder">🌐 Folder ▲</button>
         </div>
@@ -729,9 +724,12 @@
         <button type="button" class="master-btn" id="btn-master-copy-diagnostics">Copy Diagnostics</button>
         <button class="master-btn close-btn" id="btn-master-close">🎬 Close</button>
         <a href="index.html" class="master-btn back-btn">⚙ Launchpad</a>
+            </div>
+            <div id="master-folder-dropup" class="master-dropup"></div>
+            <div id="master-save-dropup" class="master-dropup"></div>
         </div>
-        <div id="master-folder-dropup" class="master-dropup"></div>
-        <div id="master-save-dropup" class="master-dropup"></div>
+        </div>
+        </div>
     </div>
 
     <!-- Bookmark modal -->

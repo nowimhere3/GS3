@@ -1311,7 +1311,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const layoutOverflowBtn = document.getElementById('btn-master-layout-overflow');
     const layoutTier2 = document.getElementById('master-layout-tier2');
     const generalOverflowBtn = document.getElementById('btn-master-overflow');
-    const generalMenuEl = document.getElementById('master-general-menu');
     const folderBtn       = document.getElementById('btn-master-folder');
     const folderDropupEl  = document.getElementById('master-folder-dropup');
     const shuffleBtn      = document.getElementById('btn-master-shuffle');
@@ -1407,13 +1406,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 layoutOverflowBtn.setAttribute('aria-expanded', 'false');
             },
         });
+        disclosure.register(document.getElementById('master-more-group'), generalOverflowBtn, {
+            onClose: () => {
+                folderDropupEl.classList.remove('open');
+                saveDropupEl.classList.remove('open');
+            },
+        });
         // 🎬 toggle open/close for the master control bar
         const closeMasterBar = () => {
             disclosure.closeAll();
             masterBarEl.classList.remove('open');
             toggleMasterBtn.classList.remove('active');
             folderDropupEl.classList.remove('open');
-            generalMenuEl?.classList.remove('open');
         };
         toggleMasterBtn.onclick = () => {
             if (masterBarEl.classList.contains('open')) {
@@ -1428,15 +1432,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         layoutOverflowBtn.onclick = () => {
             layoutTier2.hidden = !layoutTier2.hidden;
             layoutOverflowBtn.setAttribute('aria-expanded', String(!layoutTier2.hidden));
-            generalMenuEl?.classList.remove('open');
         };
-        generalOverflowBtn.onclick = () => {
-            const open = !generalMenuEl.classList.contains('open');
-            generalMenuEl.classList.toggle('open', open);
-        };
-        document.addEventListener('click', (event) => {
-            if (generalMenuEl?.classList.contains('open') && !generalMenuEl.contains(event.target) && !generalOverflowBtn.contains(event.target)) generalMenuEl.classList.remove('open');
-        });
 
         // 🌐 Folder dropup — items route through _doMasterFolder.
         folderBtn.onclick = () => {

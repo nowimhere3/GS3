@@ -79,6 +79,11 @@ changes, including after reload.
 Routine successful saves are silent. Failures remain visible through their
 existing failure path; this does not remove warnings or confirmations.
 
+More Controls is a left-expanding inline disclosure containing Folder, Save
+Session As, Copy Diagnostics, Close and Launchpad. Shuffle, Layouts and More
+Controls share one top-level disclosure owner. Folder and Save keep their
+existing choice pickers; closing More Controls dismisses those pickers.
+
 ## Runtime Memory diagnostics
 
 GS3 adopts RUNTIME MEMORY RM-1 for runtime truth. Tier 2 is an on-demand,
