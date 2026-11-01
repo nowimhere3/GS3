@@ -4615,10 +4615,10 @@ test('Stage B Grid layout shortcuts stay ordered, configurable, and complete', a
         assert.deepEqual(await page.locator('#master-layout-shortcuts .layout-shortcut').evaluateAll((buttons) => buttons.map((button) => button.dataset.layout)), ['lefttall', '3col']);
         await page.locator('#btn-master-layout-toggle').click();
         await page.locator('#btn-master-layout-overflow').click();
-        assert.equal(await page.locator('#master-layout-menu.open .layout-btn').count(), 8);
+        assert.equal(await page.locator('#master-layout-tier2:not([hidden]) .layout-btn').count(), 6);
         assert.ok(await page.locator('#btn-master-layout-overflow.has-overflow-active').count());
         await page.locator('#btn-master-overflow').click();
-        assert.equal(await page.locator('#master-layout-menu.open').count(), 0);
+        assert.equal(await page.locator('#master-layout-tier2:not([hidden])').count(), 0);
         assert.equal(await page.locator('#master-general-menu.open #btn-master-folder').count(), 1);
         assert.equal(await page.locator('.master-shell-content #btn-master-folder').count(), 0);
     } finally { await page.close(); }
@@ -4682,7 +4682,7 @@ test('B.1 Grid layout shortcuts extend to 1-4, stay readable floorplans, and the
 
         // All eight remain reachable through the gateway regardless of count.
         await page.locator('#btn-master-layout-overflow').click();
-        assert.equal(await page.locator('#master-layout-menu.open .layout-btn').count(), 8);
+        assert.equal(await page.locator('#master-layout-tier2:not([hidden]) .layout-btn').count(), 4);
     } finally { await page.close(); }
 });
 

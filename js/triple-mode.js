@@ -598,7 +598,7 @@ function _copyUrlToPosition(sourceSlotIndex, position, ctx) {
  * border-drag sizing this layout had earlier in the session, or falls back to
  * the layout's clean default if it hasn't been customized yet.
  */
-function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
+function _renderLayoutShortcuts(activeLayout) {
     const shortcutEl = document.getElementById('master-layout-shortcuts');
     const gateway = document.getElementById('btn-master-layout-overflow');
     const trigger = document.getElementById('btn-master-layout-toggle');
@@ -611,20 +611,24 @@ function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
     if (!shortcutEl) return;
     const order = getGridLayoutShortcutOrder();
     const visible = order.slice(0, getGridLayoutShortcutCount());
+    const tier2 = document.getElementById('master-layout-tier2');
     shortcutEl.innerHTML = '';
-    visible.forEach((name) => {
+    if (tier2) tier2.innerHTML = '';
+    order.forEach((name) => {
         const definition = GRID_LAYOUTS.find((layout) => layout.id === name);
         if (!definition) return;
         const button = document.createElement('button');
         button.className = 'master-btn layout-btn layout-shortcut';
         button.dataset.layout = name;
+        button.id = `btn-layout-${name}`;
+        button.setAttribute('aria-label', definition.title);
         button.title = definition.title;
         // The SAME mini-floorplan grammar the permanent overflow buttons use —
         // a readable tiny arrangement, never an abstract single glyph.
         button.innerHTML = getLayoutIconMarkup(name);
         button.classList.toggle('active', name === activeLayout);
         button.onclick = () => _doMasterLayout(name);
-        shortcutEl.appendChild(button);
+        (visible.includes(name) ? shortcutEl : tier2)?.appendChild(button);
     });
     if (gateway) {
         const overflowActive = !visible.includes(activeLayout);
@@ -638,7 +642,7 @@ function _renderLayoutShortcuts(activeLayout, tripleLayoutEl, layoutBtns) {
     }
 }
 
-function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
+function _applyLayout(layoutName, tripleLayoutEl) {
     const safeName = LAYOUT_IDS.includes(layoutName) ? layoutName : DEFAULT_LAYOUT;
     const previousLayout = _currentLayout;
     const mirroredArrangement = getMirroredLayoutArrangement(
@@ -681,10 +685,7 @@ function _applyLayout(layoutName, tripleLayoutEl, layoutBtns) {
 
     _refreshPositionLabels();
 
-    Object.entries(layoutBtns).forEach(([name, btn]) => {
-        if (btn) btn.classList.toggle('active', name === safeName);
-    });
-    _renderLayoutShortcuts(safeName, tripleLayoutEl, layoutBtns);
+    _renderLayoutShortcuts(safeName);
 
     Store.set('tripleLayout', safeName);
     _traceGrid('shared Store write', {
@@ -1248,11 +1249,10 @@ function _installDockReserve(dockEl) {
 
 // Module-level handles set once at boot, so the routed action functions below
 // (shared by button wiring and _installLayerScopeReceiver's forwarded-action
-// handlers) don't need every caller to thread ctx/tripleLayoutEl/layoutBtns/
+// handlers) don't need every caller to thread ctx/tripleLayoutEl/
 // statusEl through explicitly.
 let _ctx = null;
 let _tripleLayoutEl = null;
-let _layoutBtns = null;
 let _statusEl = null;
 
 /**
@@ -1289,7 +1289,7 @@ function _doMasterFolder(folderName) {
 }
 function _doMasterLayout(layoutName) {
     if (_dispatchMasterToLayerTwo('layout', { layout: layoutName })) return;
-    _applyLayout(layoutName, _tripleLayoutEl, _layoutBtns);
+    _applyLayout(layoutName, _tripleLayoutEl);
 }
 async function _doMasterSaveSessionAs(presetId) {
     if (_dispatchMasterToLayerTwo('saveSessionAs', { presetId })) return;
@@ -1309,7 +1309,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const masterBarEl     = document.getElementById('master-bar');
     const closeMasterBtn  = document.getElementById('btn-master-close');
     const layoutOverflowBtn = document.getElementById('btn-master-layout-overflow');
-    const layoutMenuEl = document.getElementById('master-layout-menu');
+    const layoutTier2 = document.getElementById('master-layout-tier2');
     const generalOverflowBtn = document.getElementById('btn-master-overflow');
     const generalMenuEl = document.getElementById('master-general-menu');
     const folderBtn       = document.getElementById('btn-master-folder');
@@ -1322,16 +1322,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const copyDiagnosticsBtn = document.getElementById('btn-master-copy-diagnostics');
     const saveDropupEl    = document.getElementById('master-save-dropup');
     const tripleLayoutEl  = document.getElementById('triple-layout');
-    const layoutBtns = {
-        top2:      document.getElementById('btn-layout-top2'),
-        bottom2:   document.getElementById('btn-layout-bottom2'),
-        '3col':    document.getElementById('btn-layout-3col'),
-        lefttall:  document.getElementById('btn-layout-lefttall'),
-        righttall: document.getElementById('btn-layout-righttall'),
-        vsplit:    document.getElementById('btn-layout-vsplit'),
-        hsplit:    document.getElementById('btn-layout-hsplit'),
-        '4grid':   document.getElementById('btn-layout-4grid'),
-    };
 
     // ── Runtime Shell Ownership (000-INVARIANTS.md) ─────────────────────────
     // A Runtime executing inside a Panel does not own the browser viewport,
@@ -1405,7 +1395,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     _ctx = ctx;
     _tripleLayoutEl = tripleLayoutEl;
-    _layoutBtns = layoutBtns;
     _statusEl = statusEl;
     _installNestedStatusReporter(statusEl);
 
@@ -1413,7 +1402,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const disclosure = createToolbarDisclosure(masterBarEl);
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
-            onClose: () => layoutMenuEl?.classList.remove('open'),
+            onClose: () => {
+                layoutTier2.hidden = true;
+                layoutOverflowBtn.setAttribute('aria-expanded', 'false');
+            },
         });
         // 🎬 toggle open/close for the master control bar
         const closeMasterBar = () => {
@@ -1421,7 +1413,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             masterBarEl.classList.remove('open');
             toggleMasterBtn.classList.remove('active');
             folderDropupEl.classList.remove('open');
-            layoutMenuEl?.classList.remove('open');
             generalMenuEl?.classList.remove('open');
         };
         toggleMasterBtn.onclick = () => {
@@ -1434,33 +1425,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
         closeMasterBtn.onclick = closeMasterBar;
 
-        // 🖥 Layout switcher — wire each button now. The INITIAL layout is
-        // applied after the session loads (below): initGridSession() resolves
-        // it from the source workspace's own saved layout, so it can't be
-        // known until then. Routed through _doMasterLayout so a selector
-        // targeting a specific nested Grid forwards instead of acting locally.
-        Object.entries(layoutBtns).forEach(([name, btn]) => {
-            if (btn) btn.onclick = () => _doMasterLayout(name);
-        });
-
         layoutOverflowBtn.onclick = () => {
-            const open = !layoutMenuEl.classList.contains('open');
-            layoutMenuEl.classList.toggle('open', open);
+            layoutTier2.hidden = !layoutTier2.hidden;
+            layoutOverflowBtn.setAttribute('aria-expanded', String(!layoutTier2.hidden));
             generalMenuEl?.classList.remove('open');
         };
         generalOverflowBtn.onclick = () => {
             const open = !generalMenuEl.classList.contains('open');
             generalMenuEl.classList.toggle('open', open);
-            layoutMenuEl?.classList.remove('open');
         };
-        // BREADCRUMBS — WHY .contains() rather than === : the gateway's own icon is
-        // itself an element (a mini-floorplan <span> when it is showing the active
-        // overflow layout), so a genuine mouse/Playwright click on the gateway can
-        // land on that child, never on the button reference itself. A strict `!==`
-        // check would then treat the click that OPENED the menu as an outside click
-        // and immediately close it again on the same event.
         document.addEventListener('click', (event) => {
-            if (layoutMenuEl?.classList.contains('open') && !layoutMenuEl.contains(event.target) && !layoutOverflowBtn.contains(event.target)) layoutMenuEl.classList.remove('open');
             if (generalMenuEl?.classList.contains('open') && !generalMenuEl.contains(event.target) && !generalOverflowBtn.contains(event.target)) generalMenuEl.classList.remove('open');
         });
 
@@ -1516,7 +1490,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // initGridSession). This is the single initial _applyLayout call for boot,
     // and it runs before the first render so _renderPanels reads the right
     // _currentLayout for its visible-slot count.
-    _applyLayout(initialSession.layout, tripleLayoutEl, layoutBtns);
+    _applyLayout(initialSession.layout, tripleLayoutEl);
     _traceGrid('after session initialization', {
         source: getSourceWorkspaceInfo(),
         initialSession,

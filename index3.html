@@ -201,11 +201,11 @@
         .master-contextual { flex: 0 0 auto; justify-content: flex-end; }
         .master-dropup-anchor { position: relative; }
         .master-layout-shortcuts { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+        #master-layout-tier2[hidden] { display: none; }
         .layout-gateway, .overflow-gateway { min-width: 42px; justify-content: center; font-size: 18px; }
         .layout-gateway.has-overflow-active { color: #4ab0f5; border-color: #0095f6; }
         .master-menu { position: absolute; bottom: calc(100% + 8px); display: none; flex-wrap: wrap; gap: 8px; padding: 10px; background: #141414; border: 1px solid #333; border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,0.7); z-index: 30001; max-width: min(620px, calc(100% - 32px)); }
         .master-menu.open { display: flex; }
-        #master-layout-menu { right: calc(20px + var(--gs3-dock-reserve, 140px)); }
         #master-general-menu { right: calc(62px + var(--gs3-dock-reserve, 140px)); }
         .master-menu .master-btn { flex: 0 0 auto; }
         .master-btn { border: 1px solid #333; padding: 9px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px; background: #1a1a1a; color: #eee; transition: background 0.15s, border-color 0.15s; white-space: nowrap; flex-shrink: 0; text-decoration: none; display: inline-flex; align-items: center; }
@@ -711,38 +711,13 @@
         <div class="tool-group" id="master-layout-group" data-dir="left" data-open="false">
             <button type="button" class="master-btn layout-btn tool-group-trigger" id="btn-master-layout-toggle" title="Layouts" aria-label="Layouts" aria-expanded="false" aria-controls="master-layout-body"></button>
             <div class="tool-group-body" id="master-layout-body" hidden>
+                <div id="master-layout-tier2" class="master-layout-shortcuts" hidden></div>
                 <div id="master-layout-shortcuts" class="master-layout-shortcuts"></div>
-                <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts">▦</button>
+                <button class="master-btn layout-gateway" id="btn-master-layout-overflow" title="More layouts" aria-label="More layouts" aria-controls="master-layout-tier2" aria-expanded="false">▦</button>
             </div>
         </div>
         <button class="master-btn overflow-gateway" id="btn-master-overflow" title="More controls">⋯</button>
         </div>
-        </div>
-        <div id="master-layout-menu" class="master-menu" aria-label="More layouts">
-        <button class="master-btn layout-btn" id="btn-layout-top2" data-layout="top2" title="2 Top + 1 Bottom Wide">
-            <span class="layout-icon li-top2"><i></i><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-bottom2" data-layout="bottom2" title="1 Top Wide + 2 Bottom">
-            <span class="layout-icon li-bottom2"><i></i><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-3col" data-layout="3col" title="3 Equal Columns">
-            <span class="layout-icon li-3col"><i></i><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-lefttall" data-layout="lefttall" title="1 Left Tall + 2 Right Stacked">
-            <span class="layout-icon li-lefttall"><i></i><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-righttall" data-layout="righttall" title="1 Right Tall + 2 Left Stacked">
-            <span class="layout-icon li-righttall"><i></i><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-vsplit" data-layout="vsplit" title="Vertical 50/50 Split">
-            <span class="layout-icon li-vsplit"><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-hsplit" data-layout="hsplit" title="Horizontal 50/50 Split">
-            <span class="layout-icon li-hsplit"><i></i><i></i></span>
-        </button>
-        <button class="master-btn layout-btn" id="btn-layout-4grid" data-layout="4grid" title="4 Screen Grid">
-            <span class="layout-icon li-4grid"><i></i><i></i><i></i><i></i></span>
-        </button>
         </div>
         <div id="master-general-menu" class="master-menu" aria-label="More controls">
         <div>

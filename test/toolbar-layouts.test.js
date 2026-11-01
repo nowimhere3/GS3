@@ -97,45 +97,54 @@ test('S2 counts 1-4, custom order, active highlighting and canonical trigger upd
             await page.evaluate(() => document.getElementById('btn-layout-righttall').click());
             await assertFloorplan(page, 'righttall');
             assert.equal(await expanded(page), 'false');
+            await page.locator(layoutTrigger).click();
+            await page.locator('#btn-master-layout-overflow').click();
+            assert.deepEqual(await page.locator('#master-layout-tier2 button').evaluateAll(ns => ns.map(n => n.dataset.layout)), order.slice(count));
+            assert.equal(await page.locator('#master-layout-body [data-layout]').count(), 8);
             assert.deepEqual(page.errors, []);
         } finally { await page.close(); }
     }
 });
 
-test('S2 legacy overflow remains unclipped, selectable and cleaned up with its group', async () => {
+test('S3 overflow reveals omitted layouts inline and resets with its parent', async () => {
     const page = await boot(1);
     try {
-        await assertFloorplan(page, 'lefttall');
         await page.locator(layoutTrigger).click();
-        assert.equal(await page.locator('#btn-master-layout-overflow').evaluate((n) => n.classList.contains('has-overflow-active')), true);
+        const height = await page.locator('#master-bar').evaluate(n => n.getBoundingClientRect().height);
         await page.locator('#btn-master-layout-overflow .layout-icon i').first().click();
-        assert.equal(await page.locator('#master-layout-menu button').count(), 8);
-        assert.equal(await page.locator('#master-layout-menu').isVisible(), true);
-        const hit = await page.locator('#btn-layout-hsplit').evaluate((n) => {
-            const r = n.getBoundingClientRect();
-            return n.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-        });
-        assert.ok(hit, 'legacy menu is painted outside the clipped inline body');
+        assert.equal(await page.locator('#master-layout-menu').count(), 0);
+        assert.equal(await page.locator('#master-layout-tier2').isVisible(), true);
+        assert.deepEqual(await page.locator('#master-layout-tier2 button').evaluateAll(ns => ns.map(n => n.dataset.layout)), order.slice(1));
+        const tier2 = await page.locator('#master-layout-tier2').boundingBox();
+        const tier1 = await page.locator('#master-layout-shortcuts').boundingBox();
+        assert.ok(tier2.x + tier2.width <= tier1.x);
+        assert.equal(await page.locator('#master-bar').evaluate(n => n.getBoundingClientRect().height), height);
+        assert.equal(await page.locator('#master-layout-tier2 .active').getAttribute('data-layout'), 'lefttall');
         await page.locator('#btn-layout-hsplit').click();
         await assertFloorplan(page, 'hsplit');
-        assert.equal(await page.locator('#triple-layout').evaluate((n) => n.classList.contains('layout-hsplit')), true);
-        assert.equal(await expanded(page), 'false');
-        assert.equal(await page.locator('#master-layout-menu').isVisible(), false);
-        for (const dismiss of ['toggle', 'shuffle', 'escape', 'minimize']) {
+        assert.equal(await page.locator('#triple-layout').evaluate(n => n.classList.contains('layout-hsplit')), true);
+        assert.equal(await page.evaluate(async () => (await import('./js/grid-session.js')).getSessionLayout()), 'hsplit');
+        assert.equal(await page.locator('#master-layout-tier2 .active').getAttribute('data-layout'), 'hsplit');
+        // Selection retains the existing open-group behavior.
+        await page.keyboard.press('Escape');
+        for (const dismiss of ['toggle', 'shuffle', 'escape', 'outside', 'minimize']) {
             await page.locator(layoutTrigger).click();
+            assert.equal(await page.locator('#btn-master-layout-overflow').getAttribute('aria-expanded'), 'false');
             await page.locator('#btn-master-layout-overflow').click();
             if (dismiss === 'toggle') await page.locator(layoutTrigger).click();
             if (dismiss === 'shuffle') await page.locator(shuffleTrigger).click();
             if (dismiss === 'escape') await page.keyboard.press('Escape');
+            if (dismiss === 'outside') await page.locator('#btn-master-overflow').click();
             if (dismiss === 'minimize') await page.locator('#btn-toggle-master').click();
-            assert.equal(await page.locator('#master-layout-menu').isVisible(), false, dismiss);
+            assert.equal(await page.locator('#master-layout-tier2').isVisible(), false, dismiss);
+            await page.keyboard.press('Escape');
             assert.equal(await expanded(page), 'false');
         }
         assert.deepEqual(page.errors, []);
     } finally { await page.close(); }
 });
 
-test('S2 disclosure and legacy gateway leave Store, history, media and Panel geometry untouched', async () => {
+test('S3 disclosure tiers leave Store, history, media and Panel geometry untouched', async () => {
     const page = await boot();
     try {
         const before = await page.evaluate(async () => {
@@ -189,6 +198,13 @@ test('S2 layouts and overflow stay reachable within the scrolling single row at 
                 }
             }
             await page.locator('#btn-master-layout-overflow').click();
+            for (const button of await page.locator('#master-layout-tier2 button').all()) {
+                await button.scrollIntoViewIfNeeded();
+                assert.ok(await button.evaluate(n => {
+                    const r = n.getBoundingClientRect();
+                    return n.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+                }), `Tier 2 reachable at ${width}`);
+            }
             await page.locator('#btn-layout-lefttall').click();
             await assertFloorplan(page, 'lefttall');
             assert.equal(await expanded(page), 'false');

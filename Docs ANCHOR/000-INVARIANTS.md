@@ -23,8 +23,10 @@ only: it never writes preferences, checkpoints history, or changes media.
 Grid layout shortcuts select 1-4 entries (default 2) from the canonical eight
 layouts, reached through the left-expanding Layouts disclosure whose trigger
 always shows the active canonical floorplan. The adjacent layout gateway
-continues to open its existing external menu until the separately approved
-second-tier slice. Opening or closing Layouts is presentation-only.
+reveals the remaining canonical layouts as a second
+inline tier to the left of the configured shortcuts, within the same disclosure.
+Closing Layouts also collapses its second tier; reopening starts with Tier 1.
+Opening or closing either tier is presentation-only.
 Configured slots never reshuffle
 merely because another layout becomes active. Layout overflow and general
 control overflow are separate gateways, and the layout gateway stays DOM- and
