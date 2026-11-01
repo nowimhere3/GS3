@@ -15,6 +15,10 @@ export const MULTIHEART_SHORTCUT_PRESETS = Object.freeze({
     zxcv: Object.freeze({ label: 'Z X C V', keys: Object.freeze(['KeyZ', 'KeyX', 'KeyC', 'KeyV']) }),
 });
 
+/** Every code any preset can ever map: the exact set a forwarded SHORTCUT_KEY may carry. */
+export const MULTIHEART_SHORTCUT_CODES = Object.freeze(new Set(
+    Object.values(MULTIHEART_SHORTCUT_PRESETS).flatMap(preset => preset.keys)));
+
 /** Anything unrecognised (corrupt storage, a future preset) is Off, never a hijacked key. */
 export function normalizeMultiHeartShortcutPreset(value) {
     return Object.hasOwn(MULTIHEART_SHORTCUT_PRESETS, value) ? value : MULTIHEART_SHORTCUT_OFF;
@@ -35,17 +39,24 @@ export function isEditableEventTarget(event) {
 }
 
 /**
- * Pure decision: which physical Position does this keydown mean, or null.
- * Plain keypress only — Ctrl/Meta/Alt/Shift all disqualify, so Ctrl+Z/X/C/V stay Undo/Cut/
- * Copy/Paste. Repeat is NOT filtered here; the caller consumes repeats without acting.
+ * Event-level safety for a NATIVE keydown (preset-independent): plain keypress only —
+ * Ctrl/Meta/Alt/Shift all disqualify, so Ctrl+Z/X/C/V stay Undo/Cut/Copy/Paste — and never
+ * while composing, already handled elsewhere, or typing in an editable. Repeat is NOT
+ * filtered here; the caller consumes repeats without acting. A Gallery-forwarded code has
+ * already passed the same checks child-side and enters below this layer.
  */
-export function resolveMultiHeartShortcut(event, preset) {
-    const keys = MULTIHEART_SHORTCUT_PRESETS[normalizeMultiHeartShortcutPreset(preset)].keys;
-    if (keys.length === 0) return null;
-    if (event.defaultPrevented || event.isComposing) return null;
-    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
-    const index = keys.indexOf(event.code);
-    if (index === -1) return null;
-    if (isEditableEventTarget(event)) return null;
-    return index + 1; // Position numbers are 1-based
+export function isPlainMultiHeartKeydown(event) {
+    if (event.defaultPrevented || event.isComposing) return false;
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+    return !isEditableEventTarget(event);
+}
+
+/**
+ * The ONE preset -> Position mapping: an approved physical key code under a preset becomes
+ * a 1-based physical Position number, or null (Off, other preset's key, unknown code).
+ * Used by both the native keydown and the Gallery-forwarded path.
+ */
+export function resolveMultiHeartShortcutCode(code, preset) {
+    const index = MULTIHEART_SHORTCUT_PRESETS[normalizeMultiHeartShortcutPreset(preset)].keys.indexOf(code);
+    return index === -1 ? null : index + 1;
 }

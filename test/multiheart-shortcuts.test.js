@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import {
-    resolveMultiHeartShortcut, normalizeMultiHeartShortcutPreset, MULTIHEART_SHORTCUT_PRESETS,
+    resolveMultiHeartShortcutCode, normalizeMultiHeartShortcutPreset, MULTIHEART_SHORTCUT_PRESETS,
 } from '../js/multiheart-shortcuts.js';
 
 const ORIGIN = 'http://127.0.0.1:4209';
@@ -75,9 +75,11 @@ test('preset table: exactly Off / 1 2 3 4 / Z X C V, physical codes, unknown val
     for (const bad of [undefined, null, '', 'NUMBERS', 'custom', 7, '__proto__', 'constructor']) {
         assert.equal(normalizeMultiHeartShortcutPreset(bad), 'off');
     }
-    const key = (code, extra = {}) => ({ code, target: {}, ...extra });
-    assert.equal(resolveMultiHeartShortcut(key('Digit3'), 'off'), null);
-    assert.equal(resolveMultiHeartShortcut(key('Digit3'), 'bogus'), null);
+    assert.equal(resolveMultiHeartShortcutCode('Digit3', 'off'), null);
+    assert.equal(resolveMultiHeartShortcutCode('Digit3', 'bogus'), null);
+    assert.equal(resolveMultiHeartShortcutCode('Digit3', 'numbers'), 3);
+    assert.equal(resolveMultiHeartShortcutCode('KeyV', 'zxcv'), 4);
+    assert.equal(resolveMultiHeartShortcutCode('KeyV', 'numbers'), null);
 });
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -310,12 +312,12 @@ test('engine architecture: one master listener, none in heart surfaces, routes t
     const source = await readFile('js/triple-mode.js', 'utf8');
     const listeners = source.match(/addEventListener\(\s*'keydown'/g) || [];
     assert.equal(listeners.length, 1);
-    const engine = source.slice(source.indexOf('function _onMultiHeartKeydown'), source.indexOf('async function _favoriteAtPosition'));
+    const engine = source.slice(source.indexOf('function _activateMultiHeartShortcutCode'), source.indexOf('async function _favoriteAtPosition'));
     assert.match(engine, /_favoriteAtPosition\(position\)/);
     assert.match(engine, /_heartPanel\(position\)/);       // resolved at press time
     assert.doesNotMatch(engine, /postMessage|requestGalleryFavoriteCurrent|new Map|new WeakMap|stopPropagation/);
     const hearts = source.slice(source.indexOf('function _syncHeartButtons'), source.indexOf('function _renderHearts'))
-        + source.slice(source.indexOf('function _installFloatingHearts'), source.indexOf('function _onMultiHeartKeydown'));
+        + source.slice(source.indexOf('function _installFloatingHearts'), source.indexOf('function _activateMultiHeartShortcutCode'));
     assert.doesNotMatch(hearts, /keydown|keyup|onkeydown/);
 });
 

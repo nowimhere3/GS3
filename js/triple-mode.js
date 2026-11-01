@@ -41,11 +41,11 @@ import {
 import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
 import { unregisterFillPanelCapability } from './capability-bridge.js';
 import { unregisterGalleryFavoriteCapability } from './gallery-favorite-bridge.js';
-import { resolveMultiHeartShortcut } from './multiheart-shortcuts.js';
+import { isPlainMultiHeartKeydown, resolveMultiHeartShortcutCode } from './multiheart-shortcuts.js';
 import {
     getGalleryFavoriteCapability, isGalleryFavoriteCapable,
     requestGalleryFavoriteCurrent, GALLERY_CAPABILITY_CHANGED,
-    getGalleryFavoriteState, GALLERY_FAVORITE_STATE_CHANGED,
+    getGalleryFavoriteState, GALLERY_FAVORITE_STATE_CHANGED, GALLERY_SHORTCUT_KEY,
 } from './gallery-favorite-bridge.js';
 import { createToolbarDisclosure } from './toolbar-disclosure.js';
 
@@ -1420,18 +1420,34 @@ function _installFloatingHearts() {
  * Gallery publishes CURRENT_FAVORITE_STATE) all apply unchanged. Runs whether or not either
  * heart surface is expanded, and touches no Runtime Session/history.
  */
-function _onMultiHeartKeydown(event) {
-    // Fresh read every press: the preset is changed from the Settings page (another document).
+function _activateMultiHeartShortcutCode(code, { repeat = false } = {}) {
+    // Fresh read every time: the preset is changed from the Settings page (another document).
     Store.invalidate('multiHeartShortcuts');
-    const position = resolveMultiHeartShortcut(event, Store.get('multiHeartShortcuts'));
-    if (position === null) return;
-    event.preventDefault(); // only this plain, matched, non-editable key is consumed
-    if (event.repeat) return; // one physical press = one favorite attempt
+    const position = resolveMultiHeartShortcutCode(code, Store.get('multiHeartShortcuts'));
+    if (position === null) return false; // Off, or not this preset's key: nothing to consume or do
+    if (repeat) return true; // matched, consumed, but one physical press = one favorite attempt
     if (!_heartEligible(_heartPanel(position))) {
         if (_statusEl) _statusEl.textContent = 'No Gallery favorite action in Position ' + position;
-        return;
+        return true;
     }
     _favoriteAtPosition(position);
+    return true;
+}
+
+/** Native keydown: apply event-level safety, then hand the physical code to the shared path. */
+function _onMultiHeartKeydown(event) {
+    if (!isPlainMultiHeartKeydown(event)) return;
+    // Only a plain, matched, non-editable key is consumed.
+    if (_activateMultiHeartShortcutCode(event.code, { repeat: event.repeat })) event.preventDefault();
+}
+
+/**
+ * Gallery-forwarded key intent (validated by the bridge). The sending Panel was only the
+ * trusted input source: the preset and code decide the Position, resolved now. Same path as
+ * the native keydown, so there is one mapping, one eligibility rule and one action.
+ */
+function _onForwardedShortcutKey(event) {
+    _activateMultiHeartShortcutCode(event.detail.code);
 }
 
 async function _favoriteAtPosition(position) {
@@ -1605,6 +1621,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.addEventListener(GALLERY_FAVORITE_STATE_CHANGED, _renderHearts);
         _installFloatingHearts();
         document.addEventListener('keydown', _onMultiHeartKeydown);
+        document.addEventListener(GALLERY_SHORTCUT_KEY, _onForwardedShortcutKey);
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
             onClose: () => {

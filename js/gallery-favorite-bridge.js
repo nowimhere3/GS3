@@ -4,6 +4,7 @@
  * The opaque generation changes on assignment AND every iframe load, including
  * reloads whose WindowProxy survives. Unsolicited/unfenced reports are refused.
  */
+import { MULTIHEART_SHORTCUT_CODES } from './multiheart-shortcuts.js';
 import {
     CAPABILITY_BRIDGE_SOURCE, CAPABILITY_BRIDGE_VERSION, findPanelForSourceWindow,
 } from './capability-bridge.js';
@@ -11,6 +12,8 @@ import {
 export const GALLERY_FAVORITE_CAPABILITY = 'GALLERY_FAVORITE';
 export const GALLERY_CAPABILITY_CHANGED = 'gs3:gallery-favorite-capability-changed';
 export const GALLERY_FAVORITE_STATE_CHANGED = 'gs3:gallery-favorite-state-changed';
+/** Validated Gallery-forwarded key intent; detail {panel, code}. Panel is the trusted SOURCE, never the target. */
+export const GALLERY_SHORTCUT_KEY = 'gs3:gallery-shortcut-key';
 const MAX_MEDIA_KEY_LENGTH = 256;
 const states = new WeakMap();
 const pending = new WeakMap();
@@ -169,12 +172,21 @@ export function handleGalleryFavoriteMessage(event) {
     const data = event?.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)
         || data.source !== CAPABILITY_BRIDGE_SOURCE || data.version !== CAPABILITY_BRIDGE_VERSION
-        || !['CAPABILITY_PRESENT', 'FAVORITE_RESULT', 'CURRENT_FAVORITE_STATE'].includes(data.type)
+        || !['CAPABILITY_PRESENT', 'FAVORITE_RESULT', 'CURRENT_FAVORITE_STATE', 'SHORTCUT_KEY'].includes(data.type)
         || data.capability !== GALLERY_FAVORITE_CAPABILITY
         || typeof data.generation !== 'string' || !allowedOrigin(event.origin)) return false;
     const panel = findPanelForSourceWindow(event.source);
     const state = panel && states.get(panel);
     if (!state?.acceptingReports || data.generation !== state.generation) return false;
+    if (data.type === 'SHORTCUT_KEY') {
+        // Key INTENT only. The bridge validates trust and emits; it never knows the preset or
+        // a Position. keyForward must be explicitly advertised (favoriteCurrent is not enough).
+        if (!state.capable || event.origin !== state.origin || !panel.isConnected
+            || !state.features.includes('keyForward')
+            || typeof data.code !== 'string' || !MULTIHEART_SHORTCUT_CODES.has(data.code)) return false;
+        panel.dispatchEvent(new CustomEvent(GALLERY_SHORTCUT_KEY, { bubbles: true, detail: { panel, code: data.code } }));
+        return true;
+    }
     if (data.type === 'CURRENT_FAVORITE_STATE') {
         const next = parseFavoriteState(data);
         if (!next || !state.capable || event.origin !== state.origin

@@ -119,6 +119,14 @@ toggles, never sets heart glyphs, and never touches Runtime Session/history. Pla
 only (Ctrl/Meta/Alt/Shift, repeats and editable targets are ignored). Keys typed while
 focus is inside a child iframe do not reach the parent document; delivering them is a
 separate child-forwarding contract in which GS3 still owns the Position.
+A Gallery that advertises `keyForward` may forward the approved key INTENT as
+`SHORTCUT_KEY {code}` while it holds keyboard focus. The bridge validates it with the same
+source/origin/generation/capability fences as every other message (and the `keyForward`
+feature) and emits one `gs3:gallery-shortcut-key` event. The forwarding Panel is the
+trusted input SOURCE only, never the target: GS3 applies the CURRENT preset to the code,
+resolves the Position -> Slot -> Panel at receipt time, and runs the same activation path
+and `_favoriteAtPosition` as a native keydown. Gallery never sends or knows a Position,
+preset, favorite state or action.
 
 ## Runtime Memory diagnostics
 

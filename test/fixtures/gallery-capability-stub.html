@@ -22,6 +22,22 @@ window.publishState = (partial = {}, generation = window.queries.at(-1)?.generat
         generation, hasMedia: true, mediaKey: 'k1', isFavorite: false, ...partial,
     }, '*');
 };
+// S9B-A child contract: forwards approved key INTENT only (never Position/preset/state).
+// ?kf=1 advertises keyForward and installs the real keydown listener a focused Gallery would have.
+window.sendKey = (code, generation = window.queries.at(-1)?.generation) => {
+    parent.postMessage({
+        source: 'gs3-capability-bridge', version: 1,
+        type: 'SHORTCUT_KEY', capability: 'GALLERY_FAVORITE', generation, code,
+    }, '*');
+};
+const FORWARDED = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'KeyZ', 'KeyX', 'KeyC', 'KeyV'];
+if (new URLSearchParams(location.search).has('kf')) {
+    addEventListener('keydown', e => {
+        if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing || e.defaultPrevented
+            || e.target.closest?.('input,textarea,select,[contenteditable]') || !FORWARDED.includes(e.code)) return;
+        window.sendKey(e.code);
+    });
+}
 // ?lateMs=N installs the listener N ms after load, like a module with top-level await.
 const lateMs = Number(new URLSearchParams(location.search).get('lateMs')) || 0;
 const install = () => addEventListener('message', event => {
@@ -39,9 +55,9 @@ const install = () => addEventListener('message', event => {
         const params = new URLSearchParams(location.search);
         if (params.has('state')) {
             // Realistic S7A child: advertise favoriteState, then publish immediately after handshake.
-            window.report(['favoriteCurrent', 'favoriteState'], data.generation);
+            window.report(['favoriteCurrent', 'favoriteState', ...(params.has('kf') ? ['keyForward'] : [])], data.generation);
             window.publishState({ isFavorite: params.get('state') === 'fav' }, data.generation);
-        } else if (params.has('auto')) window.report(['favoriteCurrent'], data.generation);
+        } else if (params.has('auto')) window.report(['favoriteCurrent', ...(params.has('kf') ? ['keyForward'] : [])], data.generation);
     }
 });
 if (lateMs) setTimeout(install, lateMs); else install();
