@@ -180,6 +180,11 @@
         .master-region { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: nowrap; }
         .master-structural { flex: 0 0 auto; }
         .tool-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .tool-group[hidden] { display: none; }
+        #btn-master-hearts-toggle .hearts-open { display: none; }
+        #master-hearts-group[data-open="true"] .hearts-closed { display: none; }
+        #master-hearts-group[data-open="true"] .hearts-open { display: inline; }
+        #master-hearts-body button:disabled { opacity: 0.5; cursor: wait; }
         .tool-group[data-dir="left"] { flex-direction: row-reverse; }
         .tool-group-body { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; scrollbar-width: none; border-left: 1px solid #444; padding-left: 8px; }
         .tool-group-body[hidden] { display: none; }
@@ -704,6 +709,10 @@
         </div>
         <div class="master-layer-spacer"></div>
         <div class="master-region master-contextual">
+        <div class="tool-group" id="master-hearts-group" data-dir="left" data-open="false" hidden>
+            <button type="button" class="master-btn tool-group-trigger" id="btn-master-hearts-toggle" title="Favorite current Gallery media" aria-label="MultiHeart" aria-expanded="false" aria-controls="master-hearts-body"><span class="hearts-closed">◀ ❤</span><span class="hearts-open">▶</span></button>
+            <div class="tool-group-body" id="master-hearts-body" hidden></div>
+        </div>
         <div class="tool-group" id="master-layout-group" data-dir="left" data-open="false">
             <button type="button" class="master-btn layout-btn tool-group-trigger" id="btn-master-layout-toggle" title="Layouts" aria-label="Layouts" aria-expanded="false" aria-controls="master-layout-body"></button>
             <div class="tool-group-body" id="master-layout-body" hidden>

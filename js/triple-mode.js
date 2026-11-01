@@ -41,6 +41,10 @@ import {
 import { generateDiagnosticArtifact, copyDiagnosticArtifact } from './diagnostics.js';
 import { unregisterFillPanelCapability } from './capability-bridge.js';
 import { unregisterGalleryFavoriteCapability } from './gallery-favorite-bridge.js';
+import {
+    getGalleryFavoriteCapability, isGalleryFavoriteCapable,
+    requestGalleryFavoriteCurrent, GALLERY_CAPABILITY_CHANGED,
+} from './gallery-favorite-bridge.js';
 import { createToolbarDisclosure } from './toolbar-disclosure.js';
 
 const SLOT_IDS = ['screen-1-slot', 'screen-2-slot', 'screen-3-slot', 'screen-4-slot'];
@@ -526,6 +530,7 @@ function _positionLongLabelFor(slotIndex) {
 }
 
 function _refreshPositionLabels() {
+    _renderHearts();
     SLOT_IDS.forEach((id, slotIndex) => {
         const slot = document.getElementById(id);
         if (!slot) return;
@@ -720,6 +725,7 @@ function _panelHistoryState(slotIndex) {
 }
 
 function _refreshHistoryButtons() {
+    _renderHearts();
     // Master Undo is Runtime-action-only and deliberately ignores browsing.
     const btn = document.getElementById('btn-master-undo');
     if (btn) btn.disabled = !canUndoGridSession();
@@ -1256,6 +1262,68 @@ function _installDockReserve(dockEl) {
 let _ctx = null;
 let _tripleLayoutEl = null;
 let _statusEl = null;
+let _toolbarDisclosure = null;
+const _busyHeartPositions = new Set();
+const _busyHeartPanels = new WeakSet();
+
+function _heartPanel(position) {
+    const slot = resolveSlotAtPosition(_currentLayout, getSessionArrangement(), position);
+    return slot === null ? null : document.getElementById(SLOT_IDS[slot])?.querySelector('.stream-panel');
+}
+
+function _heartEligible(panel) {
+    return isGalleryFavoriteCapable(panel)
+        && getGalleryFavoriteCapability(panel)?.features.includes('favoriteCurrent');
+}
+
+function _renderHearts() {
+    const group = document.getElementById('master-hearts-group');
+    if (!group) return; // Nested Runtime owns no global shell.
+    const body = document.getElementById('master-hearts-body');
+    const positions = listPositions(_currentLayout).filter(p => _heartEligible(_heartPanel(p)));
+    group.hidden = positions.length === 0;
+    if (group.hidden) _toolbarDisclosure?.close(group.id);
+    for (const button of [...body.children]) {
+        if (!positions.includes(Number(button.dataset.position))) button.remove();
+    }
+    for (const [index, position] of positions.entries()) {
+        let button = body.querySelector('[data-position="' + position + '"]');
+        if (!button) {
+            button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'master-btn';
+            button.dataset.position = String(position);
+            button.textContent = '❤' + position;
+            button.title = 'Favorite current media in Position ' + position;
+            button.setAttribute('aria-label', button.title);
+            button.onclick = () => _favoriteAtPosition(position);
+        }
+        const busy = _busyHeartPositions.has(position) || _busyHeartPanels.has(_heartPanel(position));
+        button.disabled = busy;
+        button.setAttribute('aria-busy', String(busy));
+        if (body.children[index] !== button) body.insertBefore(button, body.children[index] || null);
+    }
+}
+
+async function _favoriteAtPosition(position) {
+    // Resolve now, never retain the Panel that occupied this Position at render.
+    const panel = _heartPanel(position);
+    if (!_heartEligible(panel) || _busyHeartPositions.has(position) || _busyHeartPanels.has(panel)) return;
+    _busyHeartPositions.add(position);
+    _busyHeartPanels.add(panel);
+    _renderHearts();
+    try {
+        const { status } = await requestGalleryFavoriteCurrent(panel);
+        if (_statusEl) _statusEl.textContent = ({
+            favorited: 'Favorited', 'already-favorite': 'Already favorited',
+            'no-media': 'No current media', unavailable: 'Gallery favorite unavailable',
+        })[status] || 'Gallery favorite unavailable';
+    } finally {
+        _busyHeartPositions.delete(position);
+        _busyHeartPanels.delete(panel);
+        _renderHearts();
+    }
+}
 
 /**
  * One place per Master action: check whether the selector currently targets a
@@ -1401,6 +1469,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!IS_NESTED) {
         const disclosure = createToolbarDisclosure(masterBarEl);
+        _toolbarDisclosure = disclosure;
+        disclosure.register(document.getElementById('master-hearts-group'), document.getElementById('btn-master-hearts-toggle'));
+        document.addEventListener(GALLERY_CAPABILITY_CHANGED, _renderHearts);
         disclosure.register(document.getElementById('master-shuffle-group'), document.getElementById('btn-master-shuffle-toggle'));
         disclosure.register(document.getElementById('master-layout-group'), document.getElementById('btn-master-layout-toggle'), {
             onClose: () => {

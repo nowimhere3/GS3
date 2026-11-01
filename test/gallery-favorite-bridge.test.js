@@ -46,6 +46,103 @@ async function boot(auto = false) {
 const state = page => page.evaluate(() => gallery.getGalleryFavoriteCapability(panels[0]));
 const waitPresent = page => page.waitForFunction(() => gallery.isGalleryFavoriteCapable(panels[0]));
 
+test('MultiHeart eligibility, disclosures, status feedback and state isolation', async () => {
+    const { page, frame } = await boot();
+    try {
+        assert.equal(await page.locator('#master-hearts-group').isVisible(), false);
+        await frame.evaluate(() => report([]));
+        await waitPresent(page);
+        assert.equal(await page.locator('#master-hearts-body button').count(), 0);
+        await frame.evaluate(() => report(['favoriteCurrent']));
+        await page.waitForFunction(() => document.querySelector('#master-hearts-body button'));
+        await page.locator('#btn-toggle-master').click();
+        const trigger = page.locator('#btn-master-hearts-toggle');
+        const heart = page.locator('#master-hearts-body [data-position="1"]');
+        for (const sibling of ['#btn-master-shuffle-toggle', '#btn-master-layout-toggle', '#btn-master-overflow']) {
+            await page.locator(sibling).click();
+            await trigger.click();
+            assert.equal(await page.locator(sibling).getAttribute('aria-expanded'), 'false');
+            await page.locator(sibling).click();
+            assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+            await page.keyboard.press('Escape');
+        }
+        const before = await page.evaluate(async () => {
+            window.session = await import('./js/grid-session.js');
+            window.snap = () => JSON.stringify([session.getSessionPanels(), session.getSessionArrangement(),
+                session.getSessionLayout(), session.getGridHistory(), { ...localStorage },
+                ...[...document.querySelectorAll('.stream-panel')].map(n => n.getBoundingClientRect().toJSON())]);
+            return snap();
+        });
+        await trigger.click();
+        for (const [status, text] of [['favorited', 'Favorited'], ['already-favorite', 'Already favorited'],
+            ['no-media', 'No current media'], ['unavailable', 'Gallery favorite unavailable']]) {
+            await frame.evaluate(s => window.resultStatus = s, status);
+            await heart.click();
+            await page.waitForFunction(text => document.querySelector('#master-status').textContent === text, text);
+            assert.equal(await heart.textContent(), '❤1');
+        }
+        assert.equal(await page.evaluate(() => snap()), before);
+        await page.keyboard.press('Escape');
+        assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+        await trigger.click();
+        await page.locator('#master-status').click();
+        assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+        await trigger.click();
+        await page.locator('#btn-toggle-master').click();
+        assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+        await frame.evaluate(() => report([]));
+        await page.waitForFunction(() => document.querySelector('#master-hearts-group').hidden);
+    } finally { await page.close(); }
+});
+
+test('MultiHeart routes physical Positions at click time, supports independent busy requests and replacement', async () => {
+    const { page, frame } = await boot(true);
+    try {
+        await waitPresent(page);
+        await page.evaluate(async () => (await import('./js/launch.js')).updateRenderedPanel(panels[2], {
+            url: '/test/fixtures/gallery-capability-stub.html?auto=1&third=1',
+        }));
+        await page.waitForFunction(() => gallery.isGalleryFavoriteCapable(panels[2]));
+        const third = page.frames().find(f => f.url().includes('third=1'));
+        await page.locator('#btn-toggle-master').click();
+        await page.locator('#btn-master-hearts-toggle').click();
+        assert.deepEqual(await page.locator('#master-hearts-body button').allTextContents(), ['❤1', '❤3']);
+        // Change authoritative arrangement without a UI render: click must still resolve current truth.
+        await page.evaluate(async () => {
+            window.s = await import('./js/grid-session.js');
+            s.setSessionArrangement(['screen3', 'screen2', 'screen1', 'screen4']);
+        });
+        for (const f of [frame, third]) await f.evaluate(() => window.holdResults = true);
+        await page.locator('#master-hearts-body [data-position="1"]').click();
+        await third.waitForFunction(() => commands.length === 1);
+        assert.equal(await frame.evaluate(() => commands.length), 0);
+        assert.equal(await page.locator('#master-hearts-body [data-position="1"]').isDisabled(), true);
+        await page.locator('#master-hearts-body [data-position="1"]').dispatchEvent('click');
+        assert.equal(await third.evaluate(() => commands.length), 1);
+        await page.locator('#master-hearts-body [data-position="3"]').click();
+        await frame.waitForFunction(() => commands.length === 1);
+        for (const f of [frame, third]) await f.evaluate(() => reply(commands[0]));
+        await page.waitForFunction(() => [...document.querySelectorAll('#master-hearts-body button')].every(b => !b.disabled));
+        for (const width of [1280, 700, 360]) {
+            await page.setViewportSize({ width, height: 800 });
+            const h = await page.locator('#master-bar').evaluate(n => n.getBoundingClientRect().height);
+            for (const b of await page.locator('#master-hearts-body button').all()) {
+                await b.scrollIntoViewIfNeeded();
+                assert.ok(await b.evaluate(n => { const r = n.getBoundingClientRect(); return n.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }));
+            }
+            await page.keyboard.press('Escape');
+            assert.equal(await page.locator('#master-bar').evaluate(n => n.getBoundingClientRect().height), h);
+            await page.locator('#btn-master-hearts-toggle').click();
+        }
+        await page.evaluate(async () => (await import('./js/launch.js')).updateRenderedPanel(panels[2], { url: '/test/fixtures/canary.html?replacement=1' }));
+        await page.waitForFunction(() => document.querySelectorAll('#master-hearts-body button').length === 1);
+        assert.deepEqual(await page.locator('#master-hearts-body button').allTextContents(), ['❤3']);
+        // Real canonical layout change reprojects physical labels using positions.js.
+        await page.evaluate(() => document.getElementById('btn-layout-righttall').click());
+        assert.deepEqual(await page.locator('#master-hearts-body button').allTextContents(), ['❤2']);
+    } finally { await page.close(); }
+});
+
 test('favorite intent preserves all statuses, exact envelope and Runtime state', async () => {
     const { page, frame } = await boot(true);
     try {

@@ -4692,13 +4692,11 @@ test('B.1 Grid layout shortcuts extend to 1-4, stay readable floorplans, and the
     } finally { await page.close(); }
 });
 
-test('B.1 no Browser Gallery Hearts exist yet — the dynamic Dock contract is breadcrumbed, not implemented', async () => {
+test('MultiHeart stays hidden without actionable Gallery capability', async () => {
     const page = await bootLayerGrid(['https://third.test/A', 'https://third.test/B', 'https://third.test/C']);
     try {
-        const heartTraces = await page.evaluate(() => [...document.querySelectorAll('*')]
-            .filter((el) => /heart|favorite.?current|bg-gallery/i.test(el.id) || /heart|favorite.?current|bg-gallery/i.test(el.className))
-            .map((el) => el.id || el.className));
-        assert.deepEqual(heartTraces, []);
+        assert.equal(await page.locator('#master-hearts-group').isVisible(), false);
+        assert.equal(await page.locator('#master-hearts-body button').count(), 0);
     } finally { await page.close(); }
 });
 

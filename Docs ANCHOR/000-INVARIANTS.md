@@ -84,6 +84,16 @@ Session As, Copy Diagnostics, Close and Launchpad. Shuffle, Layouts and More
 Controls share one top-level disclosure owner. Folder and Save keep their
 existing choice pickers; closing More Controls dismisses those pickers.
 
+## MultiHeart action availability
+
+MultiHeart is a left-expanding top-level inline disclosure before Layouts and
+More Controls. It is hidden without actionable Gallery Panels. Hearts label
+physical Positions in ascending order and resolve the current occupant at click
+time through positions.js, independent of Layer targeting. Eligibility requires
+current GALLERY_FAVORITE plus favoriteCurrent. Buttons express action availability,
+never authoritative favorite state. Results use the existing status region;
+favorites remain Gallery-owned and never enter GS3 Runtime history.
+
 ## Runtime Memory diagnostics
 
 GS3 adopts RUNTIME MEMORY RM-1 for runtime truth. Tier 2 is an on-demand,
