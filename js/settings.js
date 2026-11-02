@@ -432,7 +432,7 @@ function _initHotswapControls() {
  * Make a list of rows drag-reorderable. Presentation order only — the rows are
  * views over the canonical action registry, never copies of it.
  */
-/** MultiHeart keyboard preset: Off | 1 2 3 4 | Z X C V, persisted through Store. */
+/** MultiHeart keyboard preset: Off | 1 2 3 4 | Z X C V | M , . /, persisted through Store. */
 function _initMultiHeartShortcuts() {
     const rowEl = document.getElementById('multiheart-shortcuts-row');
     if (!rowEl) return;

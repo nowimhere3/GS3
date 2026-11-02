@@ -101,7 +101,7 @@ export const KEYS = Object.freeze({
     // Floating MultiHeart bar: shell presentation only (never Runtime Session).
     floatingHeartOpacity:    'floating_heart_bar_opacity',
     floatingHeartOpen:       'floating_heart_bar_open',
-    // MultiHeart keyboard preset: 'off' | 'numbers' | 'zxcv' (Settings → MultiHeart Shortcuts).
+    // MultiHeart keyboard preset: 'off' | 'numbers' | 'zxcv' | 'mpunct' (Settings → MultiHeart Shortcuts).
     multiHeartShortcuts:     'multi_heart_shortcuts',
 
     // Workspace Tabs

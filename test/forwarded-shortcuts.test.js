@@ -88,8 +88,8 @@ test('bridge: SHORTCUT_KEY needs a live, capable, keyForward Panel with matching
         assert.equal(await send(), true);
         assert.equal(await events(), 1);
         assert.deepEqual(await page.evaluate(() => ({ code: shortcutEvents[0].code, isPanel0: shortcutEvents[0].panel === panels[0] })), { code: 'Digit1', isPanel0: true });
-        for (const code of ['Digit2', 'Digit3', 'Digit4', 'KeyZ', 'KeyX', 'KeyC', 'KeyV']) assert.equal(await send({ code }), true);
-        assert.equal(await events(), 8);
+        for (const code of ['Digit2', 'Digit3', 'Digit4', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyM', 'Comma', 'Period', 'Slash']) assert.equal(await send({ code }), true);
+        assert.equal(await events(), 12);
 
         // D/F/G/I/J rejections never emit.
         assert.equal(await send({}, { generation: 'stale' }), false);
@@ -105,11 +105,11 @@ test('bridge: SHORTCUT_KEY needs a live, capable, keyForward Panel with matching
         for (const code of ['Digit5', 'Digit0', 'KeyA', 'KeyB', 'Enter', 'Escape', '', 'digit1', 'Digit1 ', '1', 'z', 'Numpad1', '__proto__', 'constructor', 5, null, undefined, ['Digit1'], { code: 'Digit1' }]) {
             assert.equal(await send({ code }), false, 'code ' + JSON.stringify(code));
         }
-        assert.equal(await events(), 8);
+        assert.equal(await events(), 12);
 
         // Sender Panel 1 with Panel 0's generation is refused, and the reverse.
         assert.equal(await send({}, { source: 'other', generation: await page.evaluate(() => gallery.getGalleryFavoriteCapability(panels[0]).generation) }), false);
-        assert.equal(await events(), 8);
+        assert.equal(await events(), 12);
 
         // B. keyForward feature removal stops acceptance; restoring it resumes.
         await frameFor(page, 'A').evaluate(() => report(['favoriteCurrent']));
@@ -118,7 +118,7 @@ test('bridge: SHORTCUT_KEY needs a live, capable, keyForward Panel with matching
         await frameFor(page, 'A').evaluate(() => report(['favoriteCurrent', 'keyForward']));
         await page.waitForFunction(() => gallery.getGalleryFavoriteCapability(panels[0]).features.includes('keyForward'));
         assert.equal(await send(), true);
-        assert.equal(await events(), 9);
+        assert.equal(await events(), 13);
 
         // E. reset: the old generation is refused, a fresh handshake re-enables.
         const old = await page.evaluate(() => gallery.getGalleryFavoriteCapability(panels[0]).generation);
@@ -127,7 +127,7 @@ test('bridge: SHORTCUT_KEY needs a live, capable, keyForward Panel with matching
         await page.waitForFunction(() => gallery.getGalleryFavoriteCapability(panels[0]).capable);
         assert.equal(await send({}, { generation: old }), false);
         assert.equal(await send(), true);
-        assert.equal(await events(), 10);
+        assert.equal(await events(), 14);
 
         // H. unregistered, then detached.
         const live = await page.evaluate(() => gallery.getGalleryFavoriteCapability(panels[0]).generation);
@@ -138,7 +138,7 @@ test('bridge: SHORTCUT_KEY needs a live, capable, keyForward Panel with matching
             source: window, origin: 'http://localhost:4210',
             data: { source: 'gs3-capability-bridge', version: 1, type: 'SHORTCUT_KEY', capability: 'GALLERY_FAVORITE', generation: 'x', code: 'Digit1' },
         })), false);
-        assert.equal(await events(), 10);
+        assert.equal(await events(), 14);
     } finally { await context.close(); }
 });
 
@@ -369,5 +369,85 @@ test('end to end with real keystrokes: focus inside a Gallery iframe, its own ke
         await frameFor(page, 'C').waitForFunction(() => commands.length === 1);
         await settle(page);
         assert.deepEqual(await counts(page), [1, 1, 1, 1]);
+    } finally { await context.close(); }
+});
+
+test('M , . / preset (forwarded): KeyM/Comma/Period/Slash hit Positions 1-4 by the code, sender is trust only, swap retargets, other presets and Off ignore them', async () => {
+    const context = await newContext();
+    const page = await openRuntime(context, four, 'mpunct');
+    try {
+        await ready(page, 4);
+        const codes = ['KeyM', 'Comma', 'Period', 'Slash'];
+        for (const [i, code] of codes.entries()) {
+            await forward(page, 'D', code); // sender is always the Position 4 Gallery
+            await frameFor(page, 'ABCD'[i]).waitForFunction(() => commands.length === 1);
+        }
+        assert.deepEqual(await counts(page), [1, 1, 1, 1]);
+        for (const code of ['Digit1', 'Digit2', 'KeyZ', 'KeyX']) await forward(page, 'B', code); // other presets' codes
+        await settle(page);
+        assert.deepEqual(await counts(page), [1, 1, 1, 1]);
+
+        await forward(page, 'D', 'KeyM');   // sender at Position 4 -> Position 1 (A), never D
+        await frameFor(page, 'A').waitForFunction(() => commands.length === 2);
+        assert.deepEqual(await counts(page), [2, 1, 1, 1]);
+
+        await swap(page);                   // Position 1 now D, Position 4 now A
+        await forward(page, 'B', 'KeyM');
+        await frameFor(page, 'D').waitForFunction(() => commands.length === 2);
+        await forward(page, 'B', 'Slash');
+        await frameFor(page, 'A').waitForFunction(() => commands.length === 3);
+        assert.deepEqual(await counts(page), [3, 1, 1, 2]);
+
+        await forward(page, 'B', 'KeyM', 'stale-generation'); // stale generation refused
+        await settle(page);
+        assert.deepEqual(await counts(page), [3, 1, 1, 2]);
+
+        await setPreset(context, 'numbers');
+        for (const code of codes) await forward(page, 'B', code);
+        await setPreset(context, 'zxcv');
+        for (const code of codes) await forward(page, 'B', code);
+        await setPreset(context, 'off');
+        for (const code of codes) await forward(page, 'B', code);
+        await settle(page);
+        assert.deepEqual(await counts(page), [3, 1, 1, 2]);
+    } finally { await context.close(); }
+});
+
+test('M , . / real keystrokes: focused Gallery iframe forwards m , . /; focus in Position 4 still targets Position 1; swap retargets; Off stops; no parent double-fire', async () => {
+    const context = await newContext();
+    const page = await openRuntime(context, four, 'mpunct');
+    try {
+        await ready(page, 4);
+        await page.evaluate(() => { window.__parentKeys = []; document.addEventListener('keydown', e => window.__parentKeys.push(e.code), true); });
+        const focusGallery = async (index, id) => {
+            await page.evaluate(i => panels[i].querySelector('iframe').focus(), index);
+            await frameFor(page, id).evaluate(() => { document.body.tabIndex = 0; document.body.focus(); });
+            assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'IFRAME');
+        };
+        await focusGallery(0, 'A');           // focus inside Position 1's Gallery
+        for (const [i, key] of ['m', ',', '.', '/'].entries()) {
+            await page.keyboard.press(key);
+            await frameFor(page, 'ABCD'[i]).waitForFunction(() => commands.length === 1);
+            await settle(page);
+            assert.deepEqual(await counts(page), [0, 0, 0, 0].map((_, j) => (j <= i ? 1 : 0)), key);
+        }
+        await focusGallery(2, 'D');           // slot 2 = Position 4's Gallery
+        await page.keyboard.press('m');
+        await frameFor(page, 'A').waitForFunction(() => commands.length === 2);
+        await settle(page);
+        assert.deepEqual(await counts(page), [2, 1, 1, 1]);      // Position 1, not the focused D
+
+        await swap(page);
+        await focusGallery(2, 'D');
+        await page.keyboard.press('m');
+        await frameFor(page, 'D').waitForFunction(() => commands.length === 2);   // NEW occupant of Position 1
+        await settle(page);
+        assert.deepEqual(await counts(page), [2, 1, 1, 2]);
+
+        await setPreset(context, 'off');
+        await page.keyboard.press('m');
+        await settle(page);
+        assert.deepEqual(await counts(page), [2, 1, 1, 2]);
+        assert.deepEqual(await page.evaluate(() => __parentKeys), []); // parent never saw the iframe's native keys
     } finally { await context.close(); }
 });

@@ -111,8 +111,8 @@ open state and its own opacity (`floating_heart_bar_opacity`, Settings → Ghost
 0 is a valid stored value) are shell preferences in Store, not Runtime state.
 
 MultiHeart keyboard shortcuts are a third way to reach the same action, not a third
-favorite system. A Settings preset (`multi_heart_shortcuts`: off | numbers | zxcv,
-default off) maps physical key codes (Digit1-4 / KeyZ,X,C,V) to physical Position
+favorite system. A Settings preset (`multi_heart_shortcuts`: off | numbers | zxcv | mpunct,
+default off) maps physical key codes (Digit1-4 / KeyZ,X,C,V / KeyM,Comma,Period,Slash) to physical Position
 NUMBERS only. One parent keydown handler resolves Position -> Slot -> Panel at keypress
 time and calls `_favoriteAtPosition`; it never caches a key against a Slot or Panel, never
 toggles, never sets heart glyphs, and never touches Runtime Session/history. Plain keys

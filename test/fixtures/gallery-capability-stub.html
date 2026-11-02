@@ -30,7 +30,7 @@ window.sendKey = (code, generation = window.queries.at(-1)?.generation) => {
         type: 'SHORTCUT_KEY', capability: 'GALLERY_FAVORITE', generation, code,
     }, '*');
 };
-const FORWARDED = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'KeyZ', 'KeyX', 'KeyC', 'KeyV'];
+const FORWARDED = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyM', 'Comma', 'Period', 'Slash'];
 if (new URLSearchParams(location.search).has('kf')) {
     addEventListener('keydown', e => {
         if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing || e.defaultPrevented

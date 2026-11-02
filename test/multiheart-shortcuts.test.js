@@ -68,8 +68,10 @@ const settle = page => page.waitForTimeout(250);
 
 // ── Pure engine ──────────────────────────────────────────────────────────────
 
-test('preset table: exactly Off / 1 2 3 4 / Z X C V, physical codes, unknown values are Off', () => {
-    assert.deepEqual(Object.keys(MULTIHEART_SHORTCUT_PRESETS), ['off', 'numbers', 'zxcv']);
+test('preset table: exactly Off / 1 2 3 4 / Z X C V / M , . /, physical codes, unknown values are Off', () => {
+    assert.deepEqual(Object.keys(MULTIHEART_SHORTCUT_PRESETS), ['off', 'numbers', 'zxcv', 'mpunct']);
+    assert.deepEqual(MULTIHEART_SHORTCUT_PRESETS.mpunct.keys, ['KeyM', 'Comma', 'Period', 'Slash']);
+    assert.equal(MULTIHEART_SHORTCUT_PRESETS.mpunct.label, 'M , . /');
     assert.deepEqual(MULTIHEART_SHORTCUT_PRESETS.numbers.keys, ['Digit1', 'Digit2', 'Digit3', 'Digit4']);
     assert.deepEqual(MULTIHEART_SHORTCUT_PRESETS.zxcv.keys, ['KeyZ', 'KeyX', 'KeyC', 'KeyV']);
     for (const bad of [undefined, null, '', 'NUMBERS', 'custom', 7, '__proto__', 'constructor']) {
@@ -80,11 +82,16 @@ test('preset table: exactly Off / 1 2 3 4 / Z X C V, physical codes, unknown val
     assert.equal(resolveMultiHeartShortcutCode('Digit3', 'numbers'), 3);
     assert.equal(resolveMultiHeartShortcutCode('KeyV', 'zxcv'), 4);
     assert.equal(resolveMultiHeartShortcutCode('KeyV', 'numbers'), null);
+    ['KeyM', 'Comma', 'Period', 'Slash'].forEach((code, i) => {
+        assert.equal(resolveMultiHeartShortcutCode(code, 'mpunct'), i + 1);
+        for (const other of ['numbers', 'zxcv', 'off']) assert.equal(resolveMultiHeartShortcutCode(code, other), null);
+    });
+    for (const code of ['Digit1', 'Digit4', 'KeyZ', 'KeyV']) assert.equal(resolveMultiHeartShortcutCode(code, 'mpunct'), null);
 });
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-test('Settings: MultiHeart Shortcuts sits under Grid Layout Shortcuts, three exact choices, default Off, persists, canonical Store', async () => {
+test('Settings: MultiHeart Shortcuts sits under Grid Layout Shortcuts, four exact choices, default Off, persists, canonical Store', async () => {
     const context = await newContext();
     const page = await context.newPage();
     page.setDefaultTimeout(6000);
@@ -95,9 +102,9 @@ test('Settings: MultiHeart Shortcuts sits under Grid Layout Shortcuts, three exa
         assert.equal(await card.evaluate(n => n.previousElementSibling?.dataset.section), 'grid-layouts'); // immediately below
         assert.equal(await card.evaluate(n => !!n.closest('[data-section="ghost"]')), false);          // not under Ghost Mode
         const buttons = card.locator('[role="radio"]');
-        assert.deepEqual(await buttons.allTextContents(), ['Off', '1 2 3 4', 'Z X C V']);
-        assert.deepEqual(await buttons.evaluateAll(n => n.map(b => b.dataset.preset)), ['off', 'numbers', 'zxcv']);
-        assert.deepEqual(await buttons.evaluateAll(n => n.map(b => b.getAttribute('aria-checked'))), ['true', 'false', 'false']); // default Off
+        assert.deepEqual(await buttons.allTextContents(), ['Off', '1 2 3 4', 'Z X C V', 'M , . /']);
+        assert.deepEqual(await buttons.evaluateAll(n => n.map(b => b.dataset.preset)), ['off', 'numbers', 'zxcv', 'mpunct']);
+        assert.deepEqual(await buttons.evaluateAll(n => n.map(b => b.getAttribute('aria-checked'))), ['true', 'false', 'false', 'false']); // default Off
         assert.equal(await page.evaluate(k => localStorage.getItem(k), KEY), null); // nothing written by merely visiting
 
         const before = await page.evaluate(k => JSON.stringify(Object.entries(localStorage).filter(([n]) => n !== k && n !== 'settings_section_state')), KEY);
@@ -105,7 +112,11 @@ test('Settings: MultiHeart Shortcuts sits under Grid Layout Shortcuts, three exa
         assert.equal(await page.evaluate(k => localStorage.getItem(k), KEY), 'zxcv');
         assert.equal(await page.evaluate(k => JSON.stringify(Object.entries(localStorage).filter(([n]) => n !== k && n !== 'settings_section_state')), KEY), before);
         await page.reload({ waitUntil: 'networkidle' });
-        assert.deepEqual(await page.locator('[data-section="multiheart-shortcuts"] [role="radio"]').evaluateAll(n => n.map(b => b.getAttribute('aria-checked'))), ['false', 'false', 'true']);
+        assert.deepEqual(await page.locator('[data-section="multiheart-shortcuts"] [role="radio"]').evaluateAll(n => n.map(b => b.getAttribute('aria-checked'))), ['false', 'false', 'true', 'false']);
+        await page.locator('[data-section="multiheart-shortcuts"] [role="radio"]').nth(3).click();
+        assert.equal(await page.evaluate(k => localStorage.getItem(k), KEY), 'mpunct');
+        await page.reload({ waitUntil: 'networkidle' });
+        assert.deepEqual(await page.locator('[data-section="multiheart-shortcuts"] [role="radio"]').evaluateAll(n => n.map(b => b.getAttribute('aria-checked'))), ['false', 'false', 'false', 'true']);
         await page.locator('[data-section="multiheart-shortcuts"] [role="radio"]').nth(1).click();
         assert.equal(await page.evaluate(k => localStorage.getItem(k), KEY), 'numbers');
         await page.locator('[data-section="multiheart-shortcuts"] [role="radio"]').nth(0).click();
@@ -359,5 +370,64 @@ test('focus seam: parent-focused and toolbar-focused keys reach the engine; ifra
         assert.deepEqual(await child.evaluate(() => window.__childKeys), ['Digit3']);          // the child got it
         assert.equal(await page.evaluate(() => window.__parentKeys.length), parentKeysBefore); // the parent did not
         assert.deepEqual(await commandCounts(page, ['A', 'B', 'C', 'D']), [1, 1, 0, 0]);       // so no favorite happened
+    } finally { await context.close(); }
+});
+
+test('M , . / preset (native): M , . / hit Positions 1-4; modifiers/other-preset keys do nothing and are not consumed; repeat and editables stay safe', async () => {
+    const context = await newContext();
+    const page = await openRuntime(context, four, 'mpunct');
+    try {
+        await ready(page, 4);
+        await page.evaluate(() => { window.__prevented = []; document.addEventListener('keydown', e => { if (!/^(Control|Meta|Alt|Shift)/.test(e.code)) window.__prevented.push([e.code, e.defaultPrevented]); }, false); });
+        for (const mod of ['Control', 'Meta', 'Alt', 'Shift']) {
+            for (const key of ['m', ',', '.', '/']) await page.keyboard.press(`${mod}+${key}`);
+        }
+        for (const key of ['1', 'z', 'x']) await page.keyboard.press(key); // other presets' keys
+        await settle(page);
+        assert.deepEqual(await commandCounts(page, ['A', 'B', 'C', 'D']), [0, 0, 0, 0]);
+        assert.ok((await page.evaluate(() => __prevented)).every(([, prevented]) => prevented === false)); // not consumed
+        await page.evaluate(() => { window.__prevented.length = 0; });
+        for (const [i, key] of ['m', ',', '.', '/'].entries()) {
+            await page.keyboard.press(key);
+            await frameFor(page, 'ABCD'[i]).waitForFunction(() => commands.length === 1);
+        }
+        assert.deepEqual(await commandCounts(page, ['A', 'B', 'C', 'D']), [1, 1, 1, 1]);
+        assert.deepEqual((await page.evaluate(() => __prevented)).map(([, p]) => p), [true, true, true, true]); // matched keys consumed
+
+        await page.keyboard.down('m'); await page.keyboard.down('m'); await page.keyboard.down('m'); await page.keyboard.up('m');
+        await settle(page);
+        assert.equal(await frameFor(page, 'A').evaluate(() => commands.length), 2); // one press, repeats ignored
+
+        await page.evaluate(() => { const i = document.createElement('input'); i.id = 'ti'; i.style.cssText = 'position:fixed;z-index:99999'; document.body.append(i); });
+        await page.locator('#ti').focus();
+        for (const key of ['m', ',', '.', '/']) await page.keyboard.press(key);
+        await settle(page);
+        assert.equal(await page.locator('#ti').inputValue(), 'm,./');
+        assert.deepEqual(await commandCounts(page, ['A', 'B', 'C', 'D']), [2, 1, 1, 1]);
+
+        // Live preset changes without reload.
+        const settings = await context.newPage();
+        await settings.goto(ORIGIN + '/settings.html', { waitUntil: 'networkidle' });
+        await page.evaluate(() => document.activeElement.blur());
+        await settings.locator('[data-preset="numbers"]').click();
+        await page.keyboard.press('m'); await settle(page);
+        assert.equal(await frameFor(page, 'A').evaluate(() => commands.length), 2);
+        await page.keyboard.press('1');
+        await frameFor(page, 'A').waitForFunction(() => commands.length === 3);
+        await settings.locator('[data-preset="mpunct"]').click();
+        await page.keyboard.press('1'); await settle(page);
+        assert.equal(await frameFor(page, 'A').evaluate(() => commands.length), 3);
+        await page.keyboard.press('m');
+        await frameFor(page, 'A').waitForFunction(() => commands.length === 4);
+        await settings.locator('[data-preset="zxcv"]').click();
+        await page.keyboard.press('m'); await settle(page);
+        assert.equal(await frameFor(page, 'A').evaluate(() => commands.length), 4);
+        await page.keyboard.press('z');
+        await frameFor(page, 'A').waitForFunction(() => commands.length === 5);
+        await settings.locator('[data-preset="mpunct"]').click();
+        await settings.locator('[data-preset="off"]').click();
+        for (const key of ['m', ',', '.', '/', 'z', '1']) await page.keyboard.press(key);
+        await settle(page);
+        assert.deepEqual(await commandCounts(page, ['A', 'B', 'C', 'D']), [5, 1, 1, 1]);
     } finally { await context.close(); }
 });

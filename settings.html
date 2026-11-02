@@ -390,7 +390,6 @@
            as much runway as a panel edge can carry without becoming a wall. */
         .slot-count-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
         /* 1-10 lays out as two rows of five, matching the runway's two-of-four. */
-        .slot-count-grid-3 { grid-template-columns: repeat(3, 1fr); }
         .slot-count-grid-5 { grid-template-columns: repeat(5, 1fr); }
 
         /* ── Hotswap Settings hierarchy ───────────────────────────────────────
@@ -667,13 +666,14 @@
 
     <div class="config-card" data-section="multiheart-shortcuts">
         <div class="section-header"><h3>♥ MultiHeart Shortcuts</h3></div>
-        <p class="subtitle">Press a key to favorite the current item in a physical Grid Position. 1 / Z is Position 1, 2 / X is Position 2, 3 / C is Position 3, 4 / V is Position 4. Keys never fire while you are typing, and Ctrl/Alt/Meta/Shift combinations (such as Ctrl+Z) are left alone. Pressing again on an already-favorited item keeps it favorited.</p>
+        <p class="subtitle">Press a key to favorite the current item in a physical Grid Position. 1 / Z / M is Position 1, 2 / X / comma is Position 2, 3 / C / period is Position 3, 4 / V / slash is Position 4 (one preset at a time). Keys never fire while you are typing, and Ctrl/Alt/Meta/Shift combinations (such as Ctrl+Z or Ctrl+/) are left alone. Pressing again on an already-favorited item keeps it favorited.</p>
         <div class="input-group">
             <label id="multiheart-shortcuts-label">Keyboard Preset</label>
-            <div class="slot-count-grid slot-count-grid-3" id="multiheart-shortcuts-row" role="radiogroup" aria-labelledby="multiheart-shortcuts-label">
+            <div class="slot-count-grid" id="multiheart-shortcuts-row" role="radiogroup" aria-labelledby="multiheart-shortcuts-label">
                 <button type="button" class="btn-slot-count" role="radio" data-preset="off">Off</button>
                 <button type="button" class="btn-slot-count" role="radio" data-preset="numbers">1 2 3 4</button>
                 <button type="button" class="btn-slot-count" role="radio" data-preset="zxcv">Z X C V</button>
+                <button type="button" class="btn-slot-count" role="radio" data-preset="mpunct">M , . /</button>
             </div>
         </div>
     </div>

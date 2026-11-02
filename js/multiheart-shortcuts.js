@@ -13,6 +13,7 @@ export const MULTIHEART_SHORTCUT_PRESETS = Object.freeze({
     off: Object.freeze({ label: 'Off', keys: Object.freeze([]) }),
     numbers: Object.freeze({ label: '1 2 3 4', keys: Object.freeze(['Digit1', 'Digit2', 'Digit3', 'Digit4']) }),
     zxcv: Object.freeze({ label: 'Z X C V', keys: Object.freeze(['KeyZ', 'KeyX', 'KeyC', 'KeyV']) }),
+    mpunct: Object.freeze({ label: 'M , . /', keys: Object.freeze(['KeyM', 'Comma', 'Period', 'Slash']) }),
 });
 
 /** Every code any preset can ever map: the exact set a forwarded SHORTCUT_KEY may carry. */
